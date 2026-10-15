@@ -6,10 +6,56 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 include(scripts/source-fingerprint.cmake)
 relaxer_track_source_content("${CMAKE_CURRENT_SOURCE_DIR}")
+option(RELAXER_QUEUE_ONLY "Build only the independent Queue and its tests" OFF)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Test)
+add_library(relaxer_domain STATIC src/domain/queue.cpp)
+# Queue is a value object; it owns no QObject meta-object or resources.
+set_target_properties(relaxer_domain PROPERTIES AUTOMOC OFF AUTORCC OFF)
+target_include_directories(relaxer_domain PUBLIC src)
+target_link_libraries(relaxer_domain PUBLIC Qt6::Core)
+if(MSVC)
+  target_compile_options(relaxer_domain PRIVATE /utf-8 /W4)
+else()
+  target_compile_options(relaxer_domain PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+enable_testing()
+function(relaxer_add_qt_test test_name target)
+  add_test(NAME ${test_name} COMMAND "${CMAKE_COMMAND}"
+    "-DRELAXER_TEST_EXECUTABLE=$<TARGET_FILE:${target}>"
+    "-DRELAXER_TEST_LOG=${CMAKE_CURRENT_BINARY_DIR}/Testing/QtResults/${test_name}.txt"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run-qt-test.cmake")
+  # The first-start suite is deterministic/headless; physical audio playback
+  # remains available for a separate explicit hardware-enabled test run.
+  set_tests_properties(${test_name} PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_MEDIA_BACKEND=ffmpeg;RELAXER_SKIP_AUDIO_DEVICE_TESTS=1" TIMEOUT 120)
+endfunction()
+add_executable(relaxer_queue_tests tests/queue-tests.cpp)
+target_link_libraries(relaxer_queue_tests PRIVATE relaxer_domain Qt6::Test)
+relaxer_add_qt_test(relaxer_queue relaxer_queue_tests)
+if(CMAKE_OBJDUMP AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+  add_custom_command(TARGET relaxer_queue_tests POST_BUILD
+    COMMAND "${CMAKE_COMMAND}"
+      "-DRELAXER_TEST_EXECUTABLE=$<TARGET_FILE:relaxer_queue_tests>"
+      "-DRELAXER_OBJDUMP=${CMAKE_OBJDUMP}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-queue-link.cmake"
+    VERBATIM)
+  add_test(NAME relaxer_queue_link COMMAND "${CMAKE_COMMAND}"
+    "-DRELAXER_TEST_EXECUTABLE=$<TARGET_FILE:relaxer_queue_tests>"
+    "-DRELAXER_OBJDUMP=${CMAKE_OBJDUMP}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-queue-link.cmake")
+  set_tests_properties(relaxer_queue_link PROPERTIES TIMEOUT 10)
+else()
+  message(WARNING "Queue binary import audit requires objdump on Windows or Linux")
+endif()
+# This opt-in configuration proves that neither the GUI nor the media/storage
+# packages are needed to build and test Queue. The default builds every suite.
+if(RELAXER_QUEUE_ONLY)
+  return()
+endif()
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Sql Multimedia Svg Test Network)
 add_library(relaxer_core src/library.cpp src/importer.cpp src/lyrics.cpp src/lyric-text.cpp src/playback.cpp)
 target_include_directories(relaxer_core PUBLIC src)
-target_link_libraries(relaxer_core PUBLIC Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia)
+target_link_libraries(relaxer_core PUBLIC relaxer_domain Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia)
 if(WIN32)
   target_link_libraries(relaxer_core PUBLIC winmm)
 endif()
@@ -54,7 +100,6 @@ if(WIN32)
     target_compile_options(RelaxerLockCheck PRIVATE /utf-8)
   endif()
 endif()
-enable_testing()
 add_executable(relaxer_core_update_tests tests/core-update-tests.cpp)
 set_target_properties(relaxer_core_update_tests PROPERTIES AUTOMOC OFF AUTORCC OFF)
 target_include_directories(relaxer_core_update_tests PRIVATE src)
@@ -115,20 +160,7 @@ if(WIN32)
 endif()
 add_executable(relaxer_tests tests/tests.cpp)
 target_link_libraries(relaxer_tests PRIVATE relaxer_core Qt6::Test)
-function(relaxer_add_qt_test test_name target)
-  add_test(NAME ${test_name} COMMAND "${CMAKE_COMMAND}"
-    "-DRELAXER_TEST_EXECUTABLE=$<TARGET_FILE:${target}>"
-    "-DRELAXER_TEST_LOG=${CMAKE_CURRENT_BINARY_DIR}/Testing/QtResults/${test_name}.txt"
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run-qt-test.cmake")
-  # The first-start suite is deterministic/headless; physical audio playback
-  # remains available for a separate explicit hardware-enabled test run.
-  set_tests_properties(${test_name} PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_MEDIA_BACKEND=ffmpeg;RELAXER_SKIP_AUDIO_DEVICE_TESTS=1" TIMEOUT 120)
-endfunction()
 relaxer_add_qt_test(relaxer_core relaxer_tests)
-add_executable(relaxer_queue_tests tests/queue-tests.cpp)
-target_link_libraries(relaxer_queue_tests PRIVATE relaxer_core Qt6::Test)
-relaxer_add_qt_test(relaxer_queue relaxer_queue_tests)
 add_executable(relaxer_queue_playback_tests tests/queue-playback-tests.cpp)
 target_link_libraries(relaxer_queue_playback_tests PRIVATE relaxer_core Qt6::Test)
 relaxer_add_qt_test(relaxer_queue_playback relaxer_queue_playback_tests)

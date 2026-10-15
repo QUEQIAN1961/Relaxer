@@ -1,4 +1,4 @@
-#include "playback.h"
+#include "domain/queue.h"
 #include <QSet>
 #include <QtTest>
 #include <limits>
