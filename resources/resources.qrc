@@ -1,0 +1,5 @@
+<RCC><qresource prefix="/"><file>icon.svg</file><file>changelog.json</file><file>check-light.svg</file><file>check-dark.svg</file><file alias="arrow-up-dark.svg">arrow-up-dark.svg</file>
+<file alias="arrow-down-dark.svg">arrow-down-dark.svg</file>
+<file alias="arrow-up-light.svg">arrow-up-light.svg</file>
+<file alias="arrow-down-light.svg">arrow-down-light.svg</file>
+</qresource></RCC>

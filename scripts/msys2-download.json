@@ -1,0 +1,10 @@
+{
+  "release": "2026-09-27",
+  "file": "msys2-base-x86_64-20260927.sfx.exe",
+  "sha256": "ad336cccfda47758b5e15cda993fbba421115cb0b126697daef1ee4dfe37209f",
+  "urls": [
+    "https://repo.msys2.org/distrib/x86_64/msys2-base-x86_64-20260927.sfx.exe",
+    "https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-base-x86_64-20260927.sfx.exe"
+  ],
+  "checksum_source": "https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-base-x86_64-20260927.sfx.exe.sha256"
+}

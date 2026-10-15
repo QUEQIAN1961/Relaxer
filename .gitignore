@@ -1,0 +1,10 @@
+/build*/
+/runtime*/
+/data/
+/Relaxer*.exe
+!/RelaxerStart.exe
+!/RelaxerLockCheck.exe
+/msys2-path.txt
+/build-cache-path.txt
+*.log
+/source-bootstrap*/
