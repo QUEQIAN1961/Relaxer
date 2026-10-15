@@ -2,6 +2,7 @@
 #include "importer.h"
 #include "library.h"
 #include "lyrics.h"
+#include "lyric-text.h"
 #include "playback.h"
 #include <QAudioDevice>
 #include <QFile>
@@ -36,6 +37,54 @@ class Tests : public QObject {
                qAbs(color.blue() - expected.blue()) < 10;
     }
   private slots:
+    // Characterization contracts for Phase B; exercise public APIs across owners.
+    void foundationPlaylistAndSettingsSurviveReopen() {
+        QTemporaryDir dir;const auto root=dir.filePath("data");QVector<qint64> ids;qint64 playlist=0;
+        const QJsonObject extension{{"enabled",true},{"names",QJsonArray{"one","two"}},{"nested",QJsonObject{{"value",7}}}};
+        {
+            Library library(root);QVERIFY(library.open());
+            for(int i=0;i<3;++i){Track t;t.hash=QString("foundation-%1").arg(i);t.file=QString("Music/fixture-%1.wav").arg(i);t.title=QString("track %1").arg(i);t.duration=10000;const auto id=library.insert(t);QVERIFY(id>0);ids<<id;}
+            playlist=library.createPlaylist("持久化基线");QVERIFY(playlist>0);
+            QVERIFY(library.addToPlaylist(playlist,{ids[0],ids[1],ids[2],ids[0]}));
+            QVERIFY(library.reorder(playlist,{ids[2],ids[0],ids[1]}));QVERIFY(library.favorite(ids[1],true));
+            QVERIFY(library.playlistTags(playlist,{"流行","民谣"}));QVERIFY(library.playlistDescription(playlist,"跨重启保留\n歌单信息"));
+            QVERIFY(library.setSettings({{"theme",2},{"volume",37},{"translateLyrics",false},{"lyricBrowserProvider","baidu"},{"foundationUnknownSetting",extension}}));
+        }
+        Library reopened(root);QVERIFY(reopened.open());const auto tracks=reopened.tracks(playlist);
+        QCOMPARE(tracks.size(),3);QCOMPARE(tracks[0].id,ids[2]);QCOMPARE(tracks[1].id,ids[0]);QCOMPARE(tracks[2].id,ids[1]);QVERIFY(tracks[2].favorite);
+        const auto lists=reopened.playlists();QCOMPARE(lists.size(),1);QCOMPARE(lists[0].id,playlist);QCOMPARE(lists[0].count,3);
+        QCOMPARE(lists[0].tags,QStringList({"流行","民谣"}));QCOMPARE(lists[0].description,QString("跨重启保留\n歌单信息"));
+        QCOMPARE(reopened.setting("theme").toInt(),2);QCOMPARE(reopened.setting("volume").toInt(),37);
+        QCOMPARE(reopened.setting("translateLyrics").toBool(),false);QCOMPARE(reopened.setting("lyricBrowserProvider").toString(),QString("baidu"));
+        QCOMPARE(reopened.setting("foundationUnknownSetting").toObject(),extension);
+    }
+    void foundationBilingualLyricsAndOffsetsSurviveReopen() {
+        QTemporaryDir dir;const auto root=dir.filePath("data");qint64 id=0;QByteArray stored;
+        const QByteArray source("[offset:120]\n[00:01.00]first line\n[00:02.00]second line\n");
+        {
+            Library library(root);QVERIFY(library.open());Track t;t.hash="foundation-lyrics";t.file="Music/fixture.wav";id=library.insert(t);QVERIFY(id>0);
+            QVERIFY(library.setLyricOffset(id,450));QVERIFY(library.saveLyrics(id,attachTranslations(source,{"第一行","第二行"})));
+            QFile file(library.absolute(library.track(id).lyrics));QVERIFY(file.open(QIODevice::ReadOnly));stored=file.readAll();QVERIFY(!stored.isEmpty());
+        }
+        Library reopened(root);QVERIFY(reopened.open());QCOMPARE(reopened.lyricOffset(id),450);QVERIFY(!reopened.isInstrumental(id));
+        QFile file(reopened.absolute(reopened.track(id).lyrics));QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),stored);
+        // Timed translations use paired timestamps; the marker is for plain text.
+        const auto lyrics=Lyrics::parse(stored);QVERIFY(lyrics.timed);QCOMPARE(lyrics.lines.size(),4);
+        QCOMPARE(lyrics.lines[1].text,QString("第一行"));QCOMPARE(lyrics.lines[3].text,QString("第二行"));
+        QCOMPARE(lyrics.lines[0].time,qint64(1120));QCOMPARE(lyrics.lines[1].time,qint64(1120));
+        QCOMPARE(lyrics.lines[2].time,qint64(2120));QCOMPARE(lyrics.lines[3].time,qint64(2120));
+        QCOMPARE(lyricTexts(sourceLyricsForTranslation(stored)),QStringList({"first line","second line"}));
+        QVERIFY(reopened.setLyricOffset(id,-500));file.close();QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),stored);
+    }
+    void foundationNestedChangeBatchPreservesImmediateReads() {
+        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QSignalSpy changes(&library,&Library::changed);
+        library.deferChanges(true);library.deferChanges(true);
+        Track t;t.hash="foundation-batch";t.file="Music/fixture.wav";const auto id=library.insert(t);QVERIFY(id>0);
+        const auto playlist=library.createPlaylist("batch");QVERIFY(playlist>0);QVERIFY(library.addToPlaylist(playlist,{id}));
+        QCOMPARE(changes.size(),0);QCOMPARE(library.tracks(playlist).size(),1);QCOMPARE(library.track(id).id,id);
+        library.deferChanges(false);QCOMPARE(changes.size(),0);QVERIFY(library.favorite(id,true));QVERIFY(library.track(id).favorite);
+        library.deferChanges(false);QCOMPARE(changes.size(),1);library.deferChanges(false);QCOMPARE(changes.size(),1);
+    }
     void lyricsLookupCacheAndPlaybackStatePersist(){
         QTemporaryDir d;const auto root=d.filePath("cache-data");qint64 id=0;
         {

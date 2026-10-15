@@ -1,0 +1,9 @@
+# Preserve accepted source bytes and SHA-256 values; no Phase A line conversion.
+* -text
+*.cpp diff=cpp
+*.h diff=cpp
+*.exe binary
+*.dll binary
+*.ico binary
+*.png binary
+*.xz binary

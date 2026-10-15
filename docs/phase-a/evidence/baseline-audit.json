@@ -1,0 +1,15 @@
+{
+  "source": "C:\\Users\\email\\Desktop\\Relaxer\\Relaxer-V0.2.0-dev",
+  "archive": "C:\\Users\\email\\Desktop\\Relaxer\\Relaxer-V0.2.0-dev-browser-translation-src.zip",
+  "archive_sha256": "309f8d68fba3464afa7521fceaf201e68b5bd6e8a1efb5f081e6f6587af59e37",
+  "archive_entries": 140,
+  "source_manifest_files": 138,
+  "matching_source_files": 138,
+  "archive_only_generated_note": [
+    "浏览器翻译源码包说明-2026-10-15.txt"
+  ],
+  "source_subtrees_exact": true,
+  "protected_files": 532,
+  "handoff_report_sha256": "6be9cefa78a6ca88510a8b0988c8298be6e0cfbcc4561f3e75c7c1dab9c1e180",
+  "known_source_fingerprint": "935b1b1f5ab05b7f4d06049ad7418209a2864cc808a00967d5c7d344d2538e2f"
+}
