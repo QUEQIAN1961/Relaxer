@@ -829,7 +829,7 @@ void LyricsLookup::translateSelected(){
     if(!document.file.opened||document.file.tooLarge||!document.file.complete){
         setRowStatus(row,QStringLiteral("歌词文件无法完整读取"));m_status->setText(QStringLiteral("歌词文件无法完整读取或超过 4 MB。"));return;
     }
-    const auto prepared=ai::lyrics::prepare(document.file.bytes);
+    const auto prepared=ai::lyrics::prepare(document.file.bytes,track.title,track.artist);
     if(!prepared.ok()){
         setRowStatus(row,prepared.bilingual?QStringLiteral("已有双语歌词，未启动翻译"):QStringLiteral("没有可翻译的歌词"));
         m_status->setText(prepared.error);return;
@@ -845,7 +845,7 @@ void LyricsLookup::translateSelected(){
         m_status->setText(QStringLiteral("当前只支持简体中文目标语言，请检查 AI 翻译设置；本次未发送请求。"));return;
     }
     const auto stylePrompt=serviceConfiguration.translationStylePrompt;
-    const auto messages=ai::lyrics::chatMessages(track.title,track.artist,targetLanguage,stylePrompt,prepared);
+    const auto messages=ai::lyrics::chatMessages(targetLanguage,stylePrompt,prepared);
     const auto inputBound=ai::lyrics::inputTokenUpperBound(messages);
     const auto contextWindow=model->capabilities.contextWindow;
     const auto outputLimit=model->capabilities.maxOutputTokens;
@@ -855,7 +855,8 @@ void LyricsLookup::translateSelected(){
     const auto requestConfigurationDigest=currentAiConfigurationDigest();
     QMessageBox consent(this);consent.setObjectName("lyricsAiCloudConsent");consent.setIcon(QMessageBox::Information);
     consent.setWindowTitle(QStringLiteral("发送整首歌词到 DeepSeek"));
-    consent.setText(QStringLiteral("Relaxer 将把歌曲名、歌手、风格提示和整首歌词发送至 DeepSeek 官方服务器处理。\n\n"
+    consent.setText(QStringLiteral("Relaxer 将把待翻译的歌词文本、目标语言和风格提示发送至 DeepSeek 官方服务器处理。\n"
+        "不会上传 MP3、封面或本地路径，也不单独发送歌名、歌手字段；已识别的署名行仅保留在本地。\n\n"
         "本次操作只发送一次 Chat Completions 请求，不会自动拆分、重试或切换模型。使用量可能产生费用；费用以供应商账单为准。\n\n"
         "取消只能停止本地任务，无法撤销 DeepSeek 已收到或处理的请求。返回译文后，只有你点击“保存双语歌词”才会写入本地。"));
     auto *decline=consent.addButton(QStringLiteral("不发送"),QMessageBox::RejectRole);decline->setObjectName("lyricsAiConsentCancel");

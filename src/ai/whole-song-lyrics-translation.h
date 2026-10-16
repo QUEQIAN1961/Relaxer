@@ -31,10 +31,10 @@ struct ValidationResult {
     bool ok() const { return error.isEmpty(); }
 };
 
-PreparedLyrics prepare(const QByteArray &source);
+PreparedLyrics prepare(const QByteArray &source, const QString &localTitle = {}, const QString &localArtist = {});
 QString systemPrompt();
 QString blockedLinePlaceholder();
-QJsonArray chatMessages(const QString &title, const QString &artist, const QString &targetLanguage,
+QJsonArray chatMessages(const QString &targetLanguage,
                         const QString &stylePrompt, const PreparedLyrics &lyrics);
 ValidationResult validateResponse(const QString &content, const PreparedLyrics &lyrics);
 QByteArray merge(const QByteArray &source, const PreparedLyrics &lyrics, const QStringList &translations,
