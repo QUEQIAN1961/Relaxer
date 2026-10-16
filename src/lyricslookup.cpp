@@ -26,7 +26,7 @@
 #include "lyric-remote.h"
 #include "lyric-text.h"
 #include "lyrics.h"
-#include <QFile>
+#include "lyrics-document-reader.h"
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QJsonDocument>
@@ -326,10 +326,12 @@ void LyricsLookup::updatePreview(){
     const auto track=m_library->track(m_ids.value(row));const auto records=m_candidates.value(track.id);
     const int index=m_visibleRecords.value(m_versions->currentRow(),-1);QByteArray data;
     if(index>=0&&index<records.size()){const auto r=records[index].toObject();data=(r["instrumental"].toBool()?QString("纯音乐，请欣赏"):recordLyrics(r)).toUtf8();}
-    QFile saved(m_library->absolute(track.lyrics));
-    if(!track.lyrics.isEmpty()&&saved.open(QIODevice::ReadOnly)&&saved.size()<=4*1024*1024){
-        const auto local=saved.readAll();
-        if(data.isEmpty()||(lyricsIncludeTranslation(local)&&lyricTexts(sourceLyricsForTranslation(local))==lyricTexts(sourceLyricsForTranslation(data))))data=local;
+    if(!track.lyrics.isEmpty()){
+        const auto saved=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));
+        if(saved.opened&&!saved.tooLarge){
+            const auto &local=saved.bytes;
+            if(data.isEmpty()||(lyricsIncludeTranslation(local)&&lyricTexts(sourceLyricsForTranslation(local))==lyricTexts(sourceLyricsForTranslation(data))))data=local;
+        }
     }
     setPreviewLyrics(data);
 }
@@ -459,8 +461,19 @@ void LyricsLookup::lookup(const JobPtr &j){
     const auto t=j->original;const bool has=!t.lyrics.isEmpty()&&QFileInfo::exists(m_library->absolute(t.lyrics));
     if(has){beginOnline(j);return;}
     if(!m_replace->isChecked()){
-        const QFileInfo info(m_library->absolute(t.file));for(const auto &suffix:{QString(".lrc"),QString(".txt")}){QFile f(info.dir().filePath(info.completeBaseName()+suffix));if(f.open(QIODevice::ReadOnly)&&f.size()<=4*1024*1024){const auto data=f.readAll();if(!Lyrics::parse(data).lines.isEmpty()&&store(t,data)){++m_saved;finishJob(j,"已保存本地歌词");return;}}}
-        if(knownArtist(t.artist))for(auto id:m_reuse.value(reuseKey(t))){if(id==t.id)continue;const auto donor=m_library->track(id);if(t.duration>0&&donor.duration>0&&qAbs(t.duration-donor.duration)>4000)continue;QFile f(m_library->absolute(donor.lyrics));if(!f.open(QIODevice::ReadOnly)||f.size()>4*1024*1024)continue;if(store(t,f.readAll())){++m_saved;finishJob(j,"已保存同曲歌词 · 复用《"+donor.title+"》");return;}}
+        const QFileInfo info(m_library->absolute(t.file));
+        for(const auto &suffix:{QString(".lrc"),QString(".txt")}){
+            const auto localPath=info.dir().filePath(info.completeBaseName()+suffix);
+            const auto local=LyricsDocumentReader::readDocument(localPath);
+            if(local.file.opened&&!local.file.tooLarge&&!local.lyrics.lines.isEmpty()&&store(t,local.file.bytes)){++m_saved;finishJob(j,"已保存本地歌词");return;}
+        }
+        if(knownArtist(t.artist))for(auto id:m_reuse.value(reuseKey(t))){
+            if(id==t.id)continue;const auto donor=m_library->track(id);
+            if(t.duration>0&&donor.duration>0&&qAbs(t.duration-donor.duration)>4000)continue;
+            const auto donorDocument=LyricsDocumentReader::readFile(m_library->absolute(donor.lyrics));
+            if(!donorDocument.opened||donorDocument.tooLarge)continue;
+            if(store(t,donorDocument.bytes)){++m_saved;finishJob(j,"已保存同曲歌词 · 复用《"+donor.title+"》");return;}
+        }
         setRowStatus(j->row,"正在检查内嵌歌词");auto *p=new QProcess(this);j->probe=p;
         connect(p,&QProcess::finished,this,[this,j,p](int,QProcess::ExitStatus){if(!live(j))return;const auto doc=QJsonDocument::fromJson(p->readAllStandardOutput()).object();auto tags=doc["format"].toObject()["tags"].toObject();for(const auto &s:doc["streams"].toArray()){const auto more=s.toObject()["tags"].toObject();for(auto i=more.begin();i!=more.end();++i)tags.insert(i.key(),i.value());}QByteArray data;for(auto i=tags.begin();i!=tags.end();++i)if(i.key().toLower().startsWith("lyrics")||i.key().toLower().startsWith("unsyncedlyrics")){data=i.value().toString().toUtf8();if(!data.isEmpty())break;}j->probe=nullptr;p->deleteLater();if(!data.isEmpty()&&store(j->original,data)){++m_saved;finishJob(j,"已保存内嵌歌词");}else beginOnline(j);});
         connect(p,&QProcess::errorOccurred,this,[this,j,p](QProcess::ProcessError e){if(e==QProcess::FailedToStart&&live(j)){j->probe=nullptr;p->deleteLater();beginOnline(j);}});
@@ -646,10 +659,10 @@ void LyricsLookup::pasteLyrics(){
     if(m_multi)return;
     if(m_tracks->currentRow()<0)return;QDialog dialog(this);dialog.setObjectName("lyricsPasteDialog");dialog.setWindowTitle("粘贴歌词");dialog.resize(580,440);auto *layout=new QVBoxLayout(&dialog);auto *text=new QPlainTextEdit(&dialog);text->setObjectName("lyricsPasteText");text->setPlaceholderText("粘贴 LRC 或普通歌词");const auto clip=QApplication::clipboard()->text();if(clip.contains('\n'))text->setPlainText(clip);layout->addWidget(text,1);auto *buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog);layout->addWidget(buttons);connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);if(dialog.exec()==QDialog::Accepted)saveManual(text->toPlainText().toUtf8(),"已保存粘贴歌词");
 }
-void LyricsLookup::importLyrics(){if(m_multi||m_tracks->currentRow()<0)return;const auto path=QFileDialog::getOpenFileName(this,"导入歌词",{},"歌词 (*.lrc *.txt)");if(path.isEmpty())return;QFile f(path);if(!f.open(QIODevice::ReadOnly)||f.size()>4*1024*1024){m_status->setText("歌词文件无法读取或超过4 MB。");return;}saveManual(f.readAll(),"已保存导入歌词");}
+void LyricsLookup::importLyrics(){if(m_multi||m_tracks->currentRow()<0)return;const auto path=QFileDialog::getOpenFileName(this,"导入歌词",{},"歌词 (*.lrc *.txt)");if(path.isEmpty())return;const auto file=LyricsDocumentReader::readFile(path);if(!file.opened||file.tooLarge){m_status->setText("歌词文件无法读取或超过4 MB。");return;}saveManual(file.bytes,"已保存导入歌词");}
 void LyricsLookup::saveOffsets(){
     const auto rows=batchRows();if(rows.isEmpty())return;const int offset=m_offset->value();stop();int saved=0,skipped=0,failed=0;
-    for(int row:rows){const auto track=m_library->track(m_ids[row]);QFile file(m_library->absolute(track.lyrics));if(track.lyrics.isEmpty()||!file.open(QIODevice::ReadOnly)||file.size()>4*1024*1024){++skipped;continue;}const auto data=file.readAll();file.close();const auto parsed=Lyrics::parse(data);if(!parsed.timed||parsed.instrumental){++skipped;continue;}
+    for(int row:rows){const auto track=m_library->track(m_ids[row]);if(track.lyrics.isEmpty()){++skipped;continue;}const auto document=LyricsDocumentReader::readDocument(m_library->absolute(track.lyrics));if(!document.file.opened||document.file.tooLarge){++skipped;continue;}const auto &data=document.file.bytes;const auto &parsed=document.lyrics;if(!parsed.timed||parsed.instrumental){++skipped;continue;}
         cancelTrackTranslation(track.id);if(store(track,withOffset(data,offset),true)){++saved;setRowStatus(row,"已保存时间偏移");}else{++failed;setRowStatus(row,"未保存："+m_library->lastError());}
     }
     m_saved+=saved;selectTrack();m_status->setText(QString("时间偏移已保存 %1 首，跳过 %2 首，失败 %3 首。").arg(saved).arg(skipped).arg(failed));controls();
@@ -710,8 +723,8 @@ void LyricsLookup::translateSelected(){
     for(int row:rows){
         const auto track=m_library->track(m_ids.value(row));
         if(!track.id||track.lyrics.isEmpty()||!QFileInfo::exists(m_library->absolute(track.lyrics))){setRowStatus(row,"没有原文，无法翻译");continue;}
-        QFile file(m_library->absolute(track.lyrics));if(!file.open(QIODevice::ReadOnly)||file.size()>4*1024*1024){setRowStatus(row,"没有原文，无法翻译");continue;}
-        const auto source=sourceLyricsForTranslation(file.readAll());
+        const auto file=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));if(!file.opened||file.tooLarge){setRowStatus(row,"没有原文，无法翻译");continue;}
+        const auto source=sourceLyricsForTranslation(file.bytes);
         if(lyricsAreChinese(QString::fromUtf8(source))){if(containsTraditional(QString::fromUtf8(source)))store(track,source,true);setRowStatus(row,"已是中文歌词，无需翻译");continue;}
         if(lyricTexts(source).isEmpty()){setRowStatus(row,"没有原文，无法翻译");continue;}
         enqueueTranslation(track.id,row,source,{});

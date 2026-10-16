@@ -1,4 +1,5 @@
 #include "window.h"
+#include "lyrics-document-reader.h"
 #include "changelog.h"
 #include "client-frame-windows.h"
 #include <QAction>
@@ -1073,12 +1074,13 @@ void Window::refreshTrack() {
     m_like->setEnabled(t.id);
     Lyrics lyric;QByteArray lyricData;
     if (!t.lyrics.isEmpty()) {
-        QFile f(m_library->absolute(t.lyrics));
-        if (f.open(QIODevice::ReadOnly))
-            lyricData=f.read(4 * 1024 * 1024);
+        auto document = LyricsDocumentReader::readDocument(
+            m_library->absolute(t.lyrics), LyricsDocumentReader::MaximumBytes,
+            LyricsDocumentReader::OversizePolicy::ReadPrefix);
+        lyricData = std::move(document.file.bytes);
+        lyric = std::move(document.lyrics);
     }
-    if(m_library->isInstrumental(t.id))lyricData=QString("纯音乐，请欣赏").toUtf8();
-    lyric=Lyrics::parse(lyricData);
+    if(m_library->isInstrumental(t.id)){lyricData=QString("纯音乐，请欣赏").toUtf8();lyric=Lyrics::parse(lyricData);}
     const bool timeline=lyric.timed&&!lyric.instrumental;
     m_lyricTools->setAvailable(t.id&&!lyric.instrumental,timeline);m_lyricDelay->setEnabled(timeline);if(m_loadedLyricId!=t.id)m_lyricTools->invalidateBackdrop();
     {QSignalBlocker block(m_lyricDelay);m_lyricDelay->setValue(m_library->lyricOffset(t.id)/1000.);}
