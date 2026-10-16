@@ -2,6 +2,7 @@
 #include "lyric-text.h"
 #include "lyrics.h"
 #include "lyrics.h"
+#include "lyrics-document-reader.h"
 #include <QBuffer>
 #include <QDateTime>
 #include <QDir>
@@ -483,14 +484,14 @@ bool Library::applyArtworkRepair(const ArtworkResult &result) {
     return ok;
 }
 bool Library::updateLyrics(qint64 id, const QString &source) {
-    QFile in(source);
-    if (!in.open(QIODevice::ReadOnly) || in.size() > 4 * 1024 * 1024) {
+    const auto sourceDocument = LyricsDocumentReader::readFile(source);
+    if (!sourceDocument.opened || sourceDocument.tooLarge) {
         m_error = "歌词文件无法读取或超过 4 MB";
         return false;
     }
     auto r = QString("Lyrics/track-%1.lrc").arg(id);
     QSaveFile out(absolute(r));
-    auto b = in.readAll();
+    const auto &b = sourceDocument.bytes;
     if (!out.open(QIODevice::WriteOnly) || out.write(b) != b.size() || !out.commit())
         return false;
     bool ok = exec("UPDATE tracks SET lyrics=? WHERE id=?", {r, id})&&exec("INSERT INTO lyrics_playback(track,instrumental) VALUES(?,?) ON CONFLICT(track) DO UPDATE SET instrumental=excluded.instrumental",{id,Lyrics::parse(b).instrumental?1:0});
