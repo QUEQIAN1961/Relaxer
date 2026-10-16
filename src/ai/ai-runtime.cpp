@@ -144,7 +144,13 @@ AiRuntime::AiRuntime(Library *library, std::unique_ptr<CredentialStore> credenti
     initialize(std::move(credentials));
 }
 
-void AiRuntime::initialize(std::unique_ptr<CredentialStore> credentials) {
+AiRuntime::AiRuntime(Library *library, QUrl deepSeekBaseUrl, std::unique_ptr<CredentialStore> credentials,
+                     QObject *parent)
+    : QObject(parent), m_settings(library) {
+    initialize(std::move(credentials), std::move(deepSeekBaseUrl));
+}
+
+void AiRuntime::initialize(std::unique_ptr<CredentialStore> credentials, QUrl deepSeekBaseUrl) {
     m_configuration = configurationFromJson(m_settings.get(QString::fromLatin1(ConfigKey)).toObject());
     m_models.restoreUnverified(m_configuration.cachedModels);
     if (credentials) {
@@ -154,7 +160,7 @@ void AiRuntime::initialize(std::unique_ptr<CredentialStore> credentials) {
         m_ownedCredentials = std::make_unique<WindowsCredentialStore>();
         m_credentials = m_ownedCredentials.get();
     }
-    m_deepSeek = new DeepSeekProvider(QUrl(QStringLiteral("https://api.deepseek.com")), this);
+    m_deepSeek = new DeepSeekProvider(std::move(deepSeekBaseUrl), this);
     m_providers.add(m_deepSeek);
     m_requests = new AiRequestCoordinator(&m_providers, this);
     connect(m_requests, &AiRequestCoordinator::modelsFinished, this,

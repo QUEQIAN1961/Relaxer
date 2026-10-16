@@ -1,5 +1,6 @@
 #include "lyricslookup.h"
 #include "browser-translation.h"
+#include "lyrics-document-reader.h"
 #include "lyric-text.h"
 #include "lyrics.h"
 #include "lyric-remote.h"
@@ -118,10 +119,18 @@ private slots:
         QTRY_COMPARE(done.size(),1);QCOMPARE(done.front()[0].toULongLong(),quint64(3));QVERIFY(done.front()[2].toString().contains("4000"));
         QVERIFY(!QDir(dir.filePath("browser-translation")).exists());
     }
-    void browserTranslationProviderAndUrlArePreserved(){
+    void browserTranslationInfrastructureRemainsIsolatedFromUserWorkflow(){
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
-        {LyricsLookup dialog(&library,{},nullptr,QUrl("http://127.0.0.1:9/api"));auto *combo=dialog.findChild<QComboBox *>("lyricsTranslationProvider");QVERIFY(combo);QCOMPARE(combo->currentData().toString(),QString("bing"));combo->setCurrentIndex(1);}
-        LyricsLookup reopened(&library,{},nullptr,QUrl("http://127.0.0.1:9/api"));QCOMPARE(reopened.findChild<QComboBox *>("lyricsTranslationProvider")->currentData().toString(),QString("baidu"));
+        QVERIFY(library.setSetting("lyricBrowserProvider","baidu"));QVERIFY(library.setSetting("translateLyrics",true));
+        LyricsLookup dialog(&library,{},nullptr,QUrl("http://127.0.0.1:9/api"));
+        QVERIFY(!dialog.findChild<QComboBox *>("lyricsTranslationProvider"));
+        QVERIFY(!dialog.findChild<QCheckBox *>("lyricsAutoTranslate"));
+        QVERIFY(!dialog.findChild<QPushButton *>("lyricsShowTranslationBrowser"));
+        QVERIFY(!dialog.findChild<QPushButton *>("lyricsTranslationResume"));
+        QVERIFY(dialog.findChild<QPushButton *>("lyricsTranslate")->text().contains("AI"));
+        QVERIFY(dialog.findChild<QLabel *>("lyricsCloudTranslationNotice"));
+        QCOMPARE(library.setting("lyricBrowserProvider").toString(),QString("baidu"));
+        QCOMPARE(library.setting("translateLyrics").toBool(),true);
         const QString source="a & b + c / # ? 百分之100%";const auto url=BrowserTranslation::pageUrl("baidu",source,"ja");
         QCOMPARE(url.host(),QString("fanyi.baidu.com"));QCOMPARE(QUrlQuery(url).queryItemValue("query",QUrl::FullyDecoded),source);QCOMPARE(QUrlQuery(url).queryItemValue("lang"),QString("jp2zh"));
         QCOMPARE(BrowserTranslation::pageUrl("bing",source,"en").host(),QString("www.bing.com"));
@@ -149,23 +158,22 @@ private slots:
         right->verticalScrollBar()->setValue(4);QCOMPARE(left->verticalScrollBar()->value(),4);
         const auto output=qEnvironmentVariable("RELAXER_QA_DIR");if(!output.isEmpty()){QDir().mkpath(output);QVERIFY(dialog.grab().save(output+(dark?"/lyrics-dark.png":"/lyrics-light.png")));}
     }
-    void translationProgressIncludesQueuedTracksAndCompletedLines(){
-        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QVector<qint64> ids;
-        for(int song=0;song<3;++song){const auto track=seed(library,QString("翻译进度 %1").arg(song),QString("progress-%1").arg(song));QStringList lines;for(int i=0;i<20;++i)lines<<QString("hello line %1").arg(i);QVERIFY(library.saveLyrics(track.id,lines.join('\n').toUtf8()));ids<<track.id;}
-        Phase031Server translator;translator.relaxerOnly=false;translator.hold=true;QVERIFY(translator.listen(QHostAddress::LocalHost));
-        translator.reply=[](const QUrl &url){auto lines=QUrlQuery(url).queryItemValue("q",QUrl::FullyDecoded).split('\n');for(auto &line:lines)line="译"+line;return qMakePair(200,QJsonDocument(QJsonObject{{"translatedText",lines.join('\n')}}).toJson());};
-        LyricsLookup dialog(&library,ids,nullptr,QUrl("http://127.0.0.1:9/api"),{},true);dialog.setProperty("lyricTranslateUrl",translator.endpoint("/translate"));dialog.show();dialog.findChild<QPushButton *>("lyricsMultiSelect")->click();dialog.findChild<QPushButton *>("lyricsSelectAll")->click();dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-        QTRY_COMPARE_WITH_TIMEOUT(translator.held.size(),2,3000);
-        auto *bar=dialog.findChild<QProgressBar *>("lyricsTranslationProgress");auto *label=dialog.findChild<QLabel *>("lyricsTranslationProgressLabel");QVERIFY(bar&&label);QCOMPARE(bar->maximum(),60);QCOMPARE(bar->value(),0);QVERIFY(label->text().contains("0 / 3 首"));
-        auto socket=translator.held.takeFirst();const auto url=QUrl::fromEncoded("http://localhost"+socket->property("buffer").toByteArray().split(' ').value(1));auto response=translator.reply(url);Phase031Server::send(socket,response.first,response.second);
-        QTRY_VERIFY_WITH_TIMEOUT(bar->value()>0&&bar->value()<bar->maximum(),3000);
-        auto *panel=dialog.findChild<QWidget *>("lyricsTranslationProgressPanel");QVERIFY(panel);QVERIFY(panel->geometry().bottom()>dialog.findChild<QPushButton *>("lyricsSaveClose")->geometry().bottom());
-        QVERIFY(label->geometry().right()<bar->geometry().left());QVERIFY(qAbs(label->geometry().center().y()-bar->geometry().center().y())<=1);QVERIFY(label->alignment()&Qt::AlignLeft);
-        const auto output=qEnvironmentVariable("RELAXER_QA_DIR");if(!output.isEmpty())QVERIFY(dialog.grab().save(output+"/translation-progress.png"));
-        translator.hold=false;const auto held=translator.held;translator.held.clear();for(const auto &pending:held){QVERIFY(pending);const auto heldUrl=QUrl::fromEncoded("http://localhost"+pending->property("buffer").toByteArray().split(' ').value(1));const auto reply=translator.reply(heldUrl);Phase031Server::send(pending,reply.first,reply.second);}
-        QTRY_COMPARE_WITH_TIMEOUT(bar->value(),bar->maximum(),5000);QVERIFY(label->text().contains("翻译完成"));QVERIFY(label->text().contains("3 首"));
-    }
-    void initTestCase() { qApp->setQuitOnLastWindowClosed(false); qApp->setStyle("Fusion"); }
+    void lyricsSearchNeverStartsAutomaticCloudTranslation(){
+        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+        const auto track=seed(library,"Search Without Translation","no-auto-translation");
+        QVERIFY(library.setSetting("translateLyrics",true));
+        Phase031Server search;QVERIFY(search.listen(QHostAddress::LocalHost));
+        search.reply=[&](const QUrl &url){if(url.path().endsWith("/get"))return qMakePair(404,QByteArray("{}"));return qMakePair(200,QJsonDocument(QJsonArray{record(track.title,track.artist)}).toJson());};
+        Phase031Server retiredWeb;retiredWeb.relaxerOnly=false;QVERIFY(retiredWeb.listen(QHostAddress::LocalHost));
+        LyricsLookup dialog(&library,{track.id},nullptr,search.endpoint(),{},true);
+        dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint("/translate"));dialog.show();relaxerClickSearch(&dialog);
+        QTRY_VERIFY_WITH_TIMEOUT(!library.track(track.id).lyrics.isEmpty(),8000);
+        QTRY_VERIFY_WITH_TIMEOUT(statusAt(dialog,0).startsWith("已保存"),3000);
+        QCOMPARE(retiredWeb.requests,0);
+        const auto saved=LyricsDocumentReader::readFile(library.absolute(library.track(track.id).lyrics));
+        QVERIFY(saved.opened&&saved.complete);QCOMPARE(saved.bytes,record(track.title,track.artist)["syncedLyrics"].toString().toUtf8());
+        QVERIFY(!dialog.findChild<QCheckBox *>("lyricsAutoTranslate"));
+    }    void initTestCase() { qApp->setQuitOnLastWindowClosed(false); qApp->setStyle("Fusion"); }
     void sourceLyricsDropTranslationLines() {
         const auto timed = QByteArray("[00:00.00]hello\n[00:00.00]你好\n[00:02.00]world\n[00:02.00]世界\n");
         QCOMPARE(sourceLyricsForTranslation(timed), QByteArray("[00:00.00]hello\n[00:02.00]world\n"));
@@ -335,120 +343,30 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(std::any_of(server.urls.begin(), server.urls.end(), [](const QUrl &url) { return QUrlQuery(url).queryItemValue("track_name", QUrl::FullyDecoded) == "Clear"; }), 800);
         dialog.findChild<QPushButton *>("lyricsStop")->click();
     }
-    void translationFallsBackPerLineAndFailureKeepsPreviousText() {
-        QTemporaryDir dir;
-        Library library(dir.filePath("data"));
-        QVERIFY(library.open());
-        const auto track = seed(library, "翻译歌", "tr");
-        Phase031Server search;
-        QVERIFY(search.listen(QHostAddress::LocalHost));
-        search.reply = [&](const QUrl &url) {
-            if (url.path().endsWith("/get")) return qMakePair(404, QByteArray("{}"));
-            return qMakePair(200, QJsonDocument(QJsonArray{record(track.title, track.artist)}).toJson());
-        };
-        Phase031Server translator;
-        translator.relaxerOnly = false;
-        QVERIFY(translator.listen(QHostAddress::LocalHost));
-        translator.reply = [](const QUrl &url) {
-            const auto text = QUrlQuery(url).queryItemValue("q", QUrl::FullyDecoded);
-            if (text.contains('\n')) return qMakePair(200, QByteArray("{\"translatedText\":\"只有一行\"}"));
-            return qMakePair(200, QJsonDocument(QJsonObject{{"translatedText", "译" + text}}).toJson());
-        };
-        LyricsLookup dialog(&library, {track.id}, nullptr, search.endpoint());
-        dialog.setProperty("lyricTranslateUrl", translator.endpoint("/translate"));
-        dialog.show();
-        relaxerClickSearch(&dialog);
-        QTRY_VERIFY_WITH_TIMEOUT(statusAt(dialog, 0).contains("已附加简体译文"), 8000);
-        QFile saved(library.absolute(library.track(track.id).lyrics));
-        QVERIFY(saved.open(QIODevice::ReadOnly));
-        const auto body = QString::fromUtf8(saved.readAll());
-        QVERIFY(body.contains("hello line"));
-        QVERIFY(body.contains("译hello line"));
-        QVERIFY(body.contains("译second line"));
-        QVERIFY(translator.requests >= 3);
-        saved.close();
-        dialog.close();
-        const auto bilingual = library.track(track.id).lyrics;
-        QFile before(library.absolute(bilingual));
-        QVERIFY(before.open(QIODevice::ReadOnly));
-        const auto previous = before.readAll();
-        before.close();
-        Phase031Server broken;
-        broken.relaxerOnly = false;
-        QVERIFY(broken.listen(QHostAddress::LocalHost));
-        broken.reply = [](const QUrl &) { return qMakePair(500, QByteArray("{}")); };
-        LyricsLookup retry(&library, {track.id}, nullptr, search.endpoint());
-        retry.setProperty("lyricTranslateUrl", broken.endpoint("/translate"));
-        retry.show();
-        retry.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
-        retry.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
-        retry.findChild<QPushButton *>("lyricsTranslate")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(statusAt(retry, 0).startsWith("翻译失败"), 8000);
-        {
-            // Close before the rewrite. Windows cannot replace a lyric file that this process still has open.
-            QFile after(library.absolute(library.track(track.id).lyrics));
-            QVERIFY(after.open(QIODevice::ReadOnly));
-            QCOMPARE(after.readAll(), previous);
-        }
-        broken.reply = [](const QUrl &url) {
-            const auto text = QUrlQuery(url).queryItemValue("q", QUrl::FullyDecoded);
-            if (text.contains('\n')) return qMakePair(200, QByteArray("{\"translatedText\":\"只有一行\"}"));
-            return qMakePair(200, QJsonDocument(QJsonObject{{"translatedText", "新" + text}}).toJson());
-        };
-        retry.findChild<QPushButton *>("lyricsTranslate")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(statusAt(retry, 0).contains("已附加简体译文"), 8000);
-        QFile replaced(library.absolute(library.track(track.id).lyrics));
-        QVERIFY(replaced.open(QIODevice::ReadOnly));
-        const auto next = QString::fromUtf8(replaced.readAll());
-        QVERIFY(next.contains("新hello line"));
-        QVERIFY(!next.contains("译hello line"));
-        const auto parsed = Lyrics::parse(next.toUtf8());
-        QCOMPARE(parsed.lines.size(), 4);
-        QCOMPARE(parsed.lines.at(0).text, QString("hello line"));
-        QCOMPARE(parsed.lines.at(1).text, QString("新hello line"));
-    }
-    void translateSelectionRulesAndChineseSkip() {
-        QTemporaryDir dir;
-        Library library(dir.filePath("data"));
-        QVERIFY(library.open());
-        const auto foreign = seed(library, "外文", "en");
-        const auto chinese = seed(library, "中文", "zh");
-        const auto empty = seed(library, "无词", "none");
-        QVERIFY(library.saveLyrics(foreign.id, synced("hello", "world")));
-        QVERIFY(library.saveLyrics(chinese.id, synced("你好", "世界")));
-        Phase031Server translator;
-        translator.relaxerOnly = false;
-        QVERIFY(translator.listen(QHostAddress::LocalHost));
-        translator.reply = [](const QUrl &url) {
-            const auto text = QUrlQuery(url).queryItemValue("q", QUrl::FullyDecoded);
-            return qMakePair(200, QJsonDocument(QJsonObject{{"translatedText", "译" + text}}).toJson());
-        };
-        LyricsLookup dialog(&library, {foreign.id, chinese.id, empty.id}, nullptr, QUrl("http://127.0.0.1:9/api"));
-        dialog.setProperty("lyricTranslateUrl", translator.endpoint("/translate"));
-        dialog.show();
-        dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    void missingAIConfigurationDoesNotFallBackToLegacyWebTranslation(){
+        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+        const auto track=seed(library,"未配置 AI","no-ai-config");const auto original=synced("hello","world");QVERIFY(library.saveLyrics(track.id,original));
+        QVERIFY(library.setSetting("translateLyrics",true));
+        Phase031Server retiredWeb;retiredWeb.relaxerOnly=false;QVERIFY(retiredWeb.listen(QHostAddress::LocalHost));
+        LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));
+        dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint("/translate"));dialog.show();
+        dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
         dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-        QCOMPARE(dialog.findChild<QLabel *>("lyricsStatus")->text(), QString("请先选择歌曲"));
-        QCOMPARE(translator.requests, 0);
-        auto *tracks = dialog.findChild<QListWidget *>("lyricsTracks");
-        tracks->setCurrentRow(rowForId(dialog,chinese.id));
-        dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-        QCOMPARE(statusAt(dialog,rowForId(dialog,chinese.id)), QString("已是中文歌词，无需翻译"));
-        QCOMPARE(translator.requests, 0);
-        tracks->setCurrentRow(rowForId(dialog,empty.id));
-        dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-        QCOMPARE(statusAt(dialog,rowForId(dialog,empty.id)), QString("没有原文，无法翻译"));
-        tracks->setCurrentRow(rowForId(dialog,foreign.id));
-        dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(statusAt(dialog,rowForId(dialog,foreign.id)).contains("已附加简体译文"), 8000);
-        QVERIFY(dialog.findChild<QCheckBox *>("lyricsAutoTranslate")->isChecked());
-        dialog.findChild<QCheckBox *>("lyricsAutoTranslate")->setChecked(false);
-        QCOMPARE(library.setting("translateLyrics", true).toBool(), false);
-        LyricsLookup persisted(&library, {foreign.id}, nullptr, QUrl("http://127.0.0.1:9/api"));
-        persisted.show();
-        QVERIFY(!persisted.findChild<QCheckBox *>("lyricsAutoTranslate")->isChecked());
-    }
-    void localLyricsAreCompleteAndStablyGroupedLast() {
+        QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains("AI 服务不可用"));
+        QCOMPARE(retiredWeb.requests,0);
+        const auto saved=LyricsDocumentReader::readFile(library.absolute(library.track(track.id).lyrics));QVERIFY(saved.opened);QCOMPARE(saved.bytes,original);
+    }    void wholeSongTranslationRejectsMultipleSelectedTracks(){
+        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+        const auto first=seed(library,"多选甲","multi-translation-a"),second=seed(library,"多选乙","multi-translation-b");
+        QVERIFY(library.saveLyrics(first.id,synced("hello","world")));QVERIFY(library.saveLyrics(second.id,synced("goodbye","later")));
+        Phase031Server retiredWeb;retiredWeb.relaxerOnly=false;QVERIFY(retiredWeb.listen(QHostAddress::LocalHost));
+        LyricsLookup dialog(&library,{first.id,second.id},nullptr,QUrl("http://127.0.0.1:9/api"),{},true);
+        dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint("/translate"));dialog.show();
+        dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);dialog.findChild<QPushButton *>("lyricsMultiSelect")->click();
+        dialog.findChild<QPushButton *>("lyricsSelectAll")->click();dialog.findChild<QPushButton *>("lyricsTranslate")->click();
+        QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains("一次只处理一首"));
+        QCOMPARE(retiredWeb.requests,0);
+    }    void localLyricsAreCompleteAndStablyGroupedLast() {
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
         const auto a=seed(library,"已有甲","local-a"),b=seed(library,"缺失甲","missing-a"),c=seed(library,"已有乙","local-b"),d=seed(library,"缺失乙","missing-b");
         QVERIFY(library.saveLyrics(a.id,synced("原文甲","原文乙")));QVERIFY(library.saveLyrics(c.id,synced("原文丙","原文丁")));
@@ -481,13 +399,13 @@ private slots:
         const auto before=server.requests;dialog.findChild<QPushButton *>("lyricsStart")->click();QTRY_VERIFY_WITH_TIMEOUT(server.requests>before,3000);QTRY_VERIFY_WITH_TIMEOUT(!library.track(track.id).lyrics.isEmpty(),8000);
         QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),2);
     }
-    void failedTranslationRetainsCompletedLyricsState() {
+    void unavailableAITranslationRetainsCompletedLyricsState() {
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());const auto track=seed(library,"外语原文","translation-state");const auto original=synced("hello","world");QVERIFY(library.saveLyrics(track.id,original));
-        Phase031Server translator;translator.relaxerOnly=false;QVERIFY(translator.listen(QHostAddress::LocalHost));translator.reply=[](const QUrl &){return qMakePair(500,QByteArray("{}"));};
-        LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"),{},true);dialog.setProperty("lyricTranslateUrl",translator.endpoint());dialog.show();
-        auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");rows->setCurrentRow(0);dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(statusAt(dialog,0).startsWith("翻译失败"),5000);QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),2);
-        QFile file(library.absolute(library.track(track.id).lyrics));QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),original);
+        Phase031Server retiredWeb;retiredWeb.relaxerOnly=false;QVERIFY(retiredWeb.listen(QHostAddress::LocalHost));
+        LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint());dialog.show();dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+        auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),2);rows->setCurrentRow(0);dialog.findChild<QPushButton *>("lyricsTranslate")->click();
+        QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains("AI 服务不可用"));QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),2);QCOMPARE(retiredWeb.requests,0);
+        const auto saved=LyricsDocumentReader::readFile(library.absolute(library.track(track.id).lyrics));QVERIFY(saved.opened);QCOMPARE(saved.bytes,original);
     }
     void stoppedSearchKeepsRankedCandidatesActionable() {
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());const auto track=seed(library,"有候选后停止","stop-candidate");
@@ -639,50 +557,16 @@ private slots:
         QVERIFY(lyric_remote::consume(4,"search",QByteArray("{\"status\":403}"),"歌名","歌手",10000).failed);
         QVERIFY(!lyric_remote::consume(2,"search",QByteArray("{\"result\":{\"songCount\":0},\"code\":200}"),"歌名","歌手",10000).failed);
     }
-    void closeWithPendingTranslationConfirmsWithoutWaiting() {
-        QTemporaryDir dir;
-        Library library(dir.filePath("data"));
-        QVERIFY(library.open());
-        const auto track = seed(library, "关闭翻译", "close");
-        const auto original = synced("hello", "world");
-        QVERIFY(library.saveLyrics(track.id, original));
-        Phase031Server translator;
-        translator.relaxerOnly = false;
-        translator.hold = true;
-        QVERIFY(translator.listen(QHostAddress::LocalHost));
-        LyricsLookup dialog(&library, {track.id}, nullptr, QUrl("http://127.0.0.1:9/api"));
-        dialog.setProperty("lyricTranslateUrl", translator.endpoint("/translate"));
-        dialog.show();
-        dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
-        dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
-        dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-        QTRY_VERIFY_WITH_TIMEOUT(statusAt(dialog, 0).startsWith("正在翻译"), 3000);
-        QTimer::singleShot(0, &dialog, [] {
-            for (auto *widget : QApplication::topLevelWidgets())
-                if (widget->objectName() == "lyricsTranslateCloseConfirm") {
-                    QCOMPARE(widget->windowTitle(), QString("翻译任务尚未完成"));
-                    widget->findChild<QAbstractButton *>("lyricsContinueTranslate")->click();
-                }
-        });
-        dialog.close();
-        QVERIFY(dialog.isVisible());
-        QCOMPARE(statusAt(dialog, 0).startsWith("正在翻译") || statusAt(dialog, 0).startsWith("等待翻译"), true);
-        QTimer::singleShot(0, &dialog, [] {
-            for (auto *widget : QApplication::topLevelWidgets())
-                if (widget->objectName() == "lyricsTranslateCloseConfirm")
-                    widget->findChild<QAbstractButton *>("lyricsStopTranslateQuit")->click();
-        });
-        const auto started = QDateTime::currentMSecsSinceEpoch();
-        dialog.close();
-        QVERIFY(QDateTime::currentMSecsSinceEpoch() - started < 1000);
-        QVERIFY(!dialog.isVisible());
-        QFile file(library.absolute(library.track(track.id).lyrics));
-        QVERIFY(file.open(QIODevice::ReadOnly));
-        QCOMPARE(file.readAll(), original);
-        QTest::qWait(200);
-        QFile later(library.absolute(library.track(track.id).lyrics));
-        QVERIFY(later.open(QIODevice::ReadOnly));
-        QCOMPARE(later.readAll(), original);
+    void unavailableAIServiceDoesNotLeaveAHiddenBrowserTask(){
+        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+        const auto track=seed(library,"没有隐藏请求","no-hidden-browser-task");const auto original=synced("hello","world");QVERIFY(library.saveLyrics(track.id,original));
+        Phase031Server retiredWeb;retiredWeb.relaxerOnly=false;QVERIFY(retiredWeb.listen(QHostAddress::LocalHost));
+        LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint("/translate"));dialog.show();
+        dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+        dialog.findChild<QPushButton *>("lyricsTranslate")->click();QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains("AI 服务不可用"));
+        QCOMPARE(retiredWeb.requests,0);dialog.close();QVERIFY(!dialog.isVisible());
+        for(auto *widget:QApplication::topLevelWidgets())QVERIFY(widget->objectName()!="lyricsTranslateCloseConfirm");
+        const auto saved=LyricsDocumentReader::readFile(library.absolute(library.track(track.id).lyrics));QVERIFY(saved.opened);QCOMPARE(saved.bytes,original);
     }
 };
 QTEST_MAIN(Phase031Tests)

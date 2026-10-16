@@ -462,6 +462,44 @@ bool Library::saveLyrics(qint64 id,const QByteArray &data){
     if(!out.open(QIODevice::WriteOnly)||out.write(normalized)!=normalized.size()||!out.commit()){m_error="无法保存歌词文件";return false;}
     const bool ok=exec("UPDATE tracks SET lyrics=? WHERE id=?",{relative,id})&&exec("INSERT INTO lyrics_playback(track,instrumental) VALUES(?,?) ON CONFLICT(track) DO UPDATE SET instrumental=excluded.instrumental",{id,Lyrics::parse(normalized).instrumental?1:0});if(ok)notifyChanged();return ok;
 }
+bool Library::saveLyricsPreservingText(qint64 id,const QByteArray &data){
+    if(!track(id).id||data.isEmpty()||data.size()>4*1024*1024||Lyrics::parse(data).lines.isEmpty()){
+        m_error="歌词内容无效或歌曲已不存在";return false;
+    }
+    const auto relative=QString("Lyrics/track-%1.lrc").arg(id);
+    const auto path=absolute(relative);
+    QByteArray previous;
+    bool hadPrevious=false;
+    QFile existing(path);
+    if(QFileInfo::exists(path)){
+        if(!existing.open(QIODevice::ReadOnly)){m_error="无法读取待替换的歌词文件";return false;}
+        previous=existing.readAll();
+        if(existing.error()!=QFileDevice::NoError){m_error="无法备份待替换的歌词文件";return false;}
+        hadPrevious=true;
+    }
+    existing.close();
+    if(!m_db.transaction()){m_error=m_db.lastError().text();return false;}
+    auto restoreFile=[&]{
+        if(hadPrevious){QSaveFile restore(path);if(!restore.open(QIODevice::WriteOnly)||restore.write(previous)!=previous.size()||!restore.commit())return false;}
+        else if(QFileInfo::exists(path)&&!QFile::remove(path))return false;
+        return true;
+    };
+    QSaveFile out(path);
+    if(!out.open(QIODevice::WriteOnly)||out.write(data)!=data.size()||!out.commit()){
+        m_db.rollback();m_error="无法保存歌词文件";return false;
+    }
+    const bool updated=exec("UPDATE tracks SET lyrics=? WHERE id=?",{relative,id})&&
+        exec("INSERT INTO lyrics_playback(track,instrumental) VALUES(?,?) ON CONFLICT(track) DO UPDATE SET instrumental=excluded.instrumental",{id,Lyrics::parse(data).instrumental?1:0});
+    if(!updated||!m_db.commit()){
+        if(m_db.isOpen())m_db.rollback();
+        const auto databaseError=m_error.isEmpty()?m_db.lastError().text():m_error;
+        if(!restoreFile())m_error="歌词保存失败，且无法恢复原歌词文件";
+        else m_error=databaseError.isEmpty()?QStringLiteral("无法提交歌词保存"):databaseError;
+        return false;
+    }
+    notifyChanged();
+    return true;
+}
 bool Library::updateArtwork(qint64 id, const QString &source) {
     auto r = QString("Artwork/track-%1.png").arg(id);
     if (!copyImage(source, r))

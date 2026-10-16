@@ -34,6 +34,7 @@ class Library : public QObject {
     bool removeManaged(const QVector<qint64> &ids);
     bool favorites(const QVector<qint64> &ids,bool value);
     bool saveLyrics(qint64 id,const QByteArray &data);
+    bool saveLyricsPreservingText(qint64 id,const QByteArray &data);
     bool updateArtwork(qint64 id, const QString &source);
     bool applyArtworkRepair(const ArtworkResult &result);
     bool updateLyrics(qint64 id, const QString &source);

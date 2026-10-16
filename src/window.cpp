@@ -828,7 +828,7 @@ QWidget *Window::buildNowPlaying() {
     connect(m_lyricTools,&LyricTools::timedLyricsRequested,this,[this]{
         const auto track=m_player->current();if(!track.id||m_library->isInstrumental(track.id))return;
         m_lyricTools->closeTools();
-        LyricsLookup dialog(m_library,{track.id},this,QUrl("https://lrclib.net/api"),{},true);
+        LyricsLookup dialog(m_library,{track.id},this,QUrl("https://lrclib.net/api"),{},true,m_aiRuntime);
         dialog.setProperty("requireTimedLyrics",true);
         dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
         dialog.findChild<QCheckBox *>("lyricsReplace")->setChecked(true);
@@ -983,7 +983,7 @@ void Window::refreshFilters(){
     for(const auto &t:tracks){artists<<t.artist;if(!t.artist.contains("AC/DC",Qt::CaseInsensitive))for(const auto &name:t.artist.split('/',Qt::SkipEmptyParts))artists<<name.trimmed();}m_artistFilter->setOptions(artists);const auto artist=m_artistFilter->value();
     for(const auto &t:tracks){bool matches=artist.isEmpty()||t.artist.compare(artist,Qt::CaseInsensitive)==0;if(!t.artist.contains("AC/DC",Qt::CaseInsensitive))for(const auto &name:t.artist.split('/',Qt::SkipEmptyParts))if(name.trimmed().compare(artist,Qt::CaseInsensitive)==0)matches=true;if(matches)albums<<t.album;}m_albumFilter->setOptions(albums);m_filterRefreshing=false;
 }
-void Window::lookupLyrics(const QVector<qint64> &ids,bool pinExplicit){if(ids.isEmpty())return;LyricsLookup dialog(m_library,ids,this,QUrl("https://lrclib.net/api"),{},pinExplicit);dialog.exec();refreshTrack();}
+void Window::lookupLyrics(const QVector<qint64> &ids,bool pinExplicit){if(ids.isEmpty())return;LyricsLookup dialog(m_library,ids,this,QUrl("https://lrclib.net/api"),{},pinExplicit,m_aiRuntime);dialog.exec();refreshTrack();}
 void Window::lookupMissingLyrics(){QVector<qint64> ids;for(const auto &t:m_library->tracks())ids<<t.id;if(ids.isEmpty()){toast("资料库中还没有歌曲。");return;}lookupLyrics(ids,false);}
 void Window::saveWindowSize(){if(m_restoringWindow||!m_library||!m_normalSize.isValid())return;m_library->setSettings({{"windowWidth",m_normalSize.width()},{"windowHeight",m_normalSize.height()},{"windowMaximized",isMaximized()}});}
 void Window::changeEvent(QEvent *event){QMainWindow::changeEvent(event);if(event->type()==QEvent::WindowStateChange&&!m_restoringWindow&&m_sizeSaveTimer)m_sizeSaveTimer->start();}

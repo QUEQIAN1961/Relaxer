@@ -1,4 +1,6 @@
 #pragma once
+#include "ai/ai-runtime.h"
+#include "ai/whole-song-lyrics-translation.h"
 #include "library.h"
 #include "lyric-remote.h"
 #include <QDialog>
@@ -36,11 +38,10 @@ struct LyricHttpResult {
     QJsonDocument doc;
     lyric_remote::Follow follow;
 };
-class BrowserTranslation;
 class LyricsLookup : public QDialog {
     Q_OBJECT
 public:
-    LyricsLookup(Library *library,QVector<qint64> ids,QWidget *parent=nullptr,QUrl endpoint=QUrl("https://lrclib.net/api"),QUrl backupEndpoint={},bool pinExplicit=false);
+    LyricsLookup(Library *library,QVector<qint64> ids,QWidget *parent=nullptr,QUrl endpoint=QUrl("https://lrclib.net/api"),QUrl backupEndpoint={},bool pinExplicit=false,ai::AiRuntime *aiRuntime=nullptr);
     ~LyricsLookup() override;
     static QString normalized(const QString &text);
     static QString cleanTitle(const QString &text);
@@ -90,7 +91,7 @@ private:
         QVector<RankItem> readyRanked,readyAll;
     };
     using JobPtr=std::shared_ptr<Job>;
-    Library *m_library;QVector<qint64> m_ids;QVector<Source> m_sources;
+    Library *m_library;QVector<qint64> m_ids;QVector<Source> m_sources;QPointer<ai::AiRuntime> m_aiRuntime;
     QNetworkAccessManager m_network;
     QHash<qint64,JobPtr> m_jobs;
     QVector<JobPtr> m_recoveryQueue;
@@ -109,11 +110,9 @@ private:
     QProgressBar *m_translationProgress=nullptr;
     QLabel *m_translationProgressLabel=nullptr;
     bool m_applyingStyle=false;
-    BrowserTranslation *m_browserTranslation=nullptr;QComboBox *m_translationProvider=nullptr;QPushButton *m_translationResume=nullptr;
-    qint64 m_browserTrack=0;
     QLabel *m_status,*m_candidateTitle,*m_instrumentHint;
-    QPushButton *m_start,*m_stop,*m_apply,*m_incomplete=nullptr,*m_manualSearch,*m_mark,*m_continue,*m_translate=nullptr;
-    QLineEdit *m_searchTitle,*m_searchArtist,*m_fragment;QCheckBox *m_replace,*m_syncedOnly,*m_missingOnly=nullptr,*m_autoTranslate=nullptr;
+    QPushButton *m_start,*m_stop,*m_apply,*m_incomplete=nullptr,*m_manualSearch,*m_mark,*m_continue,*m_translate=nullptr,*m_aiSaveTranslation=nullptr,*m_aiCancelTranslation=nullptr;
+    QLineEdit *m_searchTitle,*m_searchArtist,*m_fragment;QCheckBox *m_replace,*m_syncedOnly,*m_missingOnly=nullptr;
     QLabel *m_emptyHint=nullptr;
     QSpinBox *m_offset;QComboBox *m_sourceFilter;QVector<int> m_visibleRecords;
     int m_generation=0,m_nextRow=0,m_saved=0,m_trackLimit=10,m_requestLimit=3,m_fastReplies=0;
@@ -129,22 +128,27 @@ private:
     QWidget *m_morePanel=nullptr;
     QSet<int> m_requestedRows;
     QSet<qint64> m_missingAtOpen,m_pinnedIds;
-    struct TranslateTask {
-        qint64 id=0;int row=-1,token=0,generation=0,cursor=0,lineUntil=0,provider=0;
-        bool lineMode=false,active=false;
-        QByteArray source;QString statusBase,sl,tl;
-        QStringList lines,translated;QString browserProvider;
-    };
-    QHash<qint64,TranslateTask> m_translateTasks;
-    QVector<qint64> m_translateQueue;
-    QSet<QNetworkReply *> m_translateReplies;
-    int m_translateGeneration=0,m_translateActive=0,m_translateToken=0;
-    struct TranslationProgress {int total=0,done=0;bool finished=false,failed=false,cancelled=false;};
-    QHash<qint64,TranslationProgress> m_translationStats;
-    void updateTranslationProgress();
-    void resetTranslationProgress();
+    quint64 m_aiTaskId=0,m_aiGeneration=0,m_aiActiveGeneration=0;
+    qint64 m_aiTrackId=0;
+    Track m_aiTrackSnapshot;
+    QString m_aiLyricsPath,m_aiTargetLanguage,m_aiStylePrompt;
+    QByteArray m_aiSourceBytes,m_aiSourceDigest,m_aiConfigurationDigest,m_aiMergedBytes;
+    ai::lyrics::PreparedLyrics m_aiPrepared;
+    ai::AiTaskConfiguration m_aiTaskConfiguration;
+    QStringList m_aiTranslations;
+    bool m_hasAiPreview=false,m_aiPreviewSaved=false;
     void updatePreview();
     void setPreviewLyrics(const QByteArray &data);
+    void setAiTranslationPreview();
+    QByteArray currentAiConfigurationDigest() const;
+    bool currentAiTranslationSnapshot(QString *error=nullptr) const;
+    void completeAiTranslation(quint64 taskId,const ai::ChatCompletionResult &result);
+    void saveAiTranslation();
+    void clearAiTranslationPreview();
+    void cancelAiTranslation(const QString &reason={});
+    void cancelAiTranslationForTrack(qint64 id);
+    void resetTranslationProgress();
+    int rowForTrack(qint64 id) const;
     void applyLookupStyle();
     void changeEvent(QEvent *event) override;
     void start();void stop();void pumpTracks();void lookup(const JobPtr &job);
@@ -165,13 +169,6 @@ private:
     void setRowStatus(int row,const QString &text);void updateFilter();void controls();
     bool store(const Track &track,const QByteArray &data,bool force=false);
     bool productionHost() const;
-    bool wantsTranslation(const QByteArray &data) const;
-    void enqueueTranslation(qint64 id,int row,const QByteArray &source,const QString &statusBase);
-    void pumpTranslations();
-    void translateStep(qint64 id);
-    void finishTranslation(qint64 id,bool ok,const QString &error);
-    void cancelTranslations();
-    void cancelTrackTranslation(qint64 id);
     bool translationPending() const;
     bool confirmStopTranslations();
     void translateSelected();

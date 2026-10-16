@@ -7,6 +7,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QUrl>
 #include <memory>
 
 namespace relaxer {
@@ -52,6 +53,8 @@ class AiRuntime final : public QObject {
   public:
     explicit AiRuntime(Library *library, QObject *parent = nullptr);
     AiRuntime(Library *library, std::unique_ptr<CredentialStore> credentials, QObject *parent = nullptr);
+    AiRuntime(Library *library, QUrl deepSeekBaseUrl, std::unique_ptr<CredentialStore> credentials,
+              QObject *parent = nullptr);
 
     const AiServiceConfiguration &configuration() const { return m_configuration; }
     bool saveConfiguration(const AiServiceConfiguration &configuration, QString *error = nullptr);
@@ -80,7 +83,8 @@ class AiRuntime final : public QObject {
     ProviderRegistry m_providers;
     DeepSeekProvider *m_deepSeek = nullptr;
     AiRequestCoordinator *m_requests = nullptr;
-    void initialize(std::unique_ptr<CredentialStore> credentials);
+    void initialize(std::unique_ptr<CredentialStore> credentials,
+                    QUrl deepSeekBaseUrl = QUrl(QStringLiteral("https://api.deepseek.com")));
 };
 
 } // namespace relaxer::ai

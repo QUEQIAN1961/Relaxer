@@ -163,6 +163,8 @@ add_library(relaxer_ai STATIC
   src/ai/ai-model.cpp
   src/ai/ai-request-coordinator.cpp
   src/ai/ai-runtime.cpp
+  src/ai/whole-song-lyrics-translation.cpp
+  src/ai/whole-song-lyrics-translation.h
   src/ai/ai-provider.h
   src/ai/credential-store.cpp
   src/ai/deepseek-provider.cpp)
@@ -194,6 +196,9 @@ set(RELAXER_UI src/ai/ai-settings-page.cpp src/ai/ai-settings-page.h src/chrome.
 add_library(relaxer_ui STATIC ${RELAXER_UI})
 target_include_directories(relaxer_ui PUBLIC src)
 target_link_libraries(relaxer_ui PUBLIC relaxer_ai relaxer_core relaxer_services Qt6::Widgets Qt6::Svg Qt6::Network)
+add_executable(relaxer_ai_lyrics_translation_tests tests/ai-lyrics-translation-tests.cpp)
+target_link_libraries(relaxer_ai_lyrics_translation_tests PRIVATE relaxer_ui Qt6::Test)
+relaxer_add_qt_test(relaxer_ai_lyrics_translation relaxer_ai_lyrics_translation_tests)
 if(WIN32)
   target_link_libraries(relaxer_ui PUBLIC user32 dwmapi)
 endif()
