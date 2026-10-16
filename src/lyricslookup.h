@@ -131,12 +131,11 @@ private:
     quint64 m_aiTaskId=0,m_aiGeneration=0,m_aiActiveGeneration=0;
     qint64 m_aiTrackId=0;
     Track m_aiTrackSnapshot;
-    QString m_aiLyricsPath,m_aiTargetLanguage,m_aiStylePrompt;
+    QString m_aiLyricsPath,m_aiTargetLanguage;
     QByteArray m_aiSourceBytes,m_aiSourceDigest,m_aiConfigurationDigest,m_aiMergedBytes;
     ai::lyrics::PreparedLyrics m_aiPrepared;
-    ai::AiTaskConfiguration m_aiTaskConfiguration;
     QStringList m_aiTranslations;
-    bool m_hasAiPreview=false,m_aiPreviewSaved=false;
+    bool m_hasAiPreview=false,m_aiConsentPending=false;
     void updatePreview();
     void setPreviewLyrics(const QByteArray &data);
     void setAiTranslationPreview();

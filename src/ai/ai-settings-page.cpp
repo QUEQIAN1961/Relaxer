@@ -1,6 +1,8 @@
 #include "ai-settings-page.h"
 
 #include <QCheckBox>
+#include <QAbstractItemView>
+#include <QScopedValueRollback>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QFrame>
@@ -120,14 +122,17 @@ AiSettingsPage::AiSettingsPage(AiRuntime *runtime, QWidget *parent)
     m_stack = new QStackedWidget(this);
     m_stack->setObjectName("aiSettingsStack");
     outer->addWidget(m_stack, 1);
+    m_styleSaveTimer = new QTimer(this);
+    m_styleSaveTimer->setSingleShot(true);
+    m_styleSaveTimer->setInterval(250);
+    connect(m_styleSaveTimer, &QTimer::timeout, this, &AiSettingsPage::flushStylePrompt);
     buildHome();
     buildTranslation();
     m_stack->addWidget(m_home);
     m_stack->addWidget(m_translation);
     if (m_runtime) {
     connect(m_runtime, &AiRuntime::configurationChanged, this, &AiSettingsPage::populate);
-    connect(m_runtime, &AiRuntime::modelsChanged, this, &AiSettingsPage::populate);
-    connect(m_runtime->requests(), &AiRequestCoordinator::modelsFinished, this,
+    connect(m_runtime, &AiRuntime::modelCatalogFinished, this,
             [this](quint64 taskId, const QString &, const QList<ModelInfo> &models, const ProviderError &error) {
         if (taskId != m_pendingRefresh)
             return;
@@ -150,6 +155,7 @@ AiSettingsPage::AiSettingsPage(AiRuntime *runtime, QWidget *parent)
     });
     connect(m_runtime, &QObject::destroyed, this, [this] {
         m_pendingRefresh = 0;
+        m_styleSaveTimer->stop();
         setEnabled(false);
     });
     } else {
@@ -158,8 +164,9 @@ AiSettingsPage::AiSettingsPage(AiRuntime *runtime, QWidget *parent)
     populate();
 }
 
-AiSettingsPage::~AiSettingsPage() { cancelRefresh(); }
+AiSettingsPage::~AiSettingsPage() { flushStylePrompt(); cancelRefresh(); }
 void AiSettingsPage::hideEvent(QHideEvent *event) {
+    flushStylePrompt();
     cancelRefresh();
     QWidget::hideEvent(event);
 }
@@ -274,8 +281,6 @@ void AiSettingsPage::buildHome() {
         if (configuration.translationUsesDefaults && configuration.translationOverride.providerId.isEmpty())
             configuration.translationOverride = configuration.defaults;
         saveConfiguration(configuration, m_providerStatus);
-        updateCredentialStatus();
-        updateModels();
     });
     connect(m_model, &QComboBox::currentIndexChanged, this, [this](int) {
         if (m_populating || !m_runtime)
@@ -293,40 +298,36 @@ void AiSettingsPage::buildHome() {
         auto configuration = m_runtime->configuration();
         setEffort(configuration.defaults, m_thinking->currentData().toString());
         saveConfiguration(configuration, m_providerStatus);
-        if (!configuration.translationUsesDefaults)
-            populate();
     });
     connect(m_saveKey, &QPushButton::clicked, this, [this] {
-        if (!m_runtime) return;
+        if (!m_runtime || !m_runtime->credentials()) return;
         const auto providerId = m_provider->currentData().toString();
-        auto secret = m_keyInput->text().trimmed();
-        if (providerId.isEmpty()) {
-            m_credentialStatus->setText("请先选择供应商");
-            return;
-        }
-        if (secret.isEmpty()) {
-            m_credentialStatus->setText("请输入 API Key");
-            return;
-        }
         QString error;
+        auto secret = normalizedApiKey(m_keyInput->text(), &error);
+        m_keyInput->clear();
+        if (providerId.isEmpty() || secret.isEmpty()) {
+            secret.fill(QChar());
+            m_credentialStatus->setText(providerId.isEmpty() ? QStringLiteral("请先选择供应商") : error);
+            return;
+        }
+        cancelRefresh();
         const bool stored = m_runtime->credentials()->store(providerId, secret, &error);
         secret.fill(QChar());
-        m_keyInput->clear();
         if (!stored) {
             m_credentialStatus->setText(error.isEmpty() ? "保存凭据失败" : error);
             return;
         }
-        m_credentialStatus->setText("已安全保存（完整 Key 不会显示）");
         updateCredentialStatus();
     });
     connect(m_deleteKey, &QPushButton::clicked, this, [this] {
-        if (!m_runtime) return;
+        if (!m_runtime || !m_runtime->credentials()) return;
         const auto providerId = m_provider->currentData().toString();
         if (providerId.isEmpty()) {
             m_credentialStatus->setText("请先选择供应商");
             return;
         }
         QString error;
+        cancelRefresh();
         if (!m_runtime->credentials()->remove(providerId, &error)) {
             m_credentialStatus->setText(error.isEmpty() ? "删除凭据失败" : error);
             return;
@@ -416,7 +417,6 @@ void AiSettingsPage::buildTranslation() {
         if (!useDefaults && configuration.translationOverride.providerId.isEmpty())
             configuration.translationOverride = configuration.defaults;
         saveConfiguration(configuration, m_translationStatus);
-        populate();
     });
     connect(m_translationProvider, &QComboBox::currentIndexChanged, this, [this](int) {
         if (m_populating || !m_runtime)
@@ -426,7 +426,6 @@ void AiSettingsPage::buildTranslation() {
         if (configuration.translationOverride.providerId == DeepSeekProviderId && configuration.translationOverride.modelId.isEmpty())
             configuration.translationOverride.modelId = "deepseek-flash";
         saveConfiguration(configuration, m_translationStatus);
-        updateModels();
     });
     connect(m_translationModel, &QComboBox::currentIndexChanged, this, [this](int) {
         if (m_populating || !m_runtime)
@@ -455,9 +454,8 @@ void AiSettingsPage::buildTranslation() {
     connect(m_stylePrompt, &QPlainTextEdit::textChanged, this, [this] {
         if (m_populating || !m_runtime)
             return;
-        auto configuration = m_runtime->configuration();
-        configuration.translationStylePrompt = m_stylePrompt->toPlainText();
-        saveConfiguration(configuration, m_translationStatus);
+        m_styleDirty = true;
+        m_styleSaveTimer->start();
     });
     connect(restore, &QPushButton::clicked, this, [this] {
         m_stylePrompt->setPlainText(defaultTranslationStylePrompt());
@@ -467,7 +465,7 @@ void AiSettingsPage::buildTranslation() {
 void AiSettingsPage::populate() {
     if (!m_runtime)
         return;
-    m_populating = true;
+    QScopedValueRollback<bool> populating(m_populating, true);
     const auto &configuration = m_runtime->configuration();
     {
         const QSignalBlocker blocker(m_provider);
@@ -485,14 +483,22 @@ void AiSettingsPage::populate() {
     }
     {
         const QSignalBlocker blocker(m_language);
-        const auto index = m_language->findData(configuration.targetLanguage);
+        while (m_language->count() > 1) m_language->removeItem(1);
+        auto index = m_language->findData(configuration.targetLanguage);
+        if (index < 0 && !configuration.targetLanguage.isEmpty()) {
+            m_language->addItem(QStringLiteral("暂不支持：") + configuration.targetLanguage, configuration.targetLanguage);
+            index = m_language->count() - 1;
+            if (auto *items = qobject_cast<QStandardItemModel *>(m_language->model()))
+                if (auto *item = items->item(index)) item->setEnabled(false);
+            m_translationStatus->setText(QStringLiteral("当前只支持简体中文；请明确选择兼容目标语言。"));
+        }
         m_language->setCurrentIndex(index >= 0 ? index : 0);
     }
     {
         const QSignalBlocker blocker(m_stylePrompt);
-        m_stylePrompt->setPlainText(configuration.translationStylePrompt);
+        if (!m_styleDirty && m_stylePrompt->toPlainText() != configuration.translationStylePrompt)
+            m_stylePrompt->setPlainText(configuration.translationStylePrompt);
     }
-    m_populating = false;
     updateCredentialStatus();
     updateModels();
     const bool overrideEnabled = !configuration.translationUsesDefaults;
@@ -504,16 +510,18 @@ void AiSettingsPage::updateCredentialStatus() {
     const auto providerId = m_provider->currentData().toString();
     const bool selected = !providerId.isEmpty();
     m_keyInput->setEnabled(selected);
-    m_saveKey->setEnabled(selected && !m_keyInput->text().trimmed().isEmpty());
+    m_saveKey->setEnabled(selected && !m_keyInput->text().isEmpty());
     m_deleteKey->setEnabled(selected);
-    m_verify->setEnabled(selected && !m_pendingRefresh);
-    m_refresh->setEnabled(selected && !m_pendingRefresh);
+    m_verify->setEnabled(false);
+    m_refresh->setEnabled(false);
     if (!selected) {
         m_credentialStatus->setText("未选择供应商");
         return;
     }
     QString error;
     const bool exists = m_runtime->hasCredential(providerId, &error);
+    m_verify->setEnabled(exists && error.isEmpty() && !m_pendingRefresh);
+    m_refresh->setEnabled(exists && error.isEmpty() && !m_pendingRefresh);
     if (!error.isEmpty())
         m_credentialStatus->setText(error);
     else
@@ -544,8 +552,10 @@ void AiSettingsPage::updateModels() {
         }
         combo->setCurrentIndex(index >= 0 ? index : 0);
         combo->setEnabled(!providerId.isEmpty());
+        combo->view()->setTextElideMode(Qt::ElideRight);
+        combo->setToolTip(combo->currentData(Qt::ToolTipRole).toString());
     };
-    m_populating = true;
+    QScopedValueRollback<bool> populating(m_populating, true);
     fill(m_model, globalProvider, globalModelId);
     fill(m_translationModel, translation.providerId, translation.modelId);
     updateThinkingOptions(m_thinking, configuration.defaults,
@@ -555,7 +565,6 @@ void AiSettingsPage::updateModels() {
     const bool overrideEnabled = !configuration.translationUsesDefaults;
     m_translationProvider->setEnabled(overrideEnabled);
     m_translationModel->setEnabled(overrideEnabled && !translation.providerId.isEmpty());
-    m_populating = false;
     updateCapabilityText();
     const auto error = m_runtime->validateConfiguration(m_runtime->translationConfiguration());
     if (!error.isEmpty() && m_translationStatus->text().startsWith("模型列表已更新"))
@@ -617,12 +626,29 @@ void AiSettingsPage::updateCapabilityText() {
 }
 
 void AiSettingsPage::saveConfiguration(const AiServiceConfiguration &configuration, QLabel *status) {
+    if (!m_runtime) return;
     QString error;
-    if (!m_runtime->saveConfiguration(configuration, &error))
-        status->setText(error.isEmpty() ? "保存 AI 服务设置失败" : error);
+    if (!m_runtime->saveConfiguration(configuration, &error)) {
+        populate();
+        status->setText(error.isEmpty() ? QStringLiteral("保存 AI 服务设置失败") : error);
+    }
+}
+
+void AiSettingsPage::flushStylePrompt() {
+    if (!m_styleSaveTimer) return;
+    m_styleSaveTimer->stop();
+    if (!m_styleDirty || !m_runtime) return;
+    auto configuration = m_runtime->configuration();
+    configuration.translationStylePrompt = m_stylePrompt->toPlainText();
+    QString error;
+    if (m_runtime->saveConfiguration(configuration, &error))
+        m_styleDirty = false;
+    else
+        m_translationStatus->setText(error.isEmpty() ? QStringLiteral("保存翻译风格失败") : error);
 }
 
 void AiSettingsPage::selectSubpage(bool translation) {
+    if (!translation) flushStylePrompt();
     m_stack->setCurrentWidget(translation ? m_translation : m_home);
     if (translation && m_translationScroll)
         m_translationScroll->verticalScrollBar()->setValue(0);

@@ -364,7 +364,7 @@ bool LyricsLookup::currentAiTranslationSnapshot(QString *error) const{
 }
 void LyricsLookup::clearAiTranslationPreview(){
     const bool shown=m_hasAiPreview;
-    m_hasAiPreview=false;m_aiPreviewSaved=false;m_aiMergedBytes.clear();m_aiTranslations.clear();m_aiPrepared={};
+    m_hasAiPreview=false;m_aiMergedBytes.clear();m_aiTranslations.clear();m_aiPrepared={};
     if(m_aiSaveTranslation)m_aiSaveTranslation->setEnabled(false);
     m_aiTrackId=0;m_aiLyricsPath.clear();m_aiSourceBytes.clear();m_aiSourceDigest.clear();m_aiConfigurationDigest.clear();
     if(shown)updatePreview();
@@ -424,7 +424,7 @@ void LyricsLookup::completeAiTranslation(quint64 taskId,const ai::ChatCompletion
     if(merged.isEmpty()){
         setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译失败：")+mergeError);m_status->setText(QStringLiteral("翻译失败：")+mergeError);return;
     }
-    m_aiTranslations=validation.translations;m_aiMergedBytes=merged;m_hasAiPreview=true;m_aiPreviewSaved=false;
+    m_aiTranslations=validation.translations;m_aiMergedBytes=merged;m_hasAiPreview=true;
     m_aiSaveTranslation->setEnabled(true);setAiTranslationPreview();
     QString usage=QStringLiteral("翻译完成，请核对双栏预览后再保存。费用按 DeepSeek 实际计费；");
     if(result.usage.available)usage+=QStringLiteral("本次 token：输入 %1，输出 %2，总计 %3。")
@@ -435,7 +435,7 @@ void LyricsLookup::completeAiTranslation(quint64 taskId,const ai::ChatCompletion
     setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译完成，等待你预览并保存"));m_status->setText(usage);
 }
 void LyricsLookup::saveAiTranslation(){
-    if(!m_hasAiPreview||m_aiPreviewSaved)return;
+    if(!m_hasAiPreview)return;
     QString snapshotError;
     if(!currentAiTranslationSnapshot(&snapshotError)){
         setRowStatus(rowForTrack(m_aiTrackId),snapshotError);m_status->setText(snapshotError);clearAiTranslationPreview();return;
@@ -444,9 +444,17 @@ void LyricsLookup::saveAiTranslation(){
         const auto error=m_library->lastError().isEmpty()?QStringLiteral("歌词保存失败，原歌词仍保留"):m_library->lastError();
         setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("未保存：")+error);m_status->setText(QStringLiteral("未保存：")+error);return;
     }
-    m_aiPreviewSaved=true;m_aiSaveTranslation->setEnabled(false);m_library->clearLookupCache(m_aiTrackId);remember(m_aiTrackId);
-    const auto message=QStringLiteral("双语歌词已保存，原文与时间戳保持不变。")+(m_aiRuntime&&m_aiRuntime->configuration().targetLanguage==QStringLiteral("zh-CN")?QString():QStringLiteral(" 目标语言：")+m_aiTargetLanguage);
-    setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("已保存 AI 双语歌词"));m_status->setText(message);m_translationProgressLabel->setText(message);setAiTranslationPreview();
+    const auto savedTrackId=m_aiTrackId;
+    const auto savedLanguage=m_aiTargetLanguage;
+    m_library->clearLookupCache(savedTrackId);remember(savedTrackId);
+    const auto message=QStringLiteral("双语歌词已保存，原文与时间戳保持不变。")+
+        (savedLanguage==QStringLiteral("zh-CN")?QString():QStringLiteral(" 目标语言：")+savedLanguage);
+    // An AI preview means an unsaved result. After saving, render the persisted
+    // document through the normal reader rather than keeping stale preview state.
+    clearAiTranslationPreview();
+    setRowStatus(rowForTrack(savedTrackId),QStringLiteral("已保存 AI 双语歌词"));
+    m_status->setText(message);m_translationProgressLabel->setText(message);
+    updatePreview();
 }
 void LyricsLookup::closeEvent(QCloseEvent *event){if(!confirmStopTranslations()){event->ignore();return;}QDialog::closeEvent(event);}
 void LyricsLookup::reject(){if(!confirmStopTranslations())return;stop();QDialog::reject();}
@@ -545,7 +553,7 @@ void LyricsLookup::updateFilter(){
         const bool hideDone=m_incomplete&&m_incomplete->isChecked()&&rowComplete(item);
         // A filter is not a song change. Keep the owner of a pending request or
         // unsaved paid result visible until the user saves, cancels or selects another song.
-        const bool ownsTranslation=id==m_aiTrackId&&(m_aiTaskId||(m_hasAiPreview&&!m_aiPreviewSaved));
+        const bool ownsTranslation=id==m_aiTrackId&&(m_aiTaskId||(m_hasAiPreview));
         item->setHidden(!ownsTranslation&&(hideMissing||hideDone));
         if(item->isHidden()&&item->isSelected())item->setSelected(false);
         if(!item->isHidden())any=true;
@@ -779,13 +787,14 @@ void LyricsLookup::markInstrumental(){
 }
 bool LyricsLookup::productionHost() const {return !m_sources.isEmpty()&&m_sources.first().endpoint.host()=="lrclib.net";}
 void LyricsLookup::translateSelected(){
-    if(m_aiTaskId){m_status->setText(QStringLiteral("当前整首翻译请求仍在进行中。"));return;}
+    if(m_aiTaskId||m_aiConsentPending){m_status->setText(QStringLiteral("当前整首翻译请求仍在进行中。"));return;}
+    QScopedValueRollback<bool> preparing(m_aiConsentPending,true);
     if(m_multi){m_status->setText(QStringLiteral("整首 AI 翻译一次只处理一首歌，请先退出多选并选择一首歌曲。"));return;}
     const int row=m_tracks->currentRow();
     if(row<0||row>=m_ids.size()||!m_tracks->currentItem()||!m_tracks->currentItem()->isSelected()||m_tracks->currentItem()->isHidden()){
         m_status->setText(QStringLiteral("请先选择一首歌曲。"));return;
     }
-    if(m_hasAiPreview&&!m_aiPreviewSaved){
+    if(m_hasAiPreview){
         if(QMessageBox::question(this,QStringLiteral("重新发送整首翻译"),
              QStringLiteral("当前译文预览尚未保存。再次翻译会丢弃当前预览，并发送一次新的整首歌词请求。是否继续？"),
              QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes)return;
@@ -814,6 +823,9 @@ void LyricsLookup::translateSelected(){
     if(!model){m_status->setText(QStringLiteral("所选模型不可用，请在 AI 服务设置中刷新模型列表。"));return;}
     const auto serviceConfiguration=m_aiRuntime->configuration();
     const auto targetLanguage=serviceConfiguration.targetLanguage.trimmed().isEmpty()?QStringLiteral("zh-CN"):serviceConfiguration.targetLanguage.trimmed();
+    if(targetLanguage!=QStringLiteral("zh-CN")){
+        m_status->setText(QStringLiteral("当前只支持简体中文目标语言，请检查 AI 翻译设置；本次未发送请求。"));return;
+    }
     const auto stylePrompt=serviceConfiguration.translationStylePrompt;
     const auto messages=ai::lyrics::chatMessages(track.title,track.artist,targetLanguage,stylePrompt,prepared);
     const auto inputBound=ai::lyrics::inputTokenUpperBound(messages);
@@ -822,6 +834,7 @@ void LyricsLookup::translateSelected(){
     if(contextWindow<=0||outputLimit<=0||inputBound>contextWindow-outputLimit){
         m_status->setText(QStringLiteral("整首歌词与输出上限无法放入所选模型的已确认上下文窗口；本次未发送请求。请手动选择兼容模型或精简歌词后再试。"));return;
     }
+    const auto requestConfigurationDigest=currentAiConfigurationDigest();
     QMessageBox consent(this);consent.setObjectName("lyricsAiCloudConsent");consent.setIcon(QMessageBox::Information);
     consent.setWindowTitle(QStringLiteral("发送整首歌词到 DeepSeek"));
     consent.setText(QStringLiteral("Relaxer 将把歌曲名、歌手、风格提示和整首歌词发送至 DeepSeek 官方服务器处理。\n\n"
@@ -832,13 +845,31 @@ void LyricsLookup::translateSelected(){
     consent.setDefaultButton(qobject_cast<QPushButton *>(decline));consent.exec();
     if(consent.clickedButton()!=send){m_status->setText(QStringLiteral("未发送歌词。"));return;}
 
+    // The modal consent dialog runs a nested event loop. Recheck the snapshot
+    // before charging, not only when the response eventually arrives.
+    const auto current=m_library->track(track.id);
+    if(!m_aiRuntime||m_multi||m_tracks->currentRow()!=row||!m_tracks->currentItem()||
+       !m_tracks->currentItem()->isSelected()||m_tracks->currentItem()->isHidden()||
+       m_ids.value(row)!=track.id||current.hash!=track.hash||current.title!=track.title||
+       current.artist!=track.artist||current.lyrics!=track.lyrics||
+       currentAiConfigurationDigest()!=requestConfigurationDigest){
+        m_status->setText(QStringLiteral("发送前歌曲或 AI 配置已变化；本次未发送请求。"));return;
+    }
+    const auto latest=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));
+    if(!latest.opened||!latest.complete||latest.tooLarge||
+       QCryptographicHash::hash(latest.bytes,QCryptographicHash::Sha256)!=prepared.sourceDigest){
+        m_status->setText(QStringLiteral("发送前歌词已变化；本次未发送请求。"));return;
+    }
+    const auto dispatchError=m_aiRuntime->validateConfiguration(taskConfiguration);
+    if(!dispatchError.isEmpty()){m_status->setText(dispatchError);return;}
+
     ai::ChatCompletionRequest request;request.modelId=taskConfiguration.modelId;request.messages=messages;
     request.thinkingEnabled=taskConfiguration.thinkingEnabled;request.reasoningEffort=taskConfiguration.reasoningEffort;
     request.maxTokens=outputLimit;
     m_aiTrackId=track.id;m_aiTrackSnapshot=track;m_aiLyricsPath=track.lyrics;m_aiSourceBytes=document.file.bytes;
-    m_aiSourceDigest=prepared.sourceDigest;m_aiPrepared=prepared;m_aiTaskConfiguration=taskConfiguration;
-    m_aiTargetLanguage=targetLanguage;m_aiStylePrompt=stylePrompt;m_aiConfigurationDigest=currentAiConfigurationDigest();
-    m_aiTranslations.clear();m_aiMergedBytes.clear();m_aiPreviewSaved=false;m_hasAiPreview=false;
+    m_aiSourceDigest=prepared.sourceDigest;m_aiPrepared=prepared;
+    m_aiTargetLanguage=targetLanguage;m_aiConfigurationDigest=requestConfigurationDigest;
+    m_aiTranslations.clear();m_aiMergedBytes.clear();m_hasAiPreview=false;
     m_aiActiveGeneration=++m_aiGeneration;
     m_aiTaskId=m_aiRuntime->requests()->complete(taskConfiguration.providerId,request);
     if(!m_aiTaskId){m_status->setText(QStringLiteral("AI 请求未能启动。"));return;}

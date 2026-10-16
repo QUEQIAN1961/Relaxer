@@ -52,6 +52,8 @@ class AiSettingsPage final : public QWidget {
     QPlainTextEdit *m_stylePrompt = nullptr;
     QLabel *m_translationStatus = nullptr;
     bool m_populating = false;
+    QTimer *m_styleSaveTimer = nullptr;
+    bool m_styleDirty = false;
     quint64 m_pendingRefresh = 0;
     void buildHome();
     void buildTranslation();
@@ -64,6 +66,7 @@ class AiSettingsPage final : public QWidget {
     void selectSubpage(bool translation);
     void setRequestState(bool running, const QString &message = {});
     void cancelRefresh();
+    void flushStylePrompt();
     void requestModelList(const QString &purpose);
 };
 

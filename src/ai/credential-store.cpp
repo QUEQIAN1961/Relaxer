@@ -42,12 +42,14 @@ QString normalizedApiKey(const QString &secret, QString *error) {
 
 bool WindowsCredentialStore::store(const QString &providerId, const QString &secret, QString *error) {
 #ifdef Q_OS_WIN
-    if (!isKnownProvider(providerId) || secret.trimmed().isEmpty()) {
-        if (error)
-            *error = QStringLiteral("供应商或 API Key 无效");
+    if (!isKnownProvider(providerId)) {
+        if (error) *error = QStringLiteral("供应商无效");
         return false;
     }
-    auto bytes = secret.toUtf8();
+    auto normalized = normalizedApiKey(secret, error);
+    if (normalized.isEmpty()) return false;
+    auto bytes = normalized.toUtf8();
+    normalized.fill(QChar());
     if (bytes.isEmpty() || bytes.size() > CRED_MAX_CREDENTIAL_BLOB_SIZE) {
         SecureZeroMemory(bytes.data(), size_t(bytes.size()));
         if (error)

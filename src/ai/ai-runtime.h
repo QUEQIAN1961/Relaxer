@@ -58,11 +58,13 @@ class AiRuntime final : public QObject {
     CredentialStore *credentials() { return m_credentials; }
     DeepSeekProvider *deepSeekProvider() const { return m_deepSeek; }
     bool hasCredential(const QString &providerId, QString *error = nullptr) const;
-    void acceptModelCatalog(const QString &providerId, const QList<ModelInfo> &models);
+    bool acceptModelCatalog(const QString &providerId, const QList<ModelInfo> &models, QString *error = nullptr);
 
   signals:
     void configurationChanged();
-    void modelsChanged();
+    void modelCatalogFinished(quint64 taskId, const QString &providerId,
+                              const QList<relaxer::ai::ModelInfo> &models,
+                              const relaxer::ai::ProviderError &error);
 
   private:
     SettingsStore m_settings;

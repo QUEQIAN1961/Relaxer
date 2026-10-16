@@ -5,6 +5,8 @@
 #include <QJsonParseError>
 #include <QSet>
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace relaxer::ai {
 namespace {
@@ -49,6 +51,14 @@ QJsonArray toArray(const QStringList &values) {
 }
 } // namespace
 
+qint64 nonNegativeJsonInteger(const QJsonValue &value, bool *valid) {
+    const double number = value.toDouble(-1);
+    const bool ok = value.isDouble() && std::isfinite(number) && number >= 0 &&
+                    number < double(std::numeric_limits<qint64>::max()) && std::floor(number) == number;
+    if (valid) *valid = ok;
+    return ok ? qint64(number) : 0;
+}
+
 ModelCatalogResult parseDeepSeekModelCatalog(const QByteArray &body) {
     ModelCatalogResult result;
     QJsonParseError parseError;
@@ -86,9 +96,9 @@ ModelCatalogResult parseDeepSeekModelCatalog(const QByteArray &body) {
         model.capabilities.inputModalities = strings(capabilities.value("input_modalities"));
         model.capabilities.outputModalities = strings(capabilities.value("output_modalities"));
         if (capabilities.value("context_window").isDouble())
-            model.capabilities.contextWindow = qMax<qint64>(0, qint64(capabilities.value("context_window").toDouble()));
+            model.capabilities.contextWindow = nonNegativeJsonInteger(capabilities.value("context_window"));
         if (capabilities.value("max_output_tokens").isDouble())
-            model.capabilities.maxOutputTokens = qMax<qint64>(0, qint64(capabilities.value("max_output_tokens").toDouble()));
+            model.capabilities.maxOutputTokens = nonNegativeJsonInteger(capabilities.value("max_output_tokens"));
 
         const auto effort = capabilities.value("effort");
         model.capabilities.reasoningMetadataKnown = effort.isObject();
@@ -134,8 +144,8 @@ ModelInfo modelFromJson(const QJsonObject &object) {
     model.capabilities.outputModalities = strings(object.value("outputModalities"));
     model.capabilities.reasoningEfforts = supportedEfforts(object.value("reasoningEfforts"));
     model.capabilities.defaultReasoningEffort = object.value("defaultReasoningEffort").toString();
-    model.capabilities.contextWindow = qMax<qint64>(0, qint64(object.value("contextWindow").toDouble()));
-    model.capabilities.maxOutputTokens = qMax<qint64>(0, qint64(object.value("maxOutputTokens").toDouble()));
+    model.capabilities.contextWindow = nonNegativeJsonInteger(object.value("contextWindow"));
+    model.capabilities.maxOutputTokens = nonNegativeJsonInteger(object.value("maxOutputTokens"));
     model.capabilities.reasoningMetadataKnown = object.value("reasoningMetadataKnown").toBool();
     const auto protocol = object.value("protocol").toObject();
     model.protocol.chatCompletions = protocol.value("chatCompletions").toBool();

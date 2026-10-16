@@ -117,8 +117,18 @@ void AiRuntime::initialize(std::unique_ptr<CredentialStore> credentials, QUrl de
     m_requests = new AiRequestCoordinator(&m_providers, m_credentials, &m_models, this);
     connect(m_requests, &AiRequestCoordinator::modelsFinished, this,
             [this](quint64 taskId, const QString &providerId, const QList<ModelInfo> &models, const ProviderError &error) {
-        if (error.isEmpty() && taskId == m_requests->latestModelTask(providerId))
-            acceptModelCatalog(providerId, models);
+        auto resultError = error;
+        QPointer<AiRuntime> alive(this);
+        if (error.isEmpty()) {
+            if (taskId != m_requests->latestModelTask(providerId)) {
+                resultError = {"superseded", QStringLiteral("模型刷新已被后续请求替代"), 0, true};
+            } else {
+                QString persistenceError;
+                if (!acceptModelCatalog(providerId, models, &persistenceError))
+                    resultError = {"settings", persistenceError};
+            }
+        }
+        if (alive) emit modelCatalogFinished(taskId, providerId, models, resultError);
     });
 }
 
@@ -184,10 +194,15 @@ bool AiRuntime::hasCredential(const QString &providerId, QString *error) const {
     return found;
 }
 
-void AiRuntime::acceptModelCatalog(const QString &providerId, const QList<ModelInfo> &models) {
+bool AiRuntime::acceptModelCatalog(const QString &providerId, const QList<ModelInfo> &models, QString *error) {
+    auto previousModels = m_models;
     m_models.applyLiveCatalog(providerId, models);
-    m_configuration.cachedModels = m_models.models();
-    saveConfiguration(m_configuration);
-    emit modelsChanged();
+    // saveConfiguration updates memory only after SQLite succeeds. Roll the
+    // registry back too, so failed persistence cannot silently diverge.
+    if (!saveConfiguration(m_configuration, error)) {
+        m_models = std::move(previousModels);
+        return false;
+    }
+    return true;
 }
 } // namespace relaxer::ai

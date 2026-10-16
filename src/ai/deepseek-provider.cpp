@@ -8,6 +8,7 @@
 #include <QNetworkRequest>
 #include <QTimer>
 #include <QNetworkProxy>
+#include <utility>
 
 namespace relaxer::ai {
 namespace {
@@ -92,7 +93,7 @@ DeepSeekProvider::DeepSeekProvider(QUrl baseUrl, QObject *parent)
         m_baseUrl.setPath(m_baseUrl.path().left(m_baseUrl.path().size() - 1));
     if (m_baseUrl.path() == "/")
         m_baseUrl.setPath({});
-    if (m_baseUrl.host() == "127.0.0.1" || m_baseUrl.host() == "localhost")
+    if (m_baseUrl.host() == "127.0.0.1" || m_baseUrl.host() == "::1")
         m_network.setProxy(QNetworkProxy::NoProxy);
 }
 
@@ -285,11 +286,11 @@ void DeepSeekProvider::finish(quint64 requestId) {
     TokenUsage tokenUsage;
     if (usage.isObject()) {
         const auto usageObject = usage.toObject();
-        tokenUsage.inputTokens = qMax<qint64>(0, qint64(usageObject.value("prompt_tokens").toDouble()));
-        tokenUsage.outputTokens = qMax<qint64>(0, qint64(usageObject.value("completion_tokens").toDouble()));
-        tokenUsage.totalTokens = qMax<qint64>(0, qint64(usageObject.value("total_tokens").toDouble()));
-        tokenUsage.available = usageObject.contains("prompt_tokens") || usageObject.contains("completion_tokens") ||
-                               usageObject.contains("total_tokens");
+        bool inputValid = false, outputValid = false, totalValid = false;
+        tokenUsage.inputTokens = nonNegativeJsonInteger(usageObject.value("prompt_tokens"), &inputValid);
+        tokenUsage.outputTokens = nonNegativeJsonInteger(usageObject.value("completion_tokens"), &outputValid);
+        tokenUsage.totalTokens = nonNegativeJsonInteger(usageObject.value("total_tokens"), &totalValid);
+        tokenUsage.available = inputValid && outputValid && totalValid;
     }
     ChatCompletionResult result;
     result.content = message.toObject().value("content").toString();

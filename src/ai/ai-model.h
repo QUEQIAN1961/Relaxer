@@ -61,6 +61,8 @@ class ModelRegistry final {
 QString validateModelSelection(const ModelInfo *model, const QString &providerId, const QString &modelId,
                                bool thinkingEnabled, const QString &effort);
 
+qint64 nonNegativeJsonInteger(const QJsonValue &value, bool *valid = nullptr);
+
 ModelCatalogResult parseDeepSeekModelCatalog(const QByteArray &body);
 QJsonObject modelToJson(const ModelInfo &model);
 ModelInfo modelFromJson(const QJsonObject &object);

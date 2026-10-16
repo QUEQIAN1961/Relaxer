@@ -9,6 +9,7 @@
 #include <QSet>
 #include <QStringDecoder>
 #include <cmath>
+#include <algorithm>
 
 namespace relaxer::ai::lyrics {
 namespace {
@@ -50,7 +51,10 @@ qint64 timestampMilliseconds(const QString &token) {
 bool metadataLine(const QString &line) {
     static const QRegularExpression metadata(
         R"(^\s*\[(?:ar|al|ti|by|re|ve|length|offset):)" , QRegularExpression::CaseInsensitiveOption);
-    return metadata.match(line).hasMatch();
+    // Match the unchanged Lyrics parser: an offset tag anywhere discards that
+    // source row, including a timed row containing an inline offset.
+    static const QRegularExpression offset(R"(\[offset:([+-]?\d+)\])", QRegularExpression::CaseInsensitiveOption);
+    return metadata.match(line).hasMatch() || offset.match(line).hasMatch();
 }
 
 int hanCount(const QString &text) {
@@ -105,11 +109,21 @@ bool looksLikeExistingBilingual(const QVector<SourceLine> &lines, bool timed) {
 QString singleLineError(const QString &text) {
     if (text.trimmed().isEmpty())
         return QStringLiteral("模型返回了空译文");
-    if (text.contains('\n') || text.contains('\r'))
+    const bool lineBreak = std::any_of(text.cbegin(), text.cend(), [](QChar c) {
+        return c == '\n' || c == '\r' || c == QChar(0x0085) ||
+               c == QChar(0x2028) || c == QChar(0x2029) || c == QChar(0x000b) || c == QChar(0x000c);
+    });
+    if (lineBreak)
         return QStringLiteral("每个歌词 ID 必须对应单行译文");
-    static const QRegularExpression timestampPrefix(R"(^\s*\[\d+:\d{1,2}(?:[.:]\d{1,3})?\])");
-    if (timestampPrefix.match(text).hasMatch())
+    static const QRegularExpression timestamp(R"(\[\d+:\d{1,2}(?:[.:]\d{1,3})?\])");
+    if (timestamp.match(text).hasMatch())
         return QStringLiteral("模型返回内容中包含意外时间戳");
+    // The player reads offset tags anywhere and skips metadata rows. Model text
+    // must not acquire document-control semantics when merged into an LRC.
+    static const QRegularExpression metadata(
+        R"(\[(?:ar|al|ti|by|re|ve|length|offset):)", QRegularExpression::CaseInsensitiveOption);
+    if (metadata.match(text).hasMatch())
+        return QStringLiteral("模型返回内容中包含意外歌词元数据");
     return {};
 }
 } // namespace
@@ -130,6 +144,7 @@ PreparedLyrics prepare(const QByteArray &source) {
     static const QRegularExpression timedRow(R"(^\s*((?:\[\d+:\d{1,2}(?:[.:]\d{1,3})?\])+)(.*)$)");
     for (int row = 0; row < rows.size(); ++row) {
         const auto raw = rows.at(row);
+        if (metadataLine(raw)) continue;
         const auto match = timedRow.match(raw);
         if (result.timed) {
             if (!match.hasMatch())
@@ -247,13 +262,13 @@ ValidationResult validateResponse(const QString &content, const PreparedLyrics &
             result.error = QStringLiteral("模型重复返回了歌词 ID");
             return result;
         }
-        const auto translated = object.value("text").toString().trimmed();
+        const auto translated = object.value("text").toString();
         const auto textError = singleLineError(translated);
         if (!textError.isEmpty()) {
             result.error = textError;
             return result;
         }
-        byId.insert(id, translated);
+        byId.insert(id, translated.trimmed());
     }
     result.translations.reserve(lyrics.lines.size());
     for (const auto &line : lyrics.lines) {
@@ -299,8 +314,9 @@ QByteArray merge(const QByteArray &source, const PreparedLyrics &lyrics, const Q
     }
 
     QStringList output;
-    if (!lyrics.timed)
-        output.append(QStringLiteral("[re:relaxer-bilingual]"));
+    // Existing parser metadata, also for timed lyrics: future retranslation
+    // does not need to infer the translation language from its script.
+    output.append(QStringLiteral("[re:relaxer-bilingual]"));
     for (int row = 0; row < sourceRows.size(); ++row) {
         output.append(sourceRows.at(row));
         const auto translated = translationsByRow.value(row);

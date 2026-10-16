@@ -4,6 +4,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
@@ -12,6 +13,11 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QDir>
+#include <QFileInfo>
+#include <QAbstractItemView>
 
 using namespace relaxer;
 using namespace relaxer::ai;
@@ -162,6 +168,44 @@ class AiSettingsWidgetsTests final : public QObject {
         QCOMPARE(runtime.model("deepseek", "text-only-unknown")->availability, ModelAvailability::Unavailable);
     }
 
+    void modelActionsRequireStoredCredential() {
+        QTemporaryDir directory;
+        Library library(directory.filePath("library"));
+        QVERIFY(library.open());
+        AiRuntime runtime(&library, std::make_unique<MemoryCredentials>());
+        AiSettingsPage page(&runtime);
+        page.findChild<QComboBox *>("aiProviderSelection")->setCurrentIndex(1);
+        QVERIFY(!page.findChild<QPushButton *>("aiProviderVerify")->isEnabled());
+        QVERIFY(!page.findChild<QPushButton *>("aiModelRefresh")->isEnabled());
+    }
+
+    void stylePromptEditsAreCoalesced() {
+        QTemporaryDir directory;
+        Library library(directory.filePath("library"));
+        QVERIFY(library.open());
+        AiRuntime runtime(&library, std::make_unique<MemoryCredentials>());
+        AiSettingsPage page(&runtime);
+        auto *style = page.findChild<QPlainTextEdit *>("aiTranslationStylePrompt");
+        QSignalSpy changed(&runtime, &AiRuntime::configurationChanged);
+        style->setPlainText("draft one");
+        style->setPlainText("draft two");
+        style->setPlainText("final draft");
+        QCOMPARE(changed.size(), 0);
+        QTRY_COMPARE_WITH_TIMEOUT(changed.size(), 1, 1000);
+        QCOMPARE(runtime.configuration().translationStylePrompt, QString("final draft"));
+        style->setPlainText("pending while another setting changes");
+        auto config = runtime.configuration();
+        config.defaults.providerId = "deepseek";
+        QVERIFY(runtime.saveConfiguration(config));
+        QCOMPARE(style->toPlainText(), QString("pending while another setting changes"));
+        QTRY_COMPARE(runtime.configuration().translationStylePrompt, style->toPlainText());
+        QCOMPARE(runtime.configuration().defaults.providerId, QString("deepseek"));
+        page.show();
+        style->setPlainText("flush on page exit");
+        page.hide();
+        QCOMPARE(runtime.configuration().translationStylePrompt, QString("flush on page exit"));
+    }
+
     void translationThinkingEnableStateCombinesAllPrerequisites() {
         QTemporaryDir directory;
         Library library(directory.filePath("library"));
@@ -245,6 +289,94 @@ class AiSettingsWidgetsTests final : public QObject {
         page.findChild<QComboBox *>("aiProviderSelection")->setCurrentIndex(1);
         page.findChild<QLineEdit *>("aiCredentialInput")->setText("fake-after-destruction");
         page.hide();
+    }
+
+    void catalogPersistenceFailureIsShownToTheUser() {
+        QTemporaryDir directory;
+        Library library(directory.filePath("library"));
+        QVERIFY(library.open());
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, &server, [&] {
+            auto *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, &server, [socket] {
+                auto buffer = socket->property("buffer").toByteArray() + socket->readAll();
+                socket->setProperty("buffer", buffer);
+                if (!buffer.contains("\r\n\r\n") || socket->property("sent").toBool()) return;
+                socket->setProperty("sent", true);
+                const QByteArray body = R"({"object":"list","data":[{"id":"deepseek-v4-pro","name":"Pro"}]})";
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                              QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+                socket->disconnectFromHost();
+            });
+        });
+        const QUrl url(QString("http://127.0.0.1:%1").arg(server.serverPort()));
+        AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{url}, std::make_unique<MemoryCredentials>());
+        QVERIFY(runtime.credentials()->store("deepseek", "fake-persistence-key", nullptr));
+        QVERIFY(runtime.acceptModelCatalog("deepseek", {liveModel("deepseek-flash", "Flash")}));
+        auto config = runtime.configuration();
+        config.defaults = {"deepseek", "deepseek-flash", false, {}};
+        QVERIFY(runtime.saveConfiguration(config));
+        const auto saved = library.setting("aiServiceConfigV1");
+        AiSettingsPage page(&runtime);
+        page.show();
+        QSqlDatabase database;
+        for (const auto &name : QSqlDatabase::connectionNames()) {
+            auto candidate = QSqlDatabase::database(name);
+            if (QFileInfo(candidate.databaseName()).absoluteFilePath() ==
+                QFileInfo(library.absolute("relaxer.sqlite")).absoluteFilePath()) database = candidate;
+        }
+        QVERIFY(database.isValid());
+        QSqlQuery query(database);
+        QVERIFY(query.exec("PRAGMA query_only = ON"));
+        auto *refresh = page.findChild<QPushButton *>("aiModelRefresh");
+        refresh->click();
+        QTRY_VERIFY(page.findChild<QLabel *>("aiProviderStatus")->text().contains(QStringLiteral("无法保存")));
+        QVERIFY(refresh->isEnabled());
+        QVERIFY(!runtime.model("deepseek", "deepseek-v4-pro"));
+        QCOMPARE(runtime.model("deepseek", "deepseek-flash")->availability, ModelAvailability::Available);
+        QCOMPARE(library.setting("aiServiceConfigV1"), saved);
+        QVERIFY(query.exec("PRAGMA query_only = OFF"));
+    }
+
+    void aiPagesRenderWithLongNamesAndThemes() {
+        QTemporaryDir directory;
+        Library library(directory.filePath("library"));
+        QVERIFY(library.open());
+        AiRuntime runtime(&library, std::make_unique<MemoryCredentials>());
+        QVERIFY(runtime.credentials()->store("deepseek", "fake-render-key", nullptr));
+        const auto name = QStringLiteral("DeepSeek Flash 长模型名称 / ") + QString(100, QLatin1Char('W'));
+        QVERIFY(runtime.acceptModelCatalog("deepseek", {liveModel("deepseek-flash", name)}));
+        auto config = runtime.configuration();
+        config.defaults = {"deepseek", "deepseek-flash", false, {}};
+        config.translationOverride = config.defaults;
+        config.translationUsesDefaults = false;
+        QVERIFY(runtime.saveConfiguration(config));
+        AiSettingsPage page(&runtime);
+        page.resize(740, 620);
+        page.show();
+        auto *model = page.findChild<QComboBox *>("aiDefaultModel");
+        QCOMPARE(model->view()->textElideMode(), Qt::ElideRight);
+        QVERIFY(model->toolTip().contains(name));
+        const auto evidence = qEnvironmentVariable("RELAXER_AI_SCREENSHOT_DIR");
+        if (!evidence.isEmpty()) QVERIFY(QDir().mkpath(evidence));
+        for (const bool dark : {false, true}) {
+            QPalette palette = page.palette();
+            palette.setColor(QPalette::Window, dark ? QColor("#202124") : QColor("#f4f5f7"));
+            palette.setColor(QPalette::Base, dark ? QColor("#292a2d") : QColor("#ffffff"));
+            palette.setColor(QPalette::WindowText, dark ? Qt::white : Qt::black);
+            palette.setColor(QPalette::Text, dark ? Qt::white : Qt::black);
+            page.setPalette(palette);
+            page.setAutoFillBackground(true);
+            for (const auto &subpage : {QString("home"), QString("translation")}) {
+                page.setSubpageForTest(subpage);
+                QCoreApplication::processEvents();
+                const auto image = page.grab();
+                QVERIFY(!image.isNull());
+                if (!evidence.isEmpty())
+                    QVERIFY(image.save(QDir(evidence).filePath(subpage + (dark ? "-dark.png" : "-light.png"))));
+            }
+        }
     }
 
     void settingsNavigationAndNarrowScrollableLayoutWork() {

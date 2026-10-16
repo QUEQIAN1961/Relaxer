@@ -15,6 +15,8 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QStringEncoder>
+#include "lyrics.h"
 #include <QtTest>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -234,6 +236,14 @@ class AiLyricsTranslationTests final : public QObject {
     void filtersPreservePendingAndUnsavedTranslation();
     void httpRedirectCannotReachPreviewOrSave();
     void explicitCancelAndLateResultCannotWriteLyrics();
+    void embeddedTimestampsAndUnicodeLineBreaksAreRejected();
+    void consentReentrancyStillSendsOneRequest();
+    void consentRechecksSnapshotBeforeDispatch_data();
+    void consentRechecksSnapshotBeforeDispatch();
+    void encodedLyricsNormalizeWithoutChangingTextOrTiming_data();
+    void encodedLyricsNormalizeWithoutChangingTextOrTiming();
+    void inlineOffsetsAndBilingualMarkersMatchTheExistingParser();
+    void unsupportedLanguageDoesNotSendRequest();
 };
 
 void AiLyricsTranslationTests::preparePreservesRepeatedTimestampRowsAndRejectsExistingBilingualLyrics() {
@@ -249,7 +259,7 @@ void AiLyricsTranslationTests::preparePreservesRepeatedTimestampRowsAndRejectsEx
     QCOMPARE(prepared.lines[1].text, QStringLiteral("Second line"));
 
     const auto merged = lyrics::merge(source, prepared, {QStringLiteral("第一句"), QStringLiteral("第二句"), QStringLiteral("第三句")});
-    QCOMPARE(QString::fromUtf8(merged), QStringLiteral("[00:00.00]First line\n[00:00.00]第一句\n"
+    QCOMPARE(QString::fromUtf8(merged), QStringLiteral("[re:relaxer-bilingual]\n[00:00.00]First line\n[00:00.00]第一句\n"
                                                         "[00:00.00]Second line\n[00:00.00]第二句\n"
                                                         "[00:02.50]Third line\n[00:02.50]第三句"));
     QVERIFY(QString::fromUtf8(merged).contains(QStringLiteral("[00:00.00]First line")));
@@ -372,11 +382,17 @@ void AiLyricsTranslationTests::wholeSongRequestPreviewsWithoutSavingThenSavesOnC
     dialog.findChild<QPushButton *>(QStringLiteral("lyricsSaveTranslation"))->click();
     QByteArray saved;
     QVERIFY(readFile(library.absolute(library.track(track.id).lyrics), &saved));
-    QCOMPARE(QString::fromUtf8(saved), QStringLiteral("[00:00.00]First line\n[00:00.00]第一句\n"
+    QCOMPARE(QString::fromUtf8(saved), QStringLiteral("[re:relaxer-bilingual]\n[00:00.00]First line\n[00:00.00]第一句\n"
                                                        "[00:00.00]Second line\n[00:00.00]第二句\n"
                                                        "[00:02.50]Third line\n[00:02.50]第三句"));
     QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lyricsTranslationProgressLabel"))->text().contains(QStringLiteral("已保存")));
     QVERIFY(!dialog.findChild<QPushButton *>(QStringLiteral("lyricsSaveTranslation"))->isEnabled());
+    dialog.findChild<QPushButton *>("lyricsTranslate")->click();
+    QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("已有双语")));
+    QCOMPARE(server.requestCount(), 1);
+    QByteArray afterSecondAttempt;
+    QVERIFY(readFile(library.absolute(library.track(track.id).lyrics), &afterSecondAttempt));
+    QCOMPARE(afterSecondAttempt, saved);
 }
 
 void AiLyricsTranslationTests::invalidJsonDoesNotRetryOrFallBackAndManualRetryIsOneNewRequest() {
@@ -772,6 +788,181 @@ void AiLyricsTranslationTests::explicitCancelAndLateResultCannotWriteLyrics() {
     QVERIFY(readFile(library.absolute(library.track(track.id).lyrics), &bytes));
     QCOMPARE(bytes, original);
     QCOMPARE(server.requestCount(), 1);
+}
+
+
+void AiLyricsTranslationTests::embeddedTimestampsAndUnicodeLineBreaksAreRejected() {
+    const QByteArray source = "[00:01.00]Source";
+    const auto prepared = lyrics::prepare(source);
+    QVERIFY(prepared.ok());
+    const QStringList invalid{QStringLiteral("text [99:59.00] extra"),
+        QStringLiteral("text [offset:+500] extra"), QStringLiteral("[ar:Injected metadata]"),
+        QStringLiteral("text") + QChar(0x2028) + "extra",
+        QStringLiteral("text") + QChar(0x2029),
+        QStringLiteral("text") + QChar(0x0085) + "extra",
+        QStringLiteral("text\n"), QStringLiteral("\rtext")};
+    for (const auto &text : invalid) {
+        const auto response = QString::fromUtf8(translationJson({{0, text}}));
+        QVERIFY2(!lyrics::validateResponse(response, prepared).ok(),
+                 "A response could inject timestamps or line breaks into the saved document");
+        QVERIFY(lyrics::merge(source, prepared, {text}).isEmpty());
+    }
+}
+
+void AiLyricsTranslationTests::consentReentrancyStillSendsOneRequest() {
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    const auto track = seed(library, "Reentrant consent", "consent-repeat");
+    QVERIFY(library.saveLyrics(track.id, "[00:01.00]Source"));
+    TranslationHttpMock server;
+    QVERIFY(server.listen());
+    server.setHold(true);
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("译文")}}))));
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("重复请求译文")}}))));
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library, {track.id}, nullptr, QUrl("http://127.0.0.1:9/api"), {}, true, &runtime);
+    dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    auto *translate = dialog.findChild<QPushButton *>("lyricsTranslate");
+    QTimer::singleShot(0, &dialog, [&] {
+        auto *firstConsent = QApplication::activeModalWidget();
+        QVERIFY(firstConsent && firstConsent->objectName() == "lyricsAiCloudConsent");
+        QPointer<QPushButton> firstSend = firstConsent->findChild<QPushButton *>("lyricsAiConsentSend");
+        QTimer::singleShot(0, &dialog, [] {
+            auto *modal = QApplication::activeModalWidget();
+            if (modal && modal->objectName() == "lyricsAiCloudConsent")
+                modal->findChild<QPushButton *>("lyricsAiConsentSend")->click();
+        });
+        translate->click(); // nested activation during the first modal event loop
+        if (firstSend) firstSend->click();
+    });
+    translate->click();
+    QTRY_VERIFY(server.requestCount() >= 1);
+    QTest::qWait(40);
+    QCOMPARE(server.requestCount(), 1);
+    dialog.findChild<QPushButton *>("lyricsCancelTranslation")->click();
+}
+
+void AiLyricsTranslationTests::consentRechecksSnapshotBeforeDispatch_data() {
+    QTest::addColumn<QString>("mutation");
+    QTest::newRow("lyrics") << QString("lyrics");
+    QTest::newRow("configuration") << QString("configuration");
+    QTest::newRow("selection") << QString("selection");
+}
+
+void AiLyricsTranslationTests::consentRechecksSnapshotBeforeDispatch() {
+    QFETCH(QString, mutation);
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    const auto track = seed(library, "Consent snapshot", "consent-snapshot");
+    const auto other = seed(library, "Other", "consent-other");
+    QVERIFY(library.saveLyrics(track.id, "[00:01.00]Source"));
+    QVERIFY(library.saveLyrics(other.id, "[00:01.00]Other source"));
+    TranslationHttpMock server;
+    QVERIFY(server.listen());
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("旧快照译文")}}))));
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library, {track.id, other.id}, nullptr, QUrl("http://127.0.0.1:9/api"), {}, true, &runtime);
+    dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    auto *tracks = dialog.findChild<QListWidget *>("lyricsTracks");
+    tracks->setCurrentRow(0);
+    QTimer::singleShot(0, &dialog, [&] {
+        auto *modal = QApplication::activeModalWidget();
+        QVERIFY(modal && modal->objectName() == "lyricsAiCloudConsent");
+        if (mutation == "lyrics") {
+            QFile file(library.absolute(library.track(track.id).lyrics));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("[00:01.00]Edited source");
+        } else if (mutation == "configuration") {
+            auto config = runtime.configuration();
+            config.defaults.thinkingEnabled = true;
+            config.defaults.reasoningEffort = "high";
+            QVERIFY(runtime.saveConfiguration(config));
+        } else {
+            tracks->setCurrentRow(1);
+        }
+        modal->findChild<QPushButton *>("lyricsAiConsentSend")->click();
+    });
+    dialog.findChild<QPushButton *>("lyricsTranslate")->click();
+    QTest::qWait(80);
+    QCOMPARE(server.requestCount(), 0);
+    QVERIFY(!dialog.findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
+}
+
+
+void AiLyricsTranslationTests::encodedLyricsNormalizeWithoutChangingTextOrTiming_data() {
+    QTest::addColumn<QByteArray>("source");
+    const QString text = QStringLiteral("[00:01.00]Café line\n[00:02.00]Second line");
+    QTest::newRow("utf8") << text.toUtf8();
+    QTest::newRow("utf8-bom") << (QByteArray::fromHex("efbbbf") + text.toUtf8());
+    QTest::newRow("crlf") << QString(text).replace("\n", "\r\n").toUtf8();
+    QStringEncoder little(QStringConverter::Utf16LE), big(QStringConverter::Utf16BE);
+    QTest::newRow("utf16le") << (QByteArray::fromHex("fffe") + little(text));
+    QTest::newRow("utf16be") << (QByteArray::fromHex("feff") + big(text));
+}
+
+void AiLyricsTranslationTests::encodedLyricsNormalizeWithoutChangingTextOrTiming() {
+    QFETCH(QByteArray, source);
+    const auto prepared = lyrics::prepare(source);
+    QVERIFY2(prepared.ok(), qPrintable(prepared.error));
+    QCOMPARE(prepared.lines.size(), 2);
+    QCOMPARE(prepared.lines.first().text, QStringLiteral("Café line"));
+    const auto merged = lyrics::merge(source, prepared, {QStringLiteral("第一句"), QStringLiteral("第二句")});
+    QVERIFY(merged.startsWith("[re:relaxer-bilingual]\n"));
+    QVERIFY(!merged.contains('\r'));
+    const auto parsed = Lyrics::parse(merged);
+    QCOMPARE(parsed.lines.size(), 4);
+    QCOMPARE(parsed.lines[0].text, prepared.lines[0].text);
+    QCOMPARE(parsed.lines[0].time, qint64(1000));
+    QCOMPARE(parsed.lines[1].time, qint64(1000));
+    QCOMPARE(parsed.lines[2].text, prepared.lines[1].text);
+    QCOMPARE(parsed.lines[2].time, qint64(2000));
+    QCOMPARE(parsed.lines[3].time, qint64(2000));
+    QVERIFY(lyrics::prepare(merged).bilingual);
+}
+
+void AiLyricsTranslationTests::inlineOffsetsAndBilingualMarkersMatchTheExistingParser() {
+    const QByteArray source = "[00:01.00]Ignored [offset:+500]\n[00:02.00]Valid source";
+    const auto prepared = lyrics::prepare(source);
+    QVERIFY(prepared.ok());
+    QCOMPARE(prepared.lines.size(), 1);
+    QCOMPARE(prepared.lines.first().text, QString("Valid source"));
+    const auto merged = lyrics::merge(source, prepared, {"Unchanged proper name"});
+    const auto parsed = Lyrics::parse(merged);
+    QCOMPARE(parsed.lines.size(), 2);
+    QCOMPARE(parsed.lines.first().time, qint64(2500));
+    QCOMPARE(parsed.lines.last().time, qint64(2500));
+    QCOMPARE(parsed.lines.last().text, QString("Unchanged proper name"));
+    QVERIFY(lyrics::prepare(merged).bilingual); // no Han-script heuristic required
+}
+
+
+void AiLyricsTranslationTests::unsupportedLanguageDoesNotSendRequest() {
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    const auto track = seed(library, "Language", "unsupported-language");
+    QVERIFY(library.saveLyrics(track.id, "[00:01.00]Source"));
+    TranslationHttpMock server;
+    QVERIFY(server.listen());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    auto config = runtime.configuration();
+    config.targetLanguage = "ja";
+    QVERIFY(runtime.saveConfiguration(config)); // preserve unknown setting, refuse at feature boundary
+    LyricsLookup dialog(&library, {track.id}, nullptr, QUrl("http://127.0.0.1:9/api"), {}, true, &runtime);
+    dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    dialog.findChild<QPushButton *>("lyricsTranslate")->click();
+    QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("只支持简体中文")));
+    QCOMPARE(server.requestCount(), 0);
 }
 
 QTEST_MAIN(AiLyricsTranslationTests)

@@ -55,9 +55,12 @@ void AiRequestCoordinator::watch(AiProvider *provider) {
     connect(provider, &QObject::destroyed, this, [this, provider, generation] {
         m_watched.remove(provider);
         const auto ids = m_pending.keys();
-        for (auto id : ids)
+        QPointer<AiRequestCoordinator> alive(this);
+        for (auto id : ids) {
             if (m_pending.value(id).providerGeneration == generation)
                 finishError(id, {"provider_unavailable", QStringLiteral("AI 供应商已关闭")});
+            if (!alive) return;
+        }
     });
 }
 

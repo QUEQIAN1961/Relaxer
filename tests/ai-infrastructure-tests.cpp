@@ -7,6 +7,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -31,6 +33,8 @@ class AiInfrastructureTests final : public QObject {
     void cancellationTimeoutAndLateProviderRegistrationAreTerminal();
     void newestModelRequestOwnsCatalogPersistence();
     void networkFailureAndProviderTimeoutAreTerminal();
+    void catalogPersistenceFailureKeepsPreviousState();
+    void apiKeysAndNumericMetadataAreValidated();
 
 };
 
@@ -636,6 +640,75 @@ void AiInfrastructureTests::networkFailureAndProviderTimeoutAreTerminal() {
     QTRY_COMPARE_WITH_TIMEOUT(offlineFinished.size(), 1, 8000);
     QCOMPARE(qvariant_cast<ProviderError>(offlineFinished[0][3]).code, QString("network"));
     QVERIFY(!offlineRequests.isPending(offlineTask));
+}
+
+
+void AiInfrastructureTests::catalogPersistenceFailureKeepsPreviousState() {
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    AiRuntime runtime(&library, std::make_unique<FakeCredentials>());
+    runtime.acceptModelCatalog("deepseek", {model()});
+    const auto persisted = library.setting("aiServiceConfigV1");
+    QSqlDatabase database;
+    for (const auto &name : QSqlDatabase::connectionNames()) {
+        auto candidate = QSqlDatabase::database(name);
+        if (QFileInfo(candidate.databaseName()).absoluteFilePath() ==
+            QFileInfo(library.absolute("relaxer.sqlite")).absoluteFilePath()) database = candidate;
+    }
+    QVERIFY(database.isValid());
+    QSqlQuery query(database);
+    QVERIFY(query.exec("PRAGMA query_only = ON"));
+    runtime.acceptModelCatalog("deepseek", {model("deepseek-v4-pro")});
+    QVERIFY2(!runtime.model("deepseek", "deepseek-v4-pro"), "Failed persistence changed the live model registry");
+    QCOMPARE(runtime.model("deepseek", "deepseek-flash")->availability, ModelAvailability::Available);
+    QCOMPARE(library.setting("aiServiceConfigV1"), persisted);
+    QVERIFY(query.exec("PRAGMA query_only = OFF"));
+}
+
+
+void AiInfrastructureTests::apiKeysAndNumericMetadataAreValidated() {
+    QString error;
+    QCOMPARE(normalizedApiKey(" fake-key ", &error), QString("fake-key"));
+    QVERIFY(error.isEmpty());
+    for (const auto &key : {QString(), QString("   "), QString("fake key"), QString("fake\r\nkey"),
+                           QString("fake\tkey"), QString("fake") + QChar(0), QString("fake") + QChar(0x2028)}) {
+        QVERIFY(normalizedApiKey(key, &error).isEmpty());
+        QVERIFY(!error.isEmpty());
+        QVERIFY(!error.contains("fake"));
+    }
+    const auto malformed = parseDeepSeekModelCatalog(
+        R"({"object":"list","data":[{"id":"deepseek-flash","context_window":1e300,"max_output_tokens":1.5}]})");
+    QVERIFY(malformed.ok);
+    QCOMPARE(malformed.models.first().capabilities.contextWindow, qint64(0));
+    QCOMPARE(malformed.models.first().capabilities.maxOutputTokens, qint64(0));
+    bool valid = true;
+    QCOMPARE(nonNegativeJsonInteger(QJsonValue(1e300), &valid), qint64(0));
+    QVERIFY(!valid);
+    QCOMPARE(nonNegativeJsonInteger(QJsonValue(42), &valid), qint64(42));
+    QVERIFY(valid);
+    HttpMock server;
+    QVERIFY(server.listen());
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentials>());
+    QVERIFY(runtime.credentials()->store("deepseek", "fake-numeric-key", nullptr));
+    QVERIFY(runtime.acceptModelCatalog("deepseek", {model()}));
+    QSignalSpy finished(runtime.requests(), &AiRequestCoordinator::completionFinished);
+    const QList<QByteArray> usages{R"({"prompt_tokens":"secret","completion_tokens":1,"total_tokens":1})",
+        R"({"prompt_tokens":1.5,"completion_tokens":1,"total_tokens":2})",
+        R"({"prompt_tokens":1e300,"completion_tokens":1,"total_tokens":1e300})"};
+    for (const auto &usage : usages) {
+        server.enqueue(200, R"({"choices":[{"finish_reason":"stop","message":{"content":"{}"}}],"usage":)" + usage + "}");
+        ChatCompletionRequest request{"deepseek-flash", QJsonArray{QJsonObject{{"role","user"},{"content","json"}}}, false, {}, 1024};
+        runtime.requests()->complete("deepseek", request);
+        QTRY_COMPARE(finished.size(), 1);
+        const auto result = qvariant_cast<ChatCompletionResult>(finished[0][2]);
+        QVERIFY(result.ok());
+        QVERIFY(!result.usage.available);
+        finished.clear();
+    }
 }
 
 QTEST_GUILESS_MAIN(AiInfrastructureTests)
