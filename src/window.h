@@ -1,4 +1,6 @@
 #pragma once
+#include "ai/ai-settings-page.h"
+#include "ai/ai-runtime.h"
 #include "appearance.h"
 #include "motion.h"
 #include "nextqueue.h"
@@ -94,6 +96,7 @@ class Window : public QMainWindow {
     IconButton *m_playbackToggle=nullptr;
     void updateVolumePosition(bool animate=false);
     void updatePlaybackToggle();
+    void openAiSettings();
     void closeNowPlaying();
     void setPlayerPage(bool expanded,int page);
     PageMotion *m_motion=nullptr;
@@ -115,6 +118,8 @@ class Window : public QMainWindow {
     QColor m_accent = QColor("#e5455f"), m_ink = QColor("#25252b"), m_sideInk = QColor("#25252b");
     QJsonObject m_appearancePreview,m_currentAppearance;
     QPointer<AppearancePage> m_appearancePage;
+    QPointer<ai::AiSettingsPage> m_aiPage;
+    ai::AiRuntime *m_aiRuntime = nullptr;
     TitleBar *m_topBar=nullptr;
     bool m_frameInitialized=false,m_maximumPressed=false;
     QWidget *m_libraryActions;

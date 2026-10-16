@@ -74,6 +74,7 @@ static QPushButton *checkableSetting(const QString &caption,const QString &name,
 }
 Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(new Playback(l, this)) {
     initializeResources();
+    m_aiRuntime = new ai::AiRuntime(m_library, this);
     installSmoothScrolling(qApp);
     setWindowTitle("Relaxer V1.10");
     setWindowFlag(Qt::FramelessWindowHint);
@@ -633,6 +634,23 @@ QWidget *Window::buildSettings() {
     basic->addLayout(folderRow);
     v->addWidget(group);
 
+    auto *aiCard = new QWidget;
+    aiCard->setObjectName("settingsCard");
+    auto *aiLayout = new QVBoxLayout(aiCard);
+    aiLayout->setContentsMargins(22, 18, 22, 18);
+    aiLayout->setSpacing(8);
+    auto *aiHeader = new QHBoxLayout;
+    aiHeader->addWidget(label("AI 服务", "profileName"));
+    aiHeader->addStretch(1);
+    auto *aiOpen = button("管理 AI 服务", "openAiServiceSettings");
+    aiHeader->addWidget(aiOpen);
+    aiLayout->addLayout(aiHeader);
+    auto *aiDescription = label("配置 DeepSeek 凭据、模型和歌词翻译。", "muted");
+    aiDescription->setWordWrap(true);
+    aiLayout->addWidget(aiDescription);
+    connect(aiOpen, &QPushButton::clicked, this, &Window::openAiSettings);
+    v->addWidget(aiCard);
+
     auto *keys = new QWidget;
     keys->setObjectName("settingsCard");
     auto *kv = new QVBoxLayout(keys);
@@ -750,6 +768,16 @@ void Window::editAppearance() {
         [this]{m_appearancePreview={};applyTheme();},m_pages,m_currentAppearance);
     connect(m_appearancePage,&AppearancePage::finished,this,&Window::showSettings);
     setPage(m_pages->addWidget(m_appearancePage));applyTheme();
+}
+void Window::openAiSettings() {
+    if (m_pages->currentIndex() == 3)
+        m_settingsScrollPosition = findChild<QScrollArea *>("settingsScroll")->verticalScrollBar()->value();
+    if (!m_aiPage) {
+        m_aiPage = new ai::AiSettingsPage(m_aiRuntime, m_pages);
+        connect(m_aiPage, &ai::AiSettingsPage::backRequested, this, &Window::showSettings);
+        m_pages->addWidget(m_aiPage);
+    }
+    setPage(m_pages->indexOf(m_aiPage));
 }
 QWidget *Window::buildNowPlaying() {
     m_nowPage = new Backdrop;
@@ -1144,7 +1172,7 @@ void Window::updateNavigation(){
     const int page=m_pages->currentIndex();int row=-1;
     if(page==0)row=m_scope==0?0:m_scope==-1?4:-1;
     else if(page>=1&&page<=3)row=page;
-    else if(page==5||(m_appearancePage&&m_pages->currentWidget()==m_appearancePage))row=3;
+    else if(page==5||(m_appearancePage&&m_pages->currentWidget()==m_appearancePage)||(m_aiPage&&m_pages->currentWidget()==m_aiPage))row=3;
     QSignalBlocker navBlock(m_nav),listBlock(m_lists);
     m_nav->clearSelection();m_nav->setCurrentRow(row);
     m_lists->clearSelection();m_lists->setCurrentRow(-1);
@@ -1254,7 +1282,7 @@ void Window::showProfile() {
     setPage(2);
     refresh();
 }
-void Window::showSettings(){bool returning=m_pages->currentIndex()==5||(m_appearancePage&&m_pages->currentWidget()==m_appearancePage);setPage(3);if(returning&&m_pages->currentIndex()==3){setFocus(Qt::OtherFocusReason);auto *scroll=findChild<QScrollArea *>("settingsScroll");scroll->verticalScrollBar()->setValue(m_settingsScrollPosition);QTimer::singleShot(0,this,[this,scroll]{if(m_pages->currentIndex()==3)scroll->verticalScrollBar()->setValue(m_settingsScrollPosition);});}}
+void Window::showSettings(){bool returning=m_pages->currentIndex()==5||(m_appearancePage&&m_pages->currentWidget()==m_appearancePage)||(m_aiPage&&m_pages->currentWidget()==m_aiPage);setPage(3);if(returning&&m_pages->currentIndex()==3){setFocus(Qt::OtherFocusReason);auto *scroll=findChild<QScrollArea *>("settingsScroll");scroll->verticalScrollBar()->setValue(m_settingsScrollPosition);QTimer::singleShot(0,this,[this,scroll]{if(m_pages->currentIndex()==3)scroll->verticalScrollBar()->setValue(m_settingsScrollPosition);});}}
 void Window::showVersionLog(){if(m_pages->currentIndex()==3)m_settingsScrollPosition=findChild<QScrollArea *>("settingsScroll")->verticalScrollBar()->value();setPage(5);}
 void Window::showNowPlaying() {
     setPage(4);
@@ -1561,7 +1589,7 @@ void Window::dropEvent(QDropEvent *e) {
     }
 }
 void Window::keyPressEvent(QKeyEvent *e) {
-    if(e->key()==Qt::Key_Escape&&!m_playerExpanded&&m_appearancePage&&m_pages->currentWidget()==m_appearancePage){showSettings();return;}
+    if(e->key()==Qt::Key_Escape&&!m_playerExpanded&&((m_appearancePage&&m_pages->currentWidget()==m_appearancePage)||(m_aiPage&&m_pages->currentWidget()==m_aiPage))){showSettings();return;}
     if(e->key()==Qt::Key_Escape&&m_bulkTable){exitBulk();e->accept();return;}
     if(e->key()==Qt::Key_Escape&&m_pages->currentIndex()==5){showSettings();e->accept();return;}
     if (e->key() == Qt::Key_Escape && m_playerExpanded) {

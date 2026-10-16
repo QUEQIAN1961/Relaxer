@@ -3,6 +3,8 @@
 #include <QAudioDevice>
 #include "window.h"
 #include <QComboBox>
+#include <QPushButton>
+#include <QStackedWidget>
 #include <QImage>
 #include <QJsonArray>
 #include <QMouseEvent>
@@ -258,6 +260,16 @@ class GuiTests : public QObject {
         w.showPlaylists();
         w.showProfile();
         w.showSettings();
+        auto *aiSettingsButton = w.findChild<QPushButton *>("openAiServiceSettings");
+        QVERIFY(aiSettingsButton);
+        aiSettingsButton->click();
+        auto *pages = w.findChild<QStackedWidget *>("pages");
+        QVERIFY(pages);
+        QCOMPARE(pages->currentWidget()->objectName(), QString("aiServicePage"));
+        auto *backToSettings = w.findChild<QPushButton *>("aiSettingsBack");
+        QVERIFY(backToSettings);
+        backToSettings->click();
+        QCOMPARE(pages->currentWidget()->objectName(), QString("settingsPage"));
         auto *theme = w.findChild<QComboBox *>("themeSetting");
         QVERIFY(theme);
         theme->setCurrentIndex(1);
