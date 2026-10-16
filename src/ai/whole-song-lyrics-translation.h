@@ -25,6 +25,14 @@ struct PreparedLyrics {
     bool ok() const { return error.isEmpty() && !lines.isEmpty(); }
 };
 
+enum class TranslationNeed { NotApplicable, Chinese, Translated, Missing, Review };
+struct TranslationAssessment {
+    TranslationNeed need = TranslationNeed::NotApplicable;
+    QString reason;
+    bool missing() const { return need == TranslationNeed::Missing || need == TranslationNeed::Review; }
+};
+TranslationAssessment assessTranslation(const QByteArray &source, const QString &localTitle = {}, const QString &localArtist = {});
+
 struct ValidationResult {
     QStringList translations;
     QString error;

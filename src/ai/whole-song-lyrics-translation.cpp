@@ -10,6 +10,7 @@
 #include <QStringDecoder>
 #include <cmath>
 #include <algorithm>
+#include <utility>
 
 namespace relaxer::ai::lyrics {
 namespace {
@@ -202,6 +203,52 @@ PreparedLyrics prepare(const QByteArray &source, const QString &localTitle, cons
     if (result.lines.isEmpty())
         result.error = QStringLiteral("没有可翻译的有效歌词行");
     return result;
+}
+
+TranslationAssessment assessTranslation(const QByteArray &source, const QString &localTitle, const QString &localArtist) {
+    const auto prepared = prepare(source, localTitle, localArtist);
+    if (prepared.instrumental) return {TranslationNeed::NotApplicable, QStringLiteral("纯音乐")};
+    if (prepared.lines.isEmpty()) return {TranslationNeed::NotApplicable, QStringLiteral("没有有效歌词正文")};
+    struct Counts { int han = 0; int foreign = 0; };
+    QVector<Counts> counts;
+    QHash<qint64, QPair<int, int>> groups;
+    int han = 0, foreign = 0, foreignLines = 0;
+    QString body;
+    for (const auto &line : prepared.lines) {
+        Counts c;
+        for (auto cp : line.text.toUcs4()) {
+            if (!QChar::isLetter(cp)) continue;
+            if (QChar::script(cp) == QChar::Script_Han) ++c.han;
+            else ++c.foreign;
+        }
+        counts.append(c); han += c.han; foreign += c.foreign;
+        if (c.foreign) { ++foreignLines; ++groups[line.timestampMs].first; }
+        else if (c.han) ++groups[line.timestampMs].second;
+        body += line.text + QChar(' ');
+    }
+    if (!foreignLines) {
+        if (han) return {TranslationNeed::Chinese, QStringLiteral("正文以汉字为主，未发现需翻译的外文")};
+        return {TranslationNeed::Review, QStringLiteral("正文过短或语言无法判断，请人工确认")};
+    }
+    int covered = 0;
+    if (prepared.timed) {
+        for (const auto &group : std::as_const(groups)) covered += qMin(group.first, group.second);
+    } else {
+        for (int i = 0; i + 1 < counts.size(); ++i)
+            if (counts[i].foreign && counts[i + 1].han && !counts[i + 1].foreign) ++covered;
+    }
+    const bool marked = decode(source).contains(QStringLiteral("relaxer-bilingual"), Qt::CaseInsensitive);
+    if (covered == foreignLines && (marked || foreignLines >= 2))
+        return {TranslationNeed::Translated, QStringLiteral("已识别完整的原文与中文对应行")};
+    if (marked) return {TranslationNeed::Review, QStringLiteral("双语标记与正文对应不完整，请确认译文")};
+    if (covered) return {TranslationNeed::Review, QStringLiteral("仅识别到部分或疑似中文译文，请确认")};
+    if (han) return {TranslationNeed::Review, QStringLiteral("疑似外文或中外文混合，译文状态待确认")};
+    static const QRegularExpression nonAscii(QStringLiteral("[^a-z]+"));
+    static const QRegularExpression vocal(QStringLiteral("^(?:(?:la|na|oh|ah|ooh|uh|woah|yeah)\\s*)+$"));
+    auto words = body.toLower(); words.replace(nonAscii, QStringLiteral(" ")); words = words.simplified();
+    if (foreign < 8 || (!words.isEmpty() && vocal.match(words).hasMatch()))
+        return {TranslationNeed::Review, QStringLiteral("短句或吟唱词，语言与翻译需求待确认")};
+    return {TranslationNeed::Missing, QStringLiteral("检测到外文正文，未识别到中文译文")};
 }
 
 QString blockedLinePlaceholder() { return QStringLiteral("（内容已屏蔽）"); }

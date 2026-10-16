@@ -112,8 +112,12 @@ private:
     bool m_applyingStyle=false;
     QLabel *m_status,*m_candidateTitle,*m_instrumentHint;
     QPushButton *m_start,*m_stop,*m_apply,*m_incomplete=nullptr,*m_manualSearch,*m_mark,*m_continue,*m_translate=nullptr,*m_aiSaveTranslation=nullptr,*m_aiCancelTranslation=nullptr;
-    QLineEdit *m_searchTitle,*m_searchArtist,*m_fragment;QCheckBox *m_replace,*m_syncedOnly,*m_missingOnly=nullptr;
+    QLineEdit *m_searchTitle,*m_searchArtist,*m_fragment;QCheckBox *m_replace,*m_syncedOnly,*m_missingOnly=nullptr,*m_missingTranslationOnly=nullptr;
     QLabel *m_emptyHint=nullptr;
+    QPushButton *m_refreshTranslationFilter=nullptr;
+    QHash<qint64,QPair<QByteArray,ai::lyrics::TranslationAssessment>> m_translationAssessments;
+    ai::lyrics::TranslationAssessment translationAssessment(const Track &track);
+    void updateApplyButton();
     QSpinBox *m_offset;QComboBox *m_sourceFilter;QVector<int> m_visibleRecords;
     int m_generation=0,m_nextRow=0,m_saved=0,m_trackLimit=10,m_requestLimit=3,m_fastReplies=0;
     bool m_running=false,m_proxyReady=true;
