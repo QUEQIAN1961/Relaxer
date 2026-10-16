@@ -24,6 +24,14 @@ class AiInfrastructureTests final : public QObject {
     void deepSeekProviderUsesOfficialEndpointsAndParsesUsage();
     void providerClassifiesHttpErrorsAndCancellation();
     void runtimePersistsConfigurationAndKeepsCredentialsSeparate();
+    void redirectsAreFailuresRatherThanSuccessfulEmptyCatalogs();
+    void httpStatusMatrixAndCatalogFailurePreserveState();
+    void endpointPolicyRejectsUnsafeRoutesAndProductionStoreMocks();
+    void completionBoundaryRejectsUnconfirmedModelsAndBadCredentials();
+    void cancellationTimeoutAndLateProviderRegistrationAreTerminal();
+    void newestModelRequestOwnsCatalogPersistence();
+    void networkFailureAndProviderTimeoutAreTerminal();
+
 };
 
 namespace {
@@ -98,6 +106,13 @@ class HttpMock final : public QObject {
         if (!socket || m_responses.isEmpty())
             return;
         const auto response = m_responses.takeFirst();
+        if (response.first >= 100 && response.first < 200) {
+            // Informational responses are not final HTTP responses. Keep the
+            // connection open without a final status to exercise our timeout.
+            socket->write("HTTP/1.1 " + QByteArray::number(response.first) + " Informational\r\n\r\n");
+            socket->flush();
+            return;
+        }
         const auto reason = response.first >= 200 && response.first < 300 ? "OK" : "Error";
         QByteArray bytes = "HTTP/1.1 " + QByteArray::number(response.first) + " " + reason + "\r\n";
         bytes += "Content-Type: application/json\r\nContent-Length: " + QByteArray::number(response.second.size()) +
@@ -132,8 +147,36 @@ class FakeCredentials final : public CredentialStore {
         return true;
     }
     bool supported() const override { return true; }
+    bool allowsMockRequests() const override { return true; }
   private:
     QHash<QString, QString> m_values;
+};
+
+class GuardedCredentials final : public CredentialStore {
+  public:
+    int reads = 0;
+    bool store(const QString &, const QString &, QString *) override { return false; }
+    CredentialReadResult read(const QString &) override {
+        ++reads;
+        return {true, true, "fake-production-store-sentinel", {}};
+    }
+    bool remove(const QString &, QString *) override { return false; }
+    bool supported() const override { return true; }
+};
+
+class ManualProvider final : public AiProvider {
+  public:
+    explicit ManualProvider(QString id = "deepseek") : m_id(std::move(id)) {}
+    QString providerId() const override { return m_id; }
+    bool cancel(quint64) override { ++cancellations; return false; }
+    void deliver(quint64 id, const QList<ModelInfo> &models) { emit modelsFinished(id, models, {}); }
+    quint64 serial = 0;
+    int cancellations = 0;
+  protected:
+    quint64 listModels(const QString &) override { return ++serial; }
+    quint64 complete(const QString &, const ChatCompletionRequest &) override { return ++serial; }
+  private:
+    QString m_id;
 };
 
 ModelInfo model(const QString &id = "deepseek-flash") {
@@ -219,14 +262,20 @@ class AiInfrastructureTestCases final {
     void deepSeekProviderUsesOfficialEndpointsAndParsesUsage() {
         HttpMock server;
         QVERIFY(server.listen());
-        DeepSeekProvider provider(server.baseUrl());
-        provider.setTimeoutMs(3000);
-        QSignalSpy modelsSpy(&provider, &AiProvider::modelsFinished);
+        DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl()});
+        FakeCredentials credentials;
+        QVERIFY(credentials.store("deepseek", "fake-deepseek-key", nullptr));
+        ProviderRegistry registry;
+        QVERIFY(registry.add(&provider));
+        ModelRegistry models;
+        models.applyLiveCatalog("deepseek", {model()});
+        AiRequestCoordinator coordinator(&registry, &credentials, &models);
+        QSignalSpy modelsSpy(&coordinator, &AiRequestCoordinator::modelsFinished);
         server.enqueue(200, modelList());
-        const auto modelsId = provider.listModels("fake-deepseek-key");
+        const auto modelsId = coordinator.fetchModels("deepseek");
         QTRY_COMPARE_WITH_TIMEOUT(modelsSpy.size(), 1, 3000);
         QCOMPARE(modelsSpy[0][0].toULongLong(), modelsId);
-        QVERIFY(qvariant_cast<ProviderError>(modelsSpy[0][2]).isEmpty());
+        QVERIFY(qvariant_cast<ProviderError>(modelsSpy[0][3]).isEmpty());
         QVERIFY(server.request(0).startsWith("GET /models "));
         QVERIFY(server.request(0).contains("Authorization: Bearer fake-deepseek-key"));
 
@@ -235,11 +284,11 @@ class AiInfrastructureTestCases final {
         request.modelId = "deepseek-flash";
         request.messages = QJsonArray{QJsonObject{{"role", "user"}, {"content", "json"}}};
         request.maxTokens = 2048;
-        QSignalSpy completionSpy(&provider, &AiProvider::completionFinished);
-        const auto completionId = provider.complete("fake-deepseek-key", request);
+        QSignalSpy completionSpy(&coordinator, &AiRequestCoordinator::completionFinished);
+        const auto completionId = coordinator.complete("deepseek", request);
         QTRY_COMPARE_WITH_TIMEOUT(completionSpy.size(), 1, 3000);
         QCOMPARE(completionSpy[0][0].toULongLong(), completionId);
-        const auto completion = qvariant_cast<ChatCompletionResult>(completionSpy[0][1]);
+        const auto completion = qvariant_cast<ChatCompletionResult>(completionSpy[0][2]);
         QVERIFY(completion.ok());
         QCOMPARE(completion.content, QString("{\"translations\":[]}"));
         QCOMPARE(completion.finishReason, QString("stop"));
@@ -253,27 +302,26 @@ class AiInfrastructureTestCases final {
     void providerClassifiesHttpErrorsAndCancellation() {
         HttpMock server;
         QVERIFY(server.listen());
-        DeepSeekProvider provider(server.baseUrl());
+        DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl()});
         provider.setTimeoutMs(3000);
-        QSignalSpy modelsSpy(&provider, &AiProvider::modelsFinished);
-        server.enqueue(429, "{}");
-        provider.listModels("fake-key");
-        QTRY_COMPARE_WITH_TIMEOUT(modelsSpy.size(), 1, 3000);
-        QCOMPARE(qvariant_cast<ProviderError>(modelsSpy[0][2]).code, QString("rate_limited"));
-
+        FakeCredentials credentials;
+        QVERIFY(credentials.store("deepseek", "fake-key", nullptr));
         ProviderRegistry registry;
         QVERIFY(registry.add(&provider));
-        AiRequestCoordinator coordinator(&registry);
+        AiRequestCoordinator coordinator(&registry, &credentials);
+        QSignalSpy finished(&coordinator, &AiRequestCoordinator::modelsFinished);
+        server.enqueue(429, "{}");
+        coordinator.fetchModels("deepseek");
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 3000);
+        QCOMPARE(qvariant_cast<ProviderError>(finished[0][3]).code, QString("rate_limited"));
         server.setHold(true);
-        QSignalSpy coordinated(&coordinator, &AiRequestCoordinator::modelsFinished);
-        const auto taskId = coordinator.fetchModels("deepseek", "fake-key");
+        const auto taskId = coordinator.fetchModels("deepseek");
         QTRY_COMPARE_WITH_TIMEOUT(server.requestCount(), 2, 3000);
         QVERIFY(coordinator.isPending(taskId));
         QVERIFY(coordinator.cancel(taskId));
-        QTRY_COMPARE_WITH_TIMEOUT(coordinated.size(), 1, 3000);
-        const auto cancelled = qvariant_cast<ProviderError>(coordinated[0][3]);
-        QVERIFY(cancelled.cancelled);
         QVERIFY(!coordinator.isPending(taskId));
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 2, 3000);
+        QVERIFY(qvariant_cast<ProviderError>(finished[1][3]).cancelled);
     }
 
     void runtimePersistsConfigurationAndKeepsCredentialsSeparate() {
@@ -295,7 +343,7 @@ class AiInfrastructureTestCases final {
         QVERIFY(runtime.saveConfiguration(configuration));
         QVERIFY(credentials->store("deepseek", "fake-only-key", nullptr));
         QVERIFY(runtime.hasCredential("deepseek"));
-        QCOMPARE(runtime.readCredential("deepseek"), QString("fake-only-key"));
+        QCOMPARE(runtime.credentials()->read("deepseek").secret, QString("fake-only-key"));
         QVERIFY(!library.setting("aiServiceConfigV1").toString().contains("fake-only-key"));
 
         QCOMPARE(runtime.validateConfiguration(runtime.translationConfiguration()),
@@ -331,6 +379,264 @@ void AiInfrastructureTests::chatPayloadMapsThinkingWithoutFakeEffort() { AiInfra
 void AiInfrastructureTests::deepSeekProviderUsesOfficialEndpointsAndParsesUsage() { AiInfrastructureTestCases{}.deepSeekProviderUsesOfficialEndpointsAndParsesUsage(); }
 void AiInfrastructureTests::providerClassifiesHttpErrorsAndCancellation() { AiInfrastructureTestCases{}.providerClassifiesHttpErrorsAndCancellation(); }
 void AiInfrastructureTests::runtimePersistsConfigurationAndKeepsCredentialsSeparate() { AiInfrastructureTestCases{}.runtimePersistsConfigurationAndKeepsCredentialsSeparate(); }
+
+void AiInfrastructureTests::redirectsAreFailuresRatherThanSuccessfulEmptyCatalogs() {
+    HttpMock server;
+    QVERIFY(server.listen());
+    DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl()});
+    FakeCredentials credentials;
+    QVERIFY(credentials.store("deepseek", "fake-key", nullptr));
+    ProviderRegistry registry;
+    QVERIFY(registry.add(&provider));
+    AiRequestCoordinator coordinator(&registry, &credentials);
+    QSignalSpy finished(&coordinator, &AiRequestCoordinator::modelsFinished);
+    server.enqueue(302, "{}");
+    coordinator.fetchModels("deepseek");
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 3000);
+    const auto error = qvariant_cast<ProviderError>(finished[0][3]);
+    QCOMPARE(error.httpStatus, 302);
+    QVERIFY2(!error.isEmpty(), "HTTP redirect was reported as success");
+    QCOMPARE(server.requestCount(), 1);
+}
+
+
+void AiInfrastructureTests::httpStatusMatrixAndCatalogFailurePreserveState() {
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    HttpMock server;
+    QVERIFY(server.listen());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentials>());
+    runtime.deepSeekProvider()->setTimeoutMs(1000);
+    QVERIFY(runtime.credentials()->store("deepseek", "fake-status-key", nullptr));
+    runtime.acceptModelCatalog("deepseek", {model()});
+    auto config = runtime.configuration();
+    config.defaults = {"deepseek", "deepseek-flash", false, {}};
+    QVERIFY(runtime.saveConfiguration(config));
+    const auto persisted = library.setting("aiServiceConfigV1");
+    QSignalSpy finished(runtime.requests(), &AiRequestCoordinator::modelsFinished);
+    const QList<int> statuses{199, 301, 302, 304, 400, 401, 402, 403, 404, 429, 500, 503, 204};
+    for (const auto status : statuses) {
+        server.enqueue(status, status == 204 ? QByteArray() : modelList());
+        const auto task = runtime.requests()->fetchModels("deepseek");
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 3500);
+        const auto error = qvariant_cast<ProviderError>(finished[0][3]);
+        QVERIFY2(!error.isEmpty(), qPrintable(QString("HTTP %1 reported success").arg(status)));
+        if (status >= 300 && status < 400) QCOMPARE(error.code, QString("redirect"));
+        QVERIFY(!runtime.requests()->isPending(task));
+        QCOMPARE(runtime.model("deepseek", "deepseek-flash")->availability, ModelAvailability::Available);
+        QCOMPARE(library.setting("aiServiceConfigV1"), persisted);
+        finished.clear();
+    }
+    QCOMPARE(server.requestCount(), statuses.size());
+    for (const auto body : {QByteArray(), QByteArray("{}"), QByteArray("{")}) {
+        server.enqueue(200, body);
+        runtime.requests()->fetchModels("deepseek");
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(qvariant_cast<ProviderError>(finished[0][3]).code, QString("invalid_response"));
+        QCOMPARE(library.setting("aiServiceConfigV1"), persisted);
+        finished.clear();
+    }
+    for (const int status : {200, 201}) {
+        server.enqueue(status, modelList());
+        runtime.requests()->fetchModels("deepseek");
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(qvariant_cast<ProviderError>(finished[0][3]).isEmpty());
+        finished.clear();
+    }
+    QCOMPARE(runtime.models("deepseek").size(), 2);
+}
+
+void AiInfrastructureTests::endpointPolicyRejectsUnsafeRoutesAndProductionStoreMocks() {
+    HttpMock server;
+    QVERIFY(server.listen());
+    FakeCredentials credentials;
+    QVERIFY(credentials.store("deepseek", "fake-route-key", nullptr));
+    const QList<QUrl> invalid{
+        server.baseUrl(), QUrl("https://example.invalid"), QUrl("https://api.deepseek.com.evil.invalid"),
+        QUrl("https://user@api.deepseek.com"), QUrl("https://api.deepseek.com:8443"),
+        QUrl("file:///models"), QUrl("/relative"), QUrl("https://api.deepseek.com/other"),
+        QUrl("https://api.deepseek.com?query"), QUrl("https://api.deepseek.com/#fragment")
+    };
+    for (const auto &url : invalid) {
+        DeepSeekProvider provider(url); // production policy, including a loopback URL
+        ProviderRegistry registry;
+        QVERIFY(registry.add(&provider));
+        AiRequestCoordinator coordinator(&registry, &credentials);
+        QSignalSpy finished(&coordinator, &AiRequestCoordinator::modelsFinished);
+        coordinator.fetchModels("deepseek");
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(qvariant_cast<ProviderError>(finished[0][3]).code, QString("unsafe_endpoint"));
+    }
+    QCOMPARE(server.requestCount(), 0);
+    DeepSeekProvider mock(DeepSeekProvider::MockEndpoint{server.baseUrl()});
+    ProviderRegistry registry;
+    QVERIFY(registry.add(&mock));
+    GuardedCredentials guarded;
+    AiRequestCoordinator coordinator(&registry, &guarded);
+    QSignalSpy finished(&coordinator, &AiRequestCoordinator::modelsFinished);
+    coordinator.fetchModels("deepseek");
+    QTRY_COMPARE(finished.size(), 1);
+    QCOMPARE(qvariant_cast<ProviderError>(finished[0][3]).code, QString("credentials_unavailable"));
+    QCOMPARE(guarded.reads, 0); // never touch a real credential store in test mode
+    QCOMPARE(server.requestCount(), 0);
+}
+
+void AiInfrastructureTests::completionBoundaryRejectsUnconfirmedModelsAndBadCredentials() {
+    HttpMock server;
+    QVERIFY(server.listen());
+    DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl()});
+    ProviderRegistry providers;
+    QVERIFY(providers.add(&provider));
+    FakeCredentials credentials;
+    ModelRegistry models;
+    AiRequestCoordinator coordinator(&providers, &credentials, &models);
+    QSignalSpy finished(&coordinator, &AiRequestCoordinator::completionFinished);
+    ChatCompletionRequest base{"deepseek-flash", QJsonArray{QJsonObject{{"role","user"},{"content","json"}}}, false, {}, 2048};
+    auto reject = [&](const ChatCompletionRequest &request) {
+        const auto task = coordinator.complete("deepseek", request);
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(!qvariant_cast<ChatCompletionResult>(finished[0][2]).ok());
+        QVERIFY(!coordinator.isPending(task));
+        QCOMPARE(server.requestCount(), 0);
+        finished.clear();
+    };
+    reject(base); // no verified catalog
+    auto known = model();
+    models.restoreUnverified({known});
+    reject(base);
+    models.applyLiveCatalog("deepseek", {known});
+    reject(base); // no credential
+    for (const auto &key : {QString(" "), QString("fake\r\nInjected: key"), QString("fake\tkey")}) {
+        QVERIFY(credentials.store("deepseek", key, nullptr));
+        reject(base);
+    }
+    QVERIFY(credentials.store("deepseek", " fake-boundary-key ", nullptr));
+    auto request = base; request.modelId = "unknown";
+    reject(request);
+    request = base; request.thinkingEnabled = true; request.reasoningEffort = "medium";
+    reject(request);
+    request.reasoningEffort = " High ";
+    reject(request); // canonical casing is consistent at every layer; no silent coercion
+    request = base; request.maxTokens = known.capabilities.maxOutputTokens + 1;
+    reject(request);
+    for (int missing = 0; missing < 4; ++missing) {
+        auto incomplete = known;
+        if (missing == 0) incomplete.protocol.jsonObjectOutput = false;
+        if (missing == 1) incomplete.capabilities.outputModalities.clear();
+        if (missing == 2) incomplete.capabilities.contextWindow = 0;
+        if (missing == 3) incomplete.capabilities.reasoningMetadataKnown = false;
+        models.applyLiveCatalog("deepseek", {incomplete});
+        request = base;
+        if (missing == 3) { request.thinkingEnabled = true; request.reasoningEffort = "high"; }
+        reject(request);
+    }
+    models.applyLiveCatalog("deepseek", {known});
+    server.enqueue(200, R"({"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]})");
+    coordinator.complete("deepseek", base);
+    QTRY_COMPARE(finished.size(), 1);
+    QVERIFY(qvariant_cast<ChatCompletionResult>(finished[0][2]).ok());
+    QCOMPARE(server.requestCount(), 1);
+    QVERIFY(server.request(0).contains("Authorization: Bearer fake-boundary-key"));
+}
+
+void AiInfrastructureTests::cancellationTimeoutAndLateProviderRegistrationAreTerminal() {
+    FakeCredentials credentials;
+    QVERIFY(credentials.store("deepseek", "fake-task-key", nullptr));
+    ProviderRegistry registry;
+    AiRequestCoordinator coordinator(&registry, &credentials);
+    QSignalSpy finished(&coordinator, &AiRequestCoordinator::modelsFinished);
+    auto provider = std::make_unique<ManualProvider>();
+    QVERIFY(registry.add(provider.get())); // added after coordinator construction
+    auto task = coordinator.fetchModels("deepseek");
+    QVERIFY(coordinator.isPending(task));
+    QVERIFY(coordinator.cancel(task)); // provider deliberately returns false
+    QVERIFY(!coordinator.isPending(task));
+    QVERIFY(!coordinator.cancel(task));
+    provider->deliver(1, {model()});
+    QTRY_COMPARE(finished.size(), 1);
+    QVERIFY(qvariant_cast<ProviderError>(finished[0][3]).cancelled);
+    QTest::qWait(30);
+    QCOMPARE(finished.size(), 1);
+    coordinator.setTimeoutMs(20);
+    task = coordinator.fetchModels("deepseek");
+    QTRY_COMPARE(finished.size(), 2);
+    QCOMPARE(qvariant_cast<ProviderError>(finished[1][3]).code, QString("timeout"));
+    QVERIFY(!coordinator.isPending(task));
+    provider->deliver(2, {model()});
+    QTest::qWait(30);
+    QCOMPARE(finished.size(), 2);
+    task = coordinator.fetchModels("deepseek");
+    provider.reset();
+    QTRY_COMPARE(finished.size(), 3);
+    QVERIFY(!coordinator.isPending(task));
+    QVERIFY(!registry.provider("deepseek"));
+    ManualProvider replacement;
+    QVERIFY(registry.add(&replacement));
+    coordinator.fetchModels("deepseek");
+    replacement.deliver(1, {model()});
+    QTRY_COMPARE(finished.size(), 4);
+    QVERIFY(qvariant_cast<ProviderError>(finished[3][3]).isEmpty());
+}
+
+void AiInfrastructureTests::newestModelRequestOwnsCatalogPersistence() {
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    auto credentials = std::make_unique<FakeCredentials>();
+    QVERIFY(credentials->store("catalog-test", "fake-catalog-key", nullptr));
+    AiRuntime runtime(&library, std::move(credentials));
+    ManualProvider provider("catalog-test");
+    QVERIFY(runtime.providers()->add(&provider));
+    const auto oldTask = runtime.requests()->fetchModels("catalog-test");
+    const auto latest = runtime.requests()->fetchModels("catalog-test");
+    QVERIFY(!runtime.requests()->isPending(oldTask));
+    auto newModel = model("new-model"); newModel.providerId = "catalog-test";
+    auto oldModel = model("old-model"); oldModel.providerId = "catalog-test";
+    provider.deliver(2, {newModel});
+    QTRY_VERIFY(runtime.model("catalog-test", "new-model"));
+    const auto persisted = library.setting("aiServiceConfigV1");
+    provider.deliver(1, {oldModel});
+    QTest::qWait(30);
+    QVERIFY(!runtime.model("catalog-test", "old-model"));
+    QCOMPARE(library.setting("aiServiceConfigV1"), persisted);
+    QCOMPARE(runtime.requests()->latestModelTask("catalog-test"), latest);
+}
+
+
+void AiInfrastructureTests::networkFailureAndProviderTimeoutAreTerminal() {
+    HttpMock server;
+    QVERIFY(server.listen());
+    server.setHold(true);
+    DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl()});
+    provider.setTimeoutMs(1000);
+    FakeCredentials credentials;
+    QVERIFY(credentials.store("deepseek", "fake-timeout-key", nullptr));
+    ProviderRegistry providers;
+    QVERIFY(providers.add(&provider));
+    AiRequestCoordinator coordinator(&providers, &credentials);
+    QSignalSpy finished(&coordinator, &AiRequestCoordinator::modelsFinished);
+    const auto task = coordinator.fetchModels("deepseek");
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 3000);
+    QCOMPARE(qvariant_cast<ProviderError>(finished[0][3]).code, QString("timeout"));
+    QVERIFY(!coordinator.isPending(task));
+    QCOMPARE(server.requestCount(), 1);
+    QTest::qWait(30);
+    QCOMPARE(finished.size(), 1);
+    QTcpServer closed;
+    QVERIFY(closed.listen(QHostAddress::LocalHost));
+    const auto port = closed.serverPort();
+    closed.close();
+    DeepSeekProvider offline(DeepSeekProvider::MockEndpoint{QUrl(QString("http://127.0.0.1:%1").arg(port))});
+    ProviderRegistry offlineRegistry;
+    QVERIFY(offlineRegistry.add(&offline));
+    AiRequestCoordinator offlineRequests(&offlineRegistry, &credentials);
+    QSignalSpy offlineFinished(&offlineRequests, &AiRequestCoordinator::modelsFinished);
+    const auto offlineTask = offlineRequests.fetchModels("deepseek");
+    QTRY_COMPARE_WITH_TIMEOUT(offlineFinished.size(), 1, 8000);
+    QCOMPARE(qvariant_cast<ProviderError>(offlineFinished[0][3]).code, QString("network"));
+    QVERIFY(!offlineRequests.isPending(offlineTask));
+}
 
 QTEST_GUILESS_MAIN(AiInfrastructureTests)
 #include "ai-infrastructure-tests.moc"

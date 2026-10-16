@@ -37,24 +37,15 @@ QString defaultTranslationStylePrompt();
 QJsonObject configurationToJson(const AiServiceConfiguration &configuration);
 AiServiceConfiguration configurationFromJson(const QJsonObject &object);
 
-class ModelRegistry final {
-  public:
-    void restoreUnverified(const QList<ModelInfo> &models);
-    void applyLiveCatalog(const QString &providerId, const QList<ModelInfo> &models);
-    QList<ModelInfo> models() const;
-    QList<ModelInfo> models(const QString &providerId) const;
-    const ModelInfo *find(const QString &providerId, const QString &modelId) const;
-  private:
-    QList<ModelInfo> m_models;
-};
-
 class AiRuntime final : public QObject {
     Q_OBJECT
   public:
     explicit AiRuntime(Library *library, QObject *parent = nullptr);
     AiRuntime(Library *library, std::unique_ptr<CredentialStore> credentials, QObject *parent = nullptr);
-    AiRuntime(Library *library, QUrl deepSeekBaseUrl, std::unique_ptr<CredentialStore> credentials,
+    AiRuntime(Library *library, DeepSeekProvider::MockEndpoint endpoint, std::unique_ptr<CredentialStore> credentials,
               QObject *parent = nullptr);
+
+    ~AiRuntime() override;
 
     const AiServiceConfiguration &configuration() const { return m_configuration; }
     bool saveConfiguration(const AiServiceConfiguration &configuration, QString *error = nullptr);
@@ -66,8 +57,7 @@ class AiRuntime final : public QObject {
     AiRequestCoordinator *requests() { return m_requests; }
     CredentialStore *credentials() { return m_credentials; }
     DeepSeekProvider *deepSeekProvider() const { return m_deepSeek; }
-    bool hasCredential(const QString &providerId, QString *error = nullptr);
-    QString readCredential(const QString &providerId, QString *error = nullptr);
+    bool hasCredential(const QString &providerId, QString *error = nullptr) const;
     void acceptModelCatalog(const QString &providerId, const QList<ModelInfo> &models);
 
   signals:
@@ -84,7 +74,7 @@ class AiRuntime final : public QObject {
     DeepSeekProvider *m_deepSeek = nullptr;
     AiRequestCoordinator *m_requests = nullptr;
     void initialize(std::unique_ptr<CredentialStore> credentials,
-                    QUrl deepSeekBaseUrl = QUrl(QStringLiteral("https://api.deepseek.com")));
+                    QUrl deepSeekBaseUrl = QUrl(QStringLiteral("https://api.deepseek.com")), bool mockEndpoint = false);
 };
 
 } // namespace relaxer::ai

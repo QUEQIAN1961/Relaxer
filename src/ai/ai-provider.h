@@ -47,6 +47,10 @@ class AiProvider : public QObject {
     explicit AiProvider(QObject *parent = nullptr) : QObject(parent) {}
     ~AiProvider() override = default;
     virtual QString providerId() const = 0;
+    virtual bool usesMockEndpoint() const { return false; }
+  protected:
+    friend class AiRequestCoordinator;
+    // Only the coordinator dispatches requests after credentials/capabilities are checked.
     virtual quint64 listModels(const QString &apiKey) = 0;
     virtual quint64 complete(const QString &apiKey, const ChatCompletionRequest &request) = 0;
     virtual bool cancel(quint64 requestId) = 0;

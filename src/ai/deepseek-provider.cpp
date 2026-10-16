@@ -32,9 +32,15 @@ ProviderError httpError(int status, bool networkError) {
     } else if (status >= 400) {
         error.code = "http";
         error.message = QString("DeepSeek 请求失败（HTTP %1）").arg(status);
+    } else if (status >= 300 && status < 400) {
+        error.code = "redirect";
+        error.message = "DeepSeek 返回了重定向，未向其他端点发送凭据";
     } else if (networkError) {
         error.code = "network";
-        error.message = "网络连接失败或请求超时";
+        error.message = "网络连接失败";
+    } else {
+        error.code = "http";
+        error.message = QString("DeepSeek 返回了异常 HTTP 状态（%1）").arg(status);
     }
     return error;
 }
@@ -64,7 +70,7 @@ QJsonObject deepSeekChatPayload(const ChatCompletionRequest &request, QString *e
                      {"max_tokens", double(request.maxTokens)},
                      {"response_format", QJsonObject{{"type", "json_object"}}}};
     if (request.thinkingEnabled) {
-        const auto effort = request.reasoningEffort.trimmed().toLower();
+        const auto &effort = request.reasoningEffort;
         if (effort != "low" && effort != "high" && effort != "max") {
             if (error)
                 *error = "所选模型不支持当前思考强度";
@@ -90,6 +96,42 @@ DeepSeekProvider::DeepSeekProvider(QUrl baseUrl, QObject *parent)
         m_network.setProxy(QNetworkProxy::NoProxy);
 }
 
+DeepSeekProvider::DeepSeekProvider(MockEndpoint endpoint, QObject *parent)
+    : DeepSeekProvider(std::move(endpoint.url), parent) {
+    m_mockEndpoint = true;
+}
+
+DeepSeekProvider::~DeepSeekProvider() {
+    // Disconnect before member destruction: QNetworkAccessManager aborts replies
+    // while it is being destroyed, after m_pending would otherwise be gone.
+    for (const auto &pending : std::as_const(m_pending)) {
+        if (pending.timer) pending.timer->stop();
+        if (pending.reply) {
+            disconnect(pending.reply, nullptr, this, nullptr);
+            pending.reply->abort();
+        }
+    }
+    m_pending.clear();
+}
+
+QString DeepSeekProvider::endpointError() const {
+    if (!m_baseUrl.isValid() || m_baseUrl.isRelative() || m_baseUrl.host().isEmpty() ||
+        m_baseUrl.authority().contains('@') || m_baseUrl.hasQuery() || m_baseUrl.hasFragment())
+        return QStringLiteral("AI 请求端点无效");
+    if (m_mockEndpoint) {
+        if (m_baseUrl.scheme() == "http" &&
+            (m_baseUrl.host() == "127.0.0.1" || m_baseUrl.host() == "::1") &&
+            m_baseUrl.path().isEmpty() && m_baseUrl.port() > 0)
+            return {};
+        return QStringLiteral("测试端点必须是显式回环 HTTP 地址");
+    }
+    if (m_baseUrl.scheme() != "https" || m_baseUrl.host() != "api.deepseek.com" ||
+        (m_baseUrl.port() != -1 && m_baseUrl.port() != 443) ||
+        (!m_baseUrl.path().isEmpty() && m_baseUrl.path() != "/v1"))
+        return QStringLiteral("DeepSeek 凭据只能发送到官方 HTTPS 端点");
+    return {};
+}
+
 QString DeepSeekProvider::providerId() const { return QString::fromLatin1(DeepSeekProviderId); }
 
 QUrl DeepSeekProvider::endpoint(const QString &path) const {
@@ -106,12 +148,7 @@ QUrl DeepSeekProvider::endpoint(const QString &path) const {
 void DeepSeekProvider::setTimeoutMs(int timeoutMs) { m_timeoutMs = qBound(1000, timeoutMs, 300000); }
 
 quint64 DeepSeekProvider::listModels(const QString &apiKey) {
-    QNetworkRequest request(endpoint("/models"));
-    request.setRawHeader("Authorization", QByteArray("Bearer ") + apiKey.toUtf8());
-    request.setRawHeader("Accept", "application/json");
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    request.setTransferTimeout(0);
-    return send(Kind::Models, request);
+    return send(Kind::Models, apiKey);
 }
 
 quint64 DeepSeekProvider::complete(const QString &apiKey, const ChatCompletionRequest &chat) {
@@ -127,24 +164,40 @@ quint64 DeepSeekProvider::complete(const QString &apiKey, const ChatCompletionRe
         });
         return id;
     }
-    QNetworkRequest request(endpoint("/chat/completions"));
-    request.setRawHeader("Authorization", QByteArray("Bearer ") + apiKey.toUtf8());
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    return send(Kind::Completion, apiKey, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+}
+
+quint64 DeepSeekProvider::send(Kind kind, const QString &apiKey, const QByteArray &body) {
+    const quint64 id = ++m_nextRequestId;
+    const auto invalidEndpoint = endpointError();
+    if (!invalidEndpoint.isEmpty()) {
+        const ProviderError error{"unsafe_endpoint", invalidEndpoint};
+        QTimer::singleShot(0, this, [this, id, kind, error] {
+            if (kind == Kind::Models)
+                emit modelsFinished(id, {}, error);
+            else
+                emit completionFinished(id, ChatCompletionResult{{}, {}, {}, error});
+        });
+        return id;
+    }
+    QNetworkRequest request(endpoint(kind == Kind::Models ? "/models" : "/chat/completions"));
+    auto authorization = QByteArray("Bearer ") + apiKey.toUtf8();
+    request.setRawHeader("Authorization", authorization);
+    authorization.fill('\0');
     request.setRawHeader("Accept", "application/json");
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     request.setTransferTimeout(0);
-    return send(Kind::Completion, request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-}
-
-quint64 DeepSeekProvider::send(Kind kind, QNetworkRequest request, const QByteArray &body) {
-    const quint64 id = ++m_nextRequestId;
-    auto *reply = body.isEmpty() ? m_network.get(request) : m_network.post(request, body);
+    if (kind == Kind::Completion)
+        request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    auto *reply = kind == Kind::Models ? m_network.get(request) : m_network.post(request, body);
     auto *timer = new QTimer(this);
     timer->setSingleShot(true);
     m_pending.insert(id, Pending{kind, reply, timer});
     connect(timer, &QTimer::timeout, reply, [reply] {
-        if (reply && !reply->isFinished())
+        if (!reply->isFinished()) {
+            reply->setProperty("relaxerTimedOut", true);
             reply->abort();
+        }
     });
     connect(reply, &QNetworkReply::finished, this, [this, id] { finish(id); });
     timer->start(m_timeoutMs);
@@ -175,6 +228,7 @@ void DeepSeekProvider::finish(quint64 requestId) {
     auto *reply = pending.reply.data();
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const bool cancelled = reply->property("relaxerCancelled").toBool();
+    const bool timedOut = reply->property("relaxerTimedOut").toBool();
     const bool networkError = reply->error() != QNetworkReply::NoError;
     const auto body = !cancelled && reply->isOpen() ? reply->readAll() : QByteArray();
     reply->deleteLater();
@@ -191,7 +245,8 @@ void DeepSeekProvider::finish(quint64 requestId) {
         return;
     }
     if (networkError || status < 200 || status >= 300) {
-        auto error = httpError(status, networkError);
+        auto error = timedOut ? ProviderError{"timeout", QStringLiteral("AI 请求超时，请手动重试"), status}
+                              : httpError(status, networkError);
         if (pending.kind == Kind::Models)
             emit modelsFinished(requestId, {}, error);
         else

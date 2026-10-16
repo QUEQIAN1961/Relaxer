@@ -28,6 +28,18 @@ void setError(QString *error) {
 }
 } // namespace
 
+QString normalizedApiKey(const QString &secret, QString *error) {
+    qsizetype begin = 0, end = secret.size();
+    while (begin < end && secret.at(begin) == QLatin1Char(' ')) ++begin;
+    while (end > begin && secret.at(end - 1) == QLatin1Char(' ')) --end;
+    bool valid = begin < end;
+    for (auto i = begin; valid && i < end; ++i)
+        valid = secret.at(i).unicode() >= 0x21 && secret.at(i).unicode() <= 0x7e;
+    if (error)
+        *error = valid ? QString() : QStringLiteral("API Key 为空或包含空白、控制字符或非 ASCII 字符");
+    return valid ? secret.mid(begin, end - begin) : QString();
+}
+
 bool WindowsCredentialStore::store(const QString &providerId, const QString &secret, QString *error) {
 #ifdef Q_OS_WIN
     if (!isKnownProvider(providerId) || secret.trimmed().isEmpty()) {

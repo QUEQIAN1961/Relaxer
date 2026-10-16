@@ -51,6 +51,7 @@ class FakeCredentialStore final : public CredentialStore {
         return true;
     }
     bool supported() const override { return true; }
+    bool allowsMockRequests() const override { return true; }
   private:
     QHash<QString, QString> m_values;
 };
@@ -230,6 +231,9 @@ class AiLyricsTranslationTests final : public QObject {
     void closingPendingTaskCancelsLocallyWithoutSaving();
     void failedSaveKeepsOriginalLyricsAndPreviewRetryable();
     void refusesModelsWhoseWholeSongContextIsInsufficient();
+    void filtersPreservePendingAndUnsavedTranslation();
+    void httpRedirectCannotReachPreviewOrSave();
+    void explicitCancelAndLateResultCannotWriteLyrics();
 };
 
 void AiLyricsTranslationTests::preparePreservesRepeatedTimestampRowsAndRejectsExistingBilingualLyrics() {
@@ -328,7 +332,7 @@ void AiLyricsTranslationTests::wholeSongRequestPreviewsWithoutSavingThenSavesOnC
     server.enqueue(completion(QString::fromUtf8(translationJson({{2, QStringLiteral("第三句")},
                                                                   {0, QStringLiteral("第一句")},
                                                                   {1, QStringLiteral("第二句")}}))));
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     runtime.deepSeekProvider()->setTimeoutMs(3000);
     QString error;
     QVERIFY2(configureRuntime(runtime, &error), qPrintable(error));
@@ -387,7 +391,7 @@ void AiLyricsTranslationTests::invalidJsonDoesNotRetryOrFallBackAndManualRetryIs
     TranslationHttpMock retiredWebTranslation;
     QVERIFY(retiredWebTranslation.listen());
     server.enqueue(completion(QStringLiteral("{\"translations\":[{\"id\":0,\"text\":\"only one\"}]}")));
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     QString error;
     QVERIFY2(configureRuntime(runtime, &error), qPrintable(error));
     LyricsLookup dialog(&library, {track.id}, nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api")), {}, true, &runtime);
@@ -425,7 +429,7 @@ void AiLyricsTranslationTests::apiAuthenticationErrorsDoNotRetryOrExposeResponse
     TranslationHttpMock server;
     QVERIFY(server.listen());
     server.enqueue(QByteArrayLiteral("{\"error\":{\"message\":\"test-only-fake-key must not appear\"}}"), 401);
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     QString error;
     QVERIFY2(configureRuntime(runtime, &error), qPrintable(error));
     LyricsLookup dialog(&library, {track.id}, nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api")), {}, true, &runtime);
@@ -455,7 +459,7 @@ void AiLyricsTranslationTests::truncatedCompletionCannotEnterPreviewOrSave() {
     QVERIFY(server.listen());
     server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("你好")}, {1, QStringLiteral("世界")}})),
                                QStringLiteral("length")));
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     QString error;
     QVERIFY2(configureRuntime(runtime, &error), qPrintable(error));
     LyricsLookup dialog(&library, {track.id}, nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api")), {}, true, &runtime);
@@ -483,7 +487,7 @@ void AiLyricsTranslationTests::cancelledOrStaleTasksCannotWriteToLyrics() {
     QVERIFY(server.listen());
     server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("一")}, {1, QStringLiteral("二")}}))));
     server.setHold(true);
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     QString error;
     QVERIFY2(configureRuntime(runtime, &error), qPrintable(error));
     LyricsLookup dialog(&library, {track.id}, nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api")), {}, true, &runtime);
@@ -520,7 +524,7 @@ void AiLyricsTranslationTests::switchingSongsCancelsPendingTranslation() {
     QVERIFY(server.listen());
     server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("第一句")}, {1, QStringLiteral("第二句")}}))));
     server.setHold(true);
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     QString error;
     QVERIFY2(configureRuntime(runtime, &error), qPrintable(error));
     LyricsLookup dialog(&library, {first.id, second.id}, nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api")), {}, true, &runtime);
@@ -555,7 +559,7 @@ void AiLyricsTranslationTests::closingPendingTaskCancelsLocallyWithoutSaving() {
     QVERIFY(server.listen());
     server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("一")}, {1, QStringLiteral("二")}}))));
     server.setHold(true);
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     QString error;
     QVERIFY2(configureRuntime(runtime, &error), qPrintable(error));
     LyricsLookup dialog(&library, {track.id}, nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api")), {}, true, &runtime);
@@ -592,7 +596,7 @@ void AiLyricsTranslationTests::failedSaveKeepsOriginalLyricsAndPreviewRetryable(
     TranslationHttpMock server;
     QVERIFY(server.listen());
     server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("你好")}, {1, QStringLiteral("世界")}}))));
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     QString error;
     QVERIFY2(configureRuntime(runtime, &error), qPrintable(error));
     LyricsLookup dialog(&library, {track.id}, nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api")), {}, true, &runtime);
@@ -634,7 +638,7 @@ void AiLyricsTranslationTests::refusesModelsWhoseWholeSongContextIsInsufficient(
     QVERIFY(server.listen());
     auto model = confirmedFlash(4096);
     model.capabilities.maxOutputTokens = 2048;
-    AiRuntime runtime(&library, server.baseUrl(), std::make_unique<FakeCredentialStore>());
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
     runtime.acceptModelCatalog(QStringLiteral("deepseek"), {model});
     AiServiceConfiguration configuration = runtime.configuration();
     configuration.defaults = {QStringLiteral("deepseek"), QStringLiteral("deepseek-flash"), false, {}};
@@ -649,6 +653,125 @@ void AiLyricsTranslationTests::refusesModelsWhoseWholeSongContextIsInsufficient(
     dialog.findChild<QPushButton *>(QStringLiteral("lyricsTranslate"))->click();
     QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lyricsStatus"))->text().contains(QStringLiteral("上下文窗口")));
     QCOMPARE(server.requestCount(), 0);
+}
+
+void AiLyricsTranslationTests::filtersPreservePendingAndUnsavedTranslation() {
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    const auto track = seed(library, "Filter test", "filter");
+    const auto other = seed(library, "Other song", "other-filter");
+    const QByteArray original = "[00:01.00]First line\n[00:02.00]Second line";
+    QVERIFY(library.saveLyrics(track.id, original));
+    QVERIFY(library.saveLyrics(other.id, original));
+    TranslationHttpMock server;
+    QVERIFY(server.listen());
+    server.setHold(true);
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("第一句")}, {1, QStringLiteral("第二句")}}))));
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library, {track.id, other.id}, nullptr, QUrl("http://127.0.0.1:9/api"), {}, false, &runtime);
+    dialog.show();
+    auto *missing = dialog.findChild<QCheckBox *>("lyricsMissingOnly");
+    auto *incomplete = dialog.findChild<QPushButton *>("lyricsIncomplete");
+    auto *tracks = dialog.findChild<QListWidget *>("lyricsTracks");
+    auto *save = dialog.findChild<QPushButton *>("lyricsSaveTranslation");
+    missing->setChecked(false);
+    tracks->setCurrentRow(0);
+    clickConsentAndStart(dialog);
+    QTRY_COMPARE(server.heldCount(), 1);
+    missing->setChecked(true);
+    incomplete->setChecked(true);
+    QVERIFY2(!tracks->item(0)->isHidden(), "A filter hid the song owning an in-flight paid request");
+    QVERIFY(server.releaseHeld());
+    QTRY_VERIFY(save->isEnabled());
+    QVERIFY(dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText().contains(QStringLiteral("第一句")));
+    missing->setChecked(false);
+    incomplete->setChecked(false);
+    missing->setChecked(true);
+    incomplete->setChecked(true);
+    QVERIFY(!tracks->item(0)->isHidden());
+    QVERIFY(save->isEnabled());
+    QByteArray bytes;
+    QVERIFY(readFile(library.absolute(library.track(track.id).lyrics), &bytes));
+    QCOMPARE(bytes, original);
+    save->click();
+    QVERIFY(readFile(library.absolute(library.track(track.id).lyrics), &bytes));
+    QVERIFY(bytes.contains(QStringLiteral("第一句").toUtf8()));
+    QVERIFY(readFile(library.absolute(library.track(other.id).lyrics), &bytes));
+    QCOMPARE(bytes, original);
+    QCOMPARE(server.requestCount(), 1);
+}
+
+
+void AiLyricsTranslationTests::httpRedirectCannotReachPreviewOrSave() {
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    const auto track = seed(library, "Redirect", "redirect");
+    const QByteArray original = "[00:01.00]Source line";
+    QVERIFY(library.saveLyrics(track.id, original));
+    TranslationHttpMock server;
+    QVERIFY(server.listen());
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("不应被保存")}}))), 302);
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library, {track.id}, nullptr, QUrl("http://127.0.0.1:9/api"), {}, true, &runtime);
+    dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    clickConsentAndStart(dialog);
+    auto *status = dialog.findChild<QLabel *>("lyricsStatus");
+    QTRY_VERIFY(status->text().contains(QStringLiteral("重定向")));
+    QVERIFY(!status->text().contains(QStringLiteral("JSON 无效")));
+    QVERIFY(!dialog.findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
+    QByteArray bytes;
+    QVERIFY(readFile(library.absolute(library.track(track.id).lyrics), &bytes));
+    QCOMPARE(bytes, original);
+    QCOMPARE(server.requestCount(), 1);
+}
+
+void AiLyricsTranslationTests::explicitCancelAndLateResultCannotWriteLyrics() {
+    QTemporaryDir directory;
+    Library library(directory.filePath("library"));
+    QVERIFY(library.open());
+    const auto track = seed(library, "Cancel", "cancel-button");
+    const QByteArray original = "[00:01.00]Source line";
+    QVERIFY(library.saveLyrics(track.id, original));
+    TranslationHttpMock server;
+    QVERIFY(server.listen());
+    server.setHold(true);
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0, QStringLiteral("迟到译文")}}))));
+    AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{server.baseUrl()}, std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    QSignalSpy finished(runtime.requests(), &AiRequestCoordinator::completionFinished);
+    LyricsLookup dialog(&library, {track.id}, nullptr, QUrl("http://127.0.0.1:9/api"), {}, true, &runtime);
+    dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    clickConsentAndStart(dialog);
+    QTRY_COMPARE(server.heldCount(), 1);
+    auto *cancel = dialog.findChild<QPushButton *>("lyricsCancelTranslation");
+    QVERIFY(cancel->isEnabled());
+    cancel->click();
+    QTRY_COMPARE(finished.size(), 1);
+    const auto oldTask = finished[0][0].toULongLong();
+    QVERIFY(!runtime.requests()->isPending(oldTask));
+    QVERIFY(!cancel->isEnabled());
+    QVERIFY(dialog.findChild<QPushButton *>("lyricsTranslate")->isEnabled());
+    // The real HTTP request was aborted; also exercise the dialog guard with
+    // an already-queued successful result from the previous task.
+    ChatCompletionResult late;
+    late.content = QString::fromUtf8(translationJson({{0, QStringLiteral("迟到译文")}}));
+    late.finishReason = "stop";
+    runtime.requests()->completionFinished(oldTask, "deepseek", late);
+    QCoreApplication::processEvents();
+    QVERIFY(!dialog.findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
+    QVERIFY(!dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText().contains(QStringLiteral("迟到译文")));
+    QByteArray bytes;
+    QVERIFY(readFile(library.absolute(library.track(track.id).lyrics), &bytes));
+    QCOMPARE(bytes, original);
+    QCOMPARE(server.requestCount(), 1);
 }
 
 QTEST_MAIN(AiLyricsTranslationTests)

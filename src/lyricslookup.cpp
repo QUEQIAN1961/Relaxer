@@ -543,7 +543,10 @@ void LyricsLookup::updateFilter(){
         auto *item=m_tracks->item(r);const qint64 id=m_ids.value(r);
         const bool hideMissing=m_missingOnly&&m_missingOnly->isChecked()&&!m_missingAtOpen.contains(id)&&!m_pinnedIds.contains(id);
         const bool hideDone=m_incomplete&&m_incomplete->isChecked()&&rowComplete(item);
-        item->setHidden(hideMissing||hideDone);
+        // A filter is not a song change. Keep the owner of a pending request or
+        // unsaved paid result visible until the user saves, cancels or selects another song.
+        const bool ownsTranslation=id==m_aiTrackId&&(m_aiTaskId||(m_hasAiPreview&&!m_aiPreviewSaved));
+        item->setHidden(!ownsTranslation&&(hideMissing||hideDone));
         if(item->isHidden()&&item->isSelected())item->setSelected(false);
         if(!item->isHidden())any=true;
     }
@@ -819,11 +822,6 @@ void LyricsLookup::translateSelected(){
     if(contextWindow<=0||outputLimit<=0||inputBound>contextWindow-outputLimit){
         m_status->setText(QStringLiteral("整首歌词与输出上限无法放入所选模型的已确认上下文窗口；本次未发送请求。请手动选择兼容模型或精简歌词后再试。"));return;
     }
-    QString credentialError;
-    auto apiKey=m_aiRuntime->readCredential(taskConfiguration.providerId,&credentialError);
-    if(apiKey.isEmpty()){
-        m_status->setText(credentialError.isEmpty()?QStringLiteral("请先在 AI 服务设置中添加 DeepSeek API Key。"):credentialError);return;
-    }
     QMessageBox consent(this);consent.setObjectName("lyricsAiCloudConsent");consent.setIcon(QMessageBox::Information);
     consent.setWindowTitle(QStringLiteral("发送整首歌词到 DeepSeek"));
     consent.setText(QStringLiteral("Relaxer 将把歌曲名、歌手、风格提示和整首歌词发送至 DeepSeek 官方服务器处理。\n\n"
@@ -832,7 +830,7 @@ void LyricsLookup::translateSelected(){
     auto *decline=consent.addButton(QStringLiteral("不发送"),QMessageBox::RejectRole);decline->setObjectName("lyricsAiConsentCancel");
     auto *send=consent.addButton(QStringLiteral("发送一次整首歌词"),QMessageBox::AcceptRole);send->setObjectName("lyricsAiConsentSend");
     consent.setDefaultButton(qobject_cast<QPushButton *>(decline));consent.exec();
-    if(consent.clickedButton()!=send){apiKey.fill(QChar());m_status->setText(QStringLiteral("未发送歌词。"));return;}
+    if(consent.clickedButton()!=send){m_status->setText(QStringLiteral("未发送歌词。"));return;}
 
     ai::ChatCompletionRequest request;request.modelId=taskConfiguration.modelId;request.messages=messages;
     request.thinkingEnabled=taskConfiguration.thinkingEnabled;request.reasoningEffort=taskConfiguration.reasoningEffort;
@@ -842,8 +840,7 @@ void LyricsLookup::translateSelected(){
     m_aiTargetLanguage=targetLanguage;m_aiStylePrompt=stylePrompt;m_aiConfigurationDigest=currentAiConfigurationDigest();
     m_aiTranslations.clear();m_aiMergedBytes.clear();m_aiPreviewSaved=false;m_hasAiPreview=false;
     m_aiActiveGeneration=++m_aiGeneration;
-    m_aiTaskId=m_aiRuntime->requests()->complete(taskConfiguration.providerId,apiKey,request);
-    apiKey.fill(QChar());
+    m_aiTaskId=m_aiRuntime->requests()->complete(taskConfiguration.providerId,request);
     if(!m_aiTaskId){m_status->setText(QStringLiteral("AI 请求未能启动。"));return;}
     m_translate->setEnabled(false);m_aiCancelTranslation->setEnabled(true);
     m_translationProgress->setRange(0,0);m_translationProgressLabel->setText(QStringLiteral("已发送一次整首歌词请求，正在等待 DeepSeek 响应。"));

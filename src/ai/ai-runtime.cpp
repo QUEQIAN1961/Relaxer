@@ -82,61 +82,6 @@ AiServiceConfiguration configurationFromJson(const QJsonObject &object) {
     return configuration;
 }
 
-void ModelRegistry::restoreUnverified(const QList<ModelInfo> &models) {
-    m_models.clear();
-    for (auto model : models) {
-        model.availability = ModelAvailability::Unverified;
-        if (!find(model.providerId, model.id))
-            m_models.append(model);
-    }
-}
-
-void ModelRegistry::applyLiveCatalog(const QString &providerId, const QList<ModelInfo> &models) {
-    QList<ModelInfo> retained;
-    for (auto model : m_models) {
-        if (model.providerId != providerId) {
-            retained.append(model);
-            continue;
-        }
-        const bool present = std::any_of(models.cbegin(), models.cend(), [&](const ModelInfo &live) {
-            return live.id == model.id;
-        });
-        if (!present) {
-            model.availability = ModelAvailability::Unavailable;
-            retained.append(model);
-        }
-    }
-    for (auto model : models) {
-        model.providerId = providerId;
-        model.availability = ModelAvailability::Available;
-        const auto existing = std::find_if(retained.begin(), retained.end(), [&](const ModelInfo &candidate) {
-            return candidate.providerId == providerId && candidate.id == model.id;
-        });
-        if (existing == retained.end())
-            retained.append(model);
-        else
-            *existing = model;
-    }
-    m_models = retained;
-}
-
-QList<ModelInfo> ModelRegistry::models() const { return m_models; }
-
-QList<ModelInfo> ModelRegistry::models(const QString &providerId) const {
-    QList<ModelInfo> result;
-    for (const auto &model : m_models)
-        if (providerId.isEmpty() || model.providerId == providerId)
-            result.append(model);
-    return result;
-}
-
-const ModelInfo *ModelRegistry::find(const QString &providerId, const QString &modelId) const {
-    for (const auto &model : m_models)
-        if (model.providerId == providerId && model.id == modelId)
-            return &model;
-    return nullptr;
-}
-
 AiRuntime::AiRuntime(Library *library, QObject *parent) : AiRuntime(library, {}, parent) {}
 
 AiRuntime::AiRuntime(Library *library, std::unique_ptr<CredentialStore> credentials, QObject *parent)
@@ -144,28 +89,35 @@ AiRuntime::AiRuntime(Library *library, std::unique_ptr<CredentialStore> credenti
     initialize(std::move(credentials));
 }
 
-AiRuntime::AiRuntime(Library *library, QUrl deepSeekBaseUrl, std::unique_ptr<CredentialStore> credentials,
+AiRuntime::AiRuntime(Library *library, DeepSeekProvider::MockEndpoint endpoint, std::unique_ptr<CredentialStore> credentials,
                      QObject *parent)
     : QObject(parent), m_settings(library) {
-    initialize(std::move(credentials), std::move(deepSeekBaseUrl));
+    initialize(std::move(credentials), std::move(endpoint.url), true);
 }
 
-void AiRuntime::initialize(std::unique_ptr<CredentialStore> credentials, QUrl deepSeekBaseUrl) {
+AiRuntime::~AiRuntime() {
+    // The coordinator borrows member registries/stores; terminate it while they live.
+    delete m_requests;
+    m_requests = nullptr;
+}
+
+void AiRuntime::initialize(std::unique_ptr<CredentialStore> credentials, QUrl deepSeekBaseUrl, bool mockEndpoint) {
     m_configuration = configurationFromJson(m_settings.get(QString::fromLatin1(ConfigKey)).toObject());
     m_models.restoreUnverified(m_configuration.cachedModels);
     if (credentials) {
         m_ownedCredentials = std::move(credentials);
         m_credentials = m_ownedCredentials.get();
-    } else {
+    } else if (!mockEndpoint) {
         m_ownedCredentials = std::make_unique<WindowsCredentialStore>();
         m_credentials = m_ownedCredentials.get();
     }
-    m_deepSeek = new DeepSeekProvider(std::move(deepSeekBaseUrl), this);
+    m_deepSeek = mockEndpoint ? new DeepSeekProvider(DeepSeekProvider::MockEndpoint{std::move(deepSeekBaseUrl)}, this)
+                             : new DeepSeekProvider(std::move(deepSeekBaseUrl), this);
     m_providers.add(m_deepSeek);
-    m_requests = new AiRequestCoordinator(&m_providers, this);
+    m_requests = new AiRequestCoordinator(&m_providers, m_credentials, &m_models, this);
     connect(m_requests, &AiRequestCoordinator::modelsFinished, this,
-            [this](quint64, const QString &providerId, const QList<ModelInfo> &models, const ProviderError &error) {
-        if (error.isEmpty())
+            [this](quint64 taskId, const QString &providerId, const QList<ModelInfo> &models, const ProviderError &error) {
+        if (error.isEmpty() && taskId == m_requests->latestModelTask(providerId))
             acceptModelCatalog(providerId, models);
     });
 }
@@ -200,25 +152,13 @@ QString AiRuntime::validateConfiguration(const AiTaskConfiguration &configuratio
         return "请先在 AI 服务设置中选择供应商";
     if (!m_providers.provider(configuration.providerId))
         return "所选 AI 供应商不可用";
-    if (configuration.modelId.isEmpty())
-        return "请先选择模型";
-    const auto *selected = m_models.find(configuration.providerId, configuration.modelId);
-    if (!selected)
-        return "请先刷新模型列表并确认模型可用";
-    if (selected->availability != ModelAvailability::Available)
-        return "所选模型尚未验证可用，请刷新模型列表";
-    if (!selected->protocol.supportsStructuredChat())
-        return "此模型的 Chat Completions、JSON 输出或思考控制协议尚未确认";
-    if (!selected->capabilities.inputModalities.contains("text") ||
-        !selected->capabilities.outputModalities.contains("text"))
-        return "所选模型未确认支持文本输入和输出";
-    if (selected->capabilities.contextWindow <= 0 || selected->capabilities.maxOutputTokens <= 0)
-        return "所选模型的上下文或输出上限尚未确认";
-    if (configuration.thinkingEnabled) {
-        if (!selected->capabilities.reasoningMetadataKnown ||
-            !selected->capabilities.reasoningEfforts.contains(configuration.reasoningEffort))
-            return "当前模型不支持所选思考强度，请重新选择";
-    }
+    const auto error = validateModelSelection(m_models.find(configuration.providerId, configuration.modelId),
+                                               configuration.providerId, configuration.modelId,
+                                               configuration.thinkingEnabled, configuration.reasoningEffort);
+    if (!error.isEmpty()) return error;
+    QString credentialError;
+    if (!hasCredential(configuration.providerId, &credentialError))
+        return credentialError.isEmpty() ? QStringLiteral("请先安全保存有效的供应商 API Key") : credentialError;
     return {};
 }
 
@@ -228,8 +168,8 @@ const ModelInfo *AiRuntime::model(const QString &providerId, const QString &mode
 
 QList<ModelInfo> AiRuntime::models(const QString &providerId) const { return m_models.models(providerId); }
 
-bool AiRuntime::hasCredential(const QString &providerId, QString *error) {
-    if (!m_credentials) {
+bool AiRuntime::hasCredential(const QString &providerId, QString *error) const {
+    if (!m_credentials || (m_deepSeek && m_deepSeek->usesMockEndpoint() && !m_credentials->allowsMockRequests())) {
         if (error)
             *error = "安全凭据存储不可用";
         return false;
@@ -237,21 +177,11 @@ bool AiRuntime::hasCredential(const QString &providerId, QString *error) {
     auto result = m_credentials->read(providerId);
     if (error)
         *error = result.error;
-    const bool found = result.ok && result.found && !result.secret.isEmpty();
+    auto normalized = normalizedApiKey(result.secret);
+    const bool found = result.ok && result.found && !normalized.isEmpty();
+    normalized.fill(QChar());
     result.secret.fill(QChar());
     return found;
-}
-
-QString AiRuntime::readCredential(const QString &providerId, QString *error) {
-    if (!m_credentials) {
-        if (error)
-            *error = "安全凭据存储不可用";
-        return {};
-    }
-    auto result = m_credentials->read(providerId);
-    if (error)
-        *error = result.error;
-    return result.ok && result.found ? result.secret : QString();
 }
 
 void AiRuntime::acceptModelCatalog(const QString &providerId, const QList<ModelInfo> &models) {

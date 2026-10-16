@@ -20,11 +20,14 @@ class AiSettingsPage final : public QWidget {
     Q_OBJECT
   public:
     explicit AiSettingsPage(AiRuntime *runtime, QWidget *parent = nullptr);
+    ~AiSettingsPage() override;
     void setSubpageForTest(const QString &name);
   signals:
     void backRequested();
+  protected:
+    void hideEvent(QHideEvent *event) override;
   private:
-    AiRuntime *m_runtime;
+    QPointer<AiRuntime> m_runtime;
     QStackedWidget *m_stack = nullptr;
     QWidget *m_home = nullptr;
     QWidget *m_translation = nullptr;
@@ -55,11 +58,12 @@ class AiSettingsPage final : public QWidget {
     void populate();
     void updateCredentialStatus();
     void updateModels();
-    void updateThinkingOptions(QComboBox *combo, const AiTaskConfiguration &selection, const ModelInfo *model);
+    void updateThinkingOptions(QComboBox *combo, const AiTaskConfiguration &selection, const ModelInfo *model, bool featureEnabled = true);
     void updateCapabilityText();
     void saveConfiguration(const AiServiceConfiguration &configuration, QLabel *status);
     void selectSubpage(bool translation);
     void setRequestState(bool running, const QString &message = {});
+    void cancelRefresh();
     void requestModelList(const QString &purpose);
 };
 

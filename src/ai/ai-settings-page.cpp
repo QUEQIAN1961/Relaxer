@@ -5,6 +5,7 @@
 #include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
+#include <QHideEvent>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -123,6 +124,7 @@ AiSettingsPage::AiSettingsPage(AiRuntime *runtime, QWidget *parent)
     buildTranslation();
     m_stack->addWidget(m_home);
     m_stack->addWidget(m_translation);
+    if (m_runtime) {
     connect(m_runtime, &AiRuntime::configurationChanged, this, &AiSettingsPage::populate);
     connect(m_runtime, &AiRuntime::modelsChanged, this, &AiSettingsPage::populate);
     connect(m_runtime->requests(), &AiRequestCoordinator::modelsFinished, this,
@@ -146,7 +148,26 @@ AiSettingsPage::AiSettingsPage(AiRuntime *runtime, QWidget *parent)
         updateCredentialStatus();
         updateModels();
     });
+    connect(m_runtime, &QObject::destroyed, this, [this] {
+        m_pendingRefresh = 0;
+        setEnabled(false);
+    });
+    } else {
+        setEnabled(false);
+    }
     populate();
+}
+
+AiSettingsPage::~AiSettingsPage() { cancelRefresh(); }
+void AiSettingsPage::hideEvent(QHideEvent *event) {
+    cancelRefresh();
+    QWidget::hideEvent(event);
+}
+void AiSettingsPage::cancelRefresh() {
+    const auto taskId = m_pendingRefresh;
+    m_pendingRefresh = 0;
+    if (taskId && m_runtime) m_runtime->requests()->cancel(taskId);
+    setRequestState(false);
 }
 
 void AiSettingsPage::buildHome() {
@@ -243,8 +264,9 @@ void AiSettingsPage::buildHome() {
     outer->addWidget(makeScrollPage(body, &m_homeScroll, m_home), 1);
     m_homeScroll->setObjectName("aiServiceScroll");
     connect(m_provider, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
+        cancelRefresh();
         auto configuration = m_runtime->configuration();
         configuration.defaults.providerId = m_provider->currentData().toString();
         if (configuration.defaults.providerId == DeepSeekProviderId && configuration.defaults.modelId.isEmpty())
@@ -256,7 +278,7 @@ void AiSettingsPage::buildHome() {
         updateModels();
     });
     connect(m_model, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
         auto configuration = m_runtime->configuration();
         configuration.defaults.modelId = m_model->currentData().toString();
@@ -266,7 +288,7 @@ void AiSettingsPage::buildHome() {
         updateCapabilityText();
     });
     connect(m_thinking, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
         auto configuration = m_runtime->configuration();
         setEffort(configuration.defaults, m_thinking->currentData().toString());
@@ -275,6 +297,7 @@ void AiSettingsPage::buildHome() {
             populate();
     });
     connect(m_saveKey, &QPushButton::clicked, this, [this] {
+        if (!m_runtime) return;
         const auto providerId = m_provider->currentData().toString();
         auto secret = m_keyInput->text().trimmed();
         if (providerId.isEmpty()) {
@@ -297,6 +320,7 @@ void AiSettingsPage::buildHome() {
         updateCredentialStatus();
     });
     connect(m_deleteKey, &QPushButton::clicked, this, [this] {
+        if (!m_runtime) return;
         const auto providerId = m_provider->currentData().toString();
         if (providerId.isEmpty()) {
             m_credentialStatus->setText("请先选择供应商");
@@ -385,7 +409,7 @@ void AiSettingsPage::buildTranslation() {
     m_translationScroll->setObjectName("aiTranslationSettingsScroll");
 
     connect(m_translationUsesDefaults, &QCheckBox::toggled, this, [this](bool useDefaults) {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
         auto configuration = m_runtime->configuration();
         configuration.translationUsesDefaults = useDefaults;
@@ -395,7 +419,7 @@ void AiSettingsPage::buildTranslation() {
         populate();
     });
     connect(m_translationProvider, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
         auto configuration = m_runtime->configuration();
         configuration.translationOverride.providerId = m_translationProvider->currentData().toString();
@@ -405,31 +429,31 @@ void AiSettingsPage::buildTranslation() {
         updateModels();
     });
     connect(m_translationModel, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
         auto configuration = m_runtime->configuration();
         configuration.translationOverride.modelId = m_translationModel->currentData().toString();
         saveConfiguration(configuration, m_translationStatus);
         updateThinkingOptions(m_translationThinking, configuration.translationOverride,
                               m_runtime->model(configuration.translationOverride.providerId,
-                                               configuration.translationOverride.modelId));
+                                               configuration.translationOverride.modelId), !configuration.translationUsesDefaults);
     });
     connect(m_translationThinking, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
         auto configuration = m_runtime->configuration();
         setEffort(configuration.translationOverride, m_translationThinking->currentData().toString());
         saveConfiguration(configuration, m_translationStatus);
     });
     connect(m_language, &QComboBox::currentIndexChanged, this, [this](int) {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
         auto configuration = m_runtime->configuration();
         configuration.targetLanguage = m_language->currentData().toString();
         saveConfiguration(configuration, m_translationStatus);
     });
     connect(m_stylePrompt, &QPlainTextEdit::textChanged, this, [this] {
-        if (m_populating)
+        if (m_populating || !m_runtime)
             return;
         auto configuration = m_runtime->configuration();
         configuration.translationStylePrompt = m_stylePrompt->toPlainText();
@@ -473,11 +497,10 @@ void AiSettingsPage::populate() {
     updateModels();
     const bool overrideEnabled = !configuration.translationUsesDefaults;
     m_translationProvider->setEnabled(overrideEnabled);
-    m_translationModel->setEnabled(overrideEnabled);
-    m_translationThinking->setEnabled(overrideEnabled);
 }
 
 void AiSettingsPage::updateCredentialStatus() {
+    if (!m_runtime) return;
     const auto providerId = m_provider->currentData().toString();
     const bool selected = !providerId.isEmpty();
     m_keyInput->setEnabled(selected);
@@ -528,11 +551,10 @@ void AiSettingsPage::updateModels() {
     updateThinkingOptions(m_thinking, configuration.defaults,
                           m_runtime->model(globalProvider, globalModelId));
     updateThinkingOptions(m_translationThinking, translation,
-                          m_runtime->model(translation.providerId, translation.modelId));
+                          m_runtime->model(translation.providerId, translation.modelId), !configuration.translationUsesDefaults);
     const bool overrideEnabled = !configuration.translationUsesDefaults;
     m_translationProvider->setEnabled(overrideEnabled);
     m_translationModel->setEnabled(overrideEnabled && !translation.providerId.isEmpty());
-    m_translationThinking->setEnabled(overrideEnabled && !translation.providerId.isEmpty());
     m_populating = false;
     updateCapabilityText();
     const auto error = m_runtime->validateConfiguration(m_runtime->translationConfiguration());
@@ -541,7 +563,7 @@ void AiSettingsPage::updateModels() {
 }
 
 void AiSettingsPage::updateThinkingOptions(QComboBox *combo, const AiTaskConfiguration &selection,
-                                            const ModelInfo *model) {
+                                            const ModelInfo *model, bool featureEnabled) {
     const QSignalBlocker blocker(combo);
     const auto requested = currentEffort(selection);
     combo->clear();
@@ -562,11 +584,9 @@ void AiSettingsPage::updateThinkingOptions(QComboBox *combo, const AiTaskConfigu
     combo->setToolTip(model && model->capabilities.reasoningMetadataKnown
         ? QString("此模型支持：%1").arg(model->capabilities.reasoningEfforts.join(", "))
         : QStringLiteral("尚未确认此模型支持的思考强度"));
-    if ((!model || !model->capabilities.reasoningMetadataKnown ||
-         model->capabilities.reasoningEfforts.isEmpty()) && requested == "off")
-        combo->setEnabled(false);
-    else
-        combo->setEnabled(true);
+    combo->setEnabled(featureEnabled && model && model->availability == ModelAvailability::Available &&
+                      model->protocol.supportsStructuredChat() && model->capabilities.reasoningMetadataKnown &&
+                      !model->capabilities.reasoningEfforts.isEmpty());
 }
 
 void AiSettingsPage::updateCapabilityText() {
@@ -623,7 +643,7 @@ void AiSettingsPage::setRequestState(bool running, const QString &message) {
 }
 
 void AiSettingsPage::requestModelList(const QString &purpose) {
-    if (m_pendingRefresh)
+    if (m_pendingRefresh || !m_runtime)
         return;
     const auto providerId = m_provider->currentData().toString();
     if (providerId.isEmpty()) {
@@ -631,14 +651,12 @@ void AiSettingsPage::requestModelList(const QString &purpose) {
         return;
     }
     QString error;
-    auto key = m_runtime->readCredential(providerId, &error);
-    if (key.isEmpty()) {
+    if (!m_runtime->hasCredential(providerId, &error)) {
         m_providerStatus->setText(error.isEmpty() ? "请先安全保存 API Key" : error);
         return;
     }
     setRequestState(true, purpose + "中…");
-    m_pendingRefresh = m_runtime->requests()->fetchModels(providerId, key);
-    key.fill(QChar());
+    m_pendingRefresh = m_runtime->requests()->fetchModels(providerId);
 }
 
 void AiSettingsPage::setSubpageForTest(const QString &name) {

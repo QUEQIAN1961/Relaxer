@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSet>
+#include <algorithm>
 
 namespace relaxer::ai {
 namespace {
@@ -153,4 +154,82 @@ QString modelAvailabilityText(ModelAvailability availability) {
     }
     return "尚未验证";
 }
+void ModelRegistry::restoreUnverified(const QList<ModelInfo> &models) {
+    m_models.clear();
+    for (auto model : models) {
+        model.availability = ModelAvailability::Unverified;
+        if (!find(model.providerId, model.id))
+            m_models.append(model);
+    }
+}
+
+void ModelRegistry::applyLiveCatalog(const QString &providerId, const QList<ModelInfo> &models) {
+    QList<ModelInfo> retained;
+    for (auto model : m_models) {
+        if (model.providerId != providerId) {
+            retained.append(model);
+            continue;
+        }
+        const bool present = std::any_of(models.cbegin(), models.cend(), [&](const ModelInfo &live) {
+            return live.id == model.id;
+        });
+        if (!present) {
+            model.availability = ModelAvailability::Unavailable;
+            retained.append(model);
+        }
+    }
+    for (auto model : models) {
+        model.providerId = providerId;
+        model.availability = ModelAvailability::Available;
+        const auto existing = std::find_if(retained.begin(), retained.end(), [&](const ModelInfo &candidate) {
+            return candidate.providerId == providerId && candidate.id == model.id;
+        });
+        if (existing == retained.end())
+            retained.append(model);
+        else
+            *existing = model;
+    }
+    m_models = retained;
+}
+
+QList<ModelInfo> ModelRegistry::models() const { return m_models; }
+
+QList<ModelInfo> ModelRegistry::models(const QString &providerId) const {
+    QList<ModelInfo> result;
+    for (const auto &model : m_models)
+        if (providerId.isEmpty() || model.providerId == providerId)
+            result.append(model);
+    return result;
+}
+
+const ModelInfo *ModelRegistry::find(const QString &providerId, const QString &modelId) const {
+    for (const auto &model : m_models)
+        if (model.providerId == providerId && model.id == modelId)
+            return &model;
+    return nullptr;
+}
+
+
+QString validateModelSelection(const ModelInfo *selected, const QString &providerId, const QString &modelId,
+                               bool thinkingEnabled, const QString &effort) {
+    if (modelId.isEmpty())
+        return QStringLiteral("请先选择模型");
+    if (!selected || selected->providerId != providerId || selected->id != modelId)
+        return QStringLiteral("请先刷新模型列表并确认模型可用");
+    if (selected->availability != ModelAvailability::Available)
+        return QStringLiteral("所选模型尚未验证可用，请刷新模型列表");
+    if (!selected->protocol.supportsStructuredChat())
+        return QStringLiteral("此模型的 Chat Completions、JSON 输出或思考控制协议尚未确认");
+    if (!selected->capabilities.inputModalities.contains("text") ||
+        !selected->capabilities.outputModalities.contains("text"))
+        return QStringLiteral("所选模型未确认支持文本输入和输出");
+    if (selected->capabilities.contextWindow <= 0 || selected->capabilities.maxOutputTokens <= 0)
+        return QStringLiteral("所选模型的上下文或输出上限尚未确认");
+    if (thinkingEnabled && (!selected->capabilities.reasoningMetadataKnown ||
+        !selected->capabilities.reasoningEfforts.contains(effort) ||
+        (effort != "low" && effort != "high" && effort != "max")))
+        return QStringLiteral("当前模型不支持所选思考强度，请重新选择");
+    return {};
+}
+
 } // namespace relaxer::ai

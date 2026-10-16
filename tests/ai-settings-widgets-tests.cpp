@@ -9,6 +9,9 @@
 #include <QScrollArea>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QSignalSpy>
 
 using namespace relaxer;
 using namespace relaxer::ai;
@@ -38,6 +41,7 @@ class MemoryCredentials final : public CredentialStore {
         return true;
     }
     bool supported() const override { return true; }
+    bool allowsMockRequests() const override { return true; }
   private:
     QHash<QString, QString> m_values;
 };
@@ -76,6 +80,7 @@ class AiSettingsWidgetsTests final : public QObject {
         Library library(directory.filePath("library"));
         QVERIFY(library.open());
         AiRuntime runtime(&library, std::make_unique<MemoryCredentials>());
+        QVERIFY(runtime.credentials()->store("deepseek", "fake-widget-key", nullptr));
         AiSettingsPage page(&runtime);
         page.resize(740, 620);
         page.show();
@@ -92,13 +97,13 @@ class AiSettingsWidgetsTests final : public QObject {
         save->click();
         QVERIFY(key->text().isEmpty());
         QVERIFY(runtime.hasCredential("deepseek"));
-        QCOMPARE(runtime.readCredential("deepseek"), QString("fake-only-ui-key"));
+        QCOMPARE(runtime.credentials()->read("deepseek").secret, QString("fake-only-ui-key"));
         QVERIFY(!library.setting("aiServiceConfigV1").toString().contains("fake-only-ui-key"));
         QVERIFY(!library.setting("aiServiceConfigV1").toObject().value("defaults").toString().contains("fake-only-ui-key"));
 
         key->setText("replacement-fake-key");
         save->click();
-        QCOMPARE(runtime.readCredential("deepseek"), QString("replacement-fake-key"));
+        QCOMPARE(runtime.credentials()->read("deepseek").secret, QString("replacement-fake-key"));
         remove->click();
         QVERIFY(!runtime.hasCredential("deepseek"));
     }
@@ -108,6 +113,7 @@ class AiSettingsWidgetsTests final : public QObject {
         Library library(directory.filePath("library"));
         QVERIFY(library.open());
         AiRuntime runtime(&library, std::make_unique<MemoryCredentials>());
+        QVERIFY(runtime.credentials()->store("deepseek", "fake-widget-key", nullptr));
         AiSettingsPage page(&runtime);
         auto *provider = page.findChild<QComboBox *>("aiProviderSelection");
         auto *model = page.findChild<QComboBox *>("aiDefaultModel");
@@ -156,11 +162,97 @@ class AiSettingsWidgetsTests final : public QObject {
         QCOMPARE(runtime.model("deepseek", "text-only-unknown")->availability, ModelAvailability::Unavailable);
     }
 
+    void translationThinkingEnableStateCombinesAllPrerequisites() {
+        QTemporaryDir directory;
+        Library library(directory.filePath("library"));
+        QVERIFY(library.open());
+        AiRuntime runtime(&library, std::make_unique<MemoryCredentials>());
+        runtime.acceptModelCatalog("deepseek", {liveModel("deepseek-flash", "Flash", false)});
+        auto configuration = runtime.configuration();
+        configuration.defaults = {"deepseek", "deepseek-flash", false, {}};
+        configuration.translationOverride = configuration.defaults;
+        configuration.translationUsesDefaults = false;
+        QVERIFY(runtime.saveConfiguration(configuration));
+        AiSettingsPage page(&runtime);
+        auto *thinking = page.findChild<QComboBox *>("aiTranslationThinking");
+        auto *useGlobal = page.findChild<QCheckBox *>("aiTranslationUseGlobal");
+        QVERIFY(thinking && useGlobal);
+        QVERIFY(!thinking->isEnabled());
+        runtime.acceptModelCatalog("deepseek", {liveModel("deepseek-flash", "Flash", true)});
+        QVERIFY(thinking->isEnabled());
+        useGlobal->setChecked(true);
+        QVERIFY(!thinking->isEnabled());
+        useGlobal->setChecked(false);
+        QVERIFY(thinking->isEnabled());
+        runtime.acceptModelCatalog("deepseek", {});
+        QVERIFY(!thinking->isEnabled());
+        configuration = runtime.configuration();
+        configuration.translationOverride.providerId.clear();
+        QVERIFY(runtime.saveConfiguration(configuration));
+        QVERIFY(!thinking->isEnabled());
+    }
+
+    void leavingSettingsCancelsRefreshAndIgnoresLateCatalog() {
+        QTemporaryDir directory;
+        Library library(directory.filePath("library"));
+        QVERIFY(library.open());
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const QUrl url(QString("http://127.0.0.1:%1").arg(server.serverPort()));
+        AiRuntime runtime(&library, DeepSeekProvider::MockEndpoint{url}, std::make_unique<MemoryCredentials>());
+        QVERIFY(runtime.credentials()->store("deepseek", "fake-page-key", nullptr));
+        auto configuration = runtime.configuration();
+        configuration.defaults = {"deepseek", "deepseek-flash", false, {}};
+        QVERIFY(runtime.saveConfiguration(configuration));
+        const auto saved = library.setting("aiServiceConfigV1");
+        AiSettingsPage page(&runtime);
+        page.show();
+        auto *refresh = page.findChild<QPushButton *>("aiModelRefresh");
+        refresh->click();
+        QTRY_VERIFY(server.hasPendingConnections());
+        auto *socket = server.nextPendingConnection();
+        QTRY_VERIFY(socket->bytesAvailable() > 0);
+        const auto taskId = runtime.requests()->latestModelTask("deepseek");
+        QVERIFY(runtime.requests()->isPending(taskId));
+        page.hide();
+        QVERIFY(!runtime.requests()->isPending(taskId));
+        runtime.deepSeekProvider()->modelsFinished(1, {liveModel("deepseek-flash", "late model")}, {});
+        QTest::qWait(40);
+        QCOMPARE(library.setting("aiServiceConfigV1"), saved);
+        QVERIFY(runtime.models("deepseek").isEmpty());
+        page.show();
+        QVERIFY(refresh->isEnabled());
+    }
+
+    void settingsCanOutliveRuntimeWithPendingRefresh() {
+        QTemporaryDir directory;
+        Library library(directory.filePath("library"));
+        QVERIFY(library.open());
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const QUrl url(QString("http://127.0.0.1:%1").arg(server.serverPort()));
+        auto runtime = std::make_unique<AiRuntime>(&library, DeepSeekProvider::MockEndpoint{url}, std::make_unique<MemoryCredentials>());
+        QVERIFY(runtime->credentials()->store("deepseek", "fake-destruction-key", nullptr));
+        auto configuration = runtime->configuration();
+        configuration.defaults.providerId = "deepseek";
+        QVERIFY(runtime->saveConfiguration(configuration));
+        AiSettingsPage page(runtime.get());
+        page.show();
+        page.findChild<QPushButton *>("aiModelRefresh")->click();
+        QTRY_VERIFY(server.hasPendingConnections());
+        runtime.reset();
+        QVERIFY(!page.isEnabled());
+        page.findChild<QComboBox *>("aiProviderSelection")->setCurrentIndex(1);
+        page.findChild<QLineEdit *>("aiCredentialInput")->setText("fake-after-destruction");
+        page.hide();
+    }
+
     void settingsNavigationAndNarrowScrollableLayoutWork() {
         QTemporaryDir directory;
         Library library(directory.filePath("library"));
         QVERIFY(library.open());
         AiRuntime runtime(&library, std::make_unique<MemoryCredentials>());
+        QVERIFY(runtime.credentials()->store("deepseek", "fake-widget-key", nullptr));
         AiSettingsPage page(&runtime);
         page.resize(620, 520);
         page.show();

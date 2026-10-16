@@ -11,6 +11,8 @@ struct CredentialReadResult {
     QString error;
 };
 
+QString normalizedApiKey(const QString &secret, QString *error = nullptr);
+
 class CredentialStore {
   public:
     virtual ~CredentialStore() = default;
@@ -18,6 +20,9 @@ class CredentialStore {
     virtual CredentialReadResult read(const QString &providerId) = 0;
     virtual bool remove(const QString &providerId, QString *error = nullptr) = 0;
     virtual bool supported() const = 0;
+    // Explicit test stores only; production credentials can never use loopback HTTP.
+    virtual bool allowsMockRequests() const { return false; };
+
 };
 
 class WindowsCredentialStore final : public CredentialStore {
