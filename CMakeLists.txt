@@ -7,8 +7,12 @@ set(CMAKE_AUTORCC ON)
 include(scripts/source-fingerprint.cmake)
 relaxer_track_source_content("${CMAKE_CURRENT_SOURCE_DIR}")
 option(RELAXER_QUEUE_ONLY "Build only the independent Queue and its tests" OFF)
+option(RELAXER_LYRIC_MATCH_ONLY "Build only the independent lyric matching tests" OFF)
+if(RELAXER_QUEUE_ONLY AND RELAXER_LYRIC_MATCH_ONLY)
+  message(FATAL_ERROR "Select only one independent test configuration")
+endif()
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Test)
-add_library(relaxer_domain STATIC src/domain/queue.cpp)
+add_library(relaxer_domain STATIC src/domain/queue.cpp src/domain/lyric-match.cpp)
 # Queue is a value object; it owns no QObject meta-object or resources.
 set_target_properties(relaxer_domain PROPERTIES AUTOMOC OFF AUTORCC OFF)
 target_include_directories(relaxer_domain PUBLIC src)
@@ -29,6 +33,7 @@ function(relaxer_add_qt_test test_name target)
   set_tests_properties(${test_name} PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_MEDIA_BACKEND=ffmpeg;RELAXER_SKIP_AUDIO_DEVICE_TESTS=1" TIMEOUT 120)
 endfunction()
+if(NOT RELAXER_LYRIC_MATCH_ONLY)
 add_executable(relaxer_queue_tests tests/queue-tests.cpp)
 target_link_libraries(relaxer_queue_tests PRIVATE relaxer_domain Qt6::Test)
 relaxer_add_qt_test(relaxer_queue relaxer_queue_tests)
@@ -47,9 +52,35 @@ if(CMAKE_OBJDUMP AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
 else()
   message(WARNING "Queue binary import audit requires objdump on Windows or Linux")
 endif()
+endif()
 # This opt-in configuration proves that neither the GUI nor the media/storage
 # packages are needed to build and test Queue. The default builds every suite.
 if(RELAXER_QUEUE_ONLY)
+  return()
+endif()
+# The parser is compiled only into this standalone test as an unchanged fixture
+# adapter. relaxer_domain itself never calls it and has no core-library edge.
+add_executable(relaxer_lyric_match_tests tests/lyric-match-tests.cpp src/lyrics.cpp)
+target_link_libraries(relaxer_lyric_match_tests PRIVATE relaxer_domain Qt6::Test)
+target_compile_definitions(relaxer_lyric_match_tests PRIVATE RELAXER_LYRIC_MATCH_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lyric-match-baseline.json")
+if(MSVC)
+  target_compile_options(relaxer_lyric_match_tests PRIVATE /utf-8)
+endif()
+relaxer_add_qt_test(relaxer_lyric_match relaxer_lyric_match_tests)
+if(CMAKE_OBJDUMP AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+  add_custom_command(TARGET relaxer_lyric_match_tests POST_BUILD
+    COMMAND "${CMAKE_COMMAND}"
+      "-DRELAXER_TEST_EXECUTABLE=$<TARGET_FILE:relaxer_lyric_match_tests>"
+      "-DRELAXER_OBJDUMP=${CMAKE_OBJDUMP}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-lyric-match-link.cmake"
+    VERBATIM)
+  add_test(NAME relaxer_lyric_match_link COMMAND "${CMAKE_COMMAND}"
+    "-DRELAXER_TEST_EXECUTABLE=$<TARGET_FILE:relaxer_lyric_match_tests>"
+    "-DRELAXER_OBJDUMP=${CMAKE_OBJDUMP}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-lyric-match-link.cmake")
+  set_tests_properties(relaxer_lyric_match_link PROPERTIES TIMEOUT 10)
+endif()
+if(RELAXER_LYRIC_MATCH_ONLY)
   return()
 endif()
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Sql Multimedia Svg Test Network)
@@ -233,3 +264,8 @@ target_include_directories(relaxer_media_smoke_tests PRIVATE src)
 target_link_libraries(relaxer_media_smoke_tests PRIVATE Qt6::Core Qt6::Multimedia Qt6::Test)
 add_dependencies(relaxer_media_smoke_tests Relaxer)
 relaxer_add_qt_test(relaxer_media_smoke relaxer_media_smoke_tests)
+
+add_executable(relaxer_lyric_match_compat_tests tests/lyric-match-compat-tests.cpp)
+target_link_libraries(relaxer_lyric_match_compat_tests PRIVATE relaxer_ui Qt6::Test)
+target_compile_definitions(relaxer_lyric_match_compat_tests PRIVATE RELAXER_LYRIC_MATCH_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lyric-match-baseline.json")
+relaxer_add_qt_test(relaxer_lyric_match_compat relaxer_lyric_match_compat_tests)
