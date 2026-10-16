@@ -1,4 +1,9 @@
 #include "ai-request-coordinator.h"
+#include <QDateTime>
+#include <QDebug>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
 
 namespace relaxer::ai {
 
@@ -50,7 +55,7 @@ void AiRequestCoordinator::watch(AiProvider *provider) {
         const auto taskId = m_providerRequests.value(providerRequestKey(generation, requestId));
         Pending pending;
         if (!taskId || m_pending.value(taskId).kind != Kind::Completion || !takePending(taskId, &pending)) return;
-        emit completionFinished(taskId, pending.providerId, result);
+        finishCompletion(taskId, pending, result);
     }, Qt::QueuedConnection);
     connect(provider, &QObject::destroyed, this, [this, provider, generation] {
         m_watched.remove(provider);
@@ -70,14 +75,21 @@ quint64 AiRequestCoordinator::begin(const QString &providerId, Kind kind) {
     watch(provider);
     auto *timer = new QTimer(this);
     timer->setSingleShot(true);
-    m_pending.insert(taskId, Pending{providerId, provider, m_watched.value(provider), 0, kind, timer});
+    const auto operation = kind == Kind::Models ? RequestOperation::Models : RequestOperation::Completion;
+    Pending state;
+    state.providerId = providerId; state.provider = provider;
+    state.providerGeneration = m_watched.value(provider); state.kind = kind; state.timer = timer;
+    state.budget = provider ? provider->timeoutBudget(operation) : timeoutBudgetFor(operation);
+    if (m_timeoutMs) state.budget.coordinatorMs = m_timeoutMs;
+    state.elapsed.start(); state.startedAtMs = QDateTime::currentMSecsSinceEpoch();
+    m_pending.insert(taskId, state);
     connect(timer, &QTimer::timeout, this, [this, taskId] {
         const auto pending = m_pending.value(taskId);
         finishError(taskId, {"timeout", QStringLiteral("AI 请求超时，请手动重试")});
         if (pending.provider && pending.providerRequestId)
             pending.provider->cancel(pending.providerRequestId);
     });
-    timer->start(m_timeoutMs);
+    timer->start(state.budget.coordinatorMs);
     return taskId;
 }
 
@@ -133,6 +145,9 @@ quint64 AiRequestCoordinator::fetchModels(const QString &providerId) {
 
 quint64 AiRequestCoordinator::complete(const QString &providerId, const ChatCompletionRequest &request) {
     const auto taskId = begin(providerId, Kind::Completion);
+    m_pending[taskId].modelId = request.modelId;
+    m_pending[taskId].thinkingEnabled = request.thinkingEnabled;
+    m_pending[taskId].reasoningEffort = request.reasoningEffort;
     const auto *model = m_models ? m_models->find(providerId, request.modelId) : nullptr;
     const auto error = validateModelSelection(model, providerId, request.modelId,
                                                request.thinkingEnabled, request.reasoningEffort);
@@ -170,7 +185,7 @@ void AiRequestCoordinator::finishError(quint64 taskId, const ProviderError &erro
     if (pending.kind == Kind::Models)
         emit modelsFinished(taskId, pending.providerId, {}, error);
     else
-        emit completionFinished(taskId, pending.providerId, ChatCompletionResult{{}, {}, {}, error});
+        finishCompletion(taskId, pending, ChatCompletionResult{{}, {}, {}, error});
 }
 
 bool AiRequestCoordinator::cancel(quint64 taskId) {
@@ -185,7 +200,7 @@ bool AiRequestCoordinator::cancel(quint64 taskId) {
         if (pending.kind == Kind::Models)
             emit modelsFinished(taskId, pending.providerId, {}, error);
         else
-            emit completionFinished(taskId, pending.providerId, ChatCompletionResult{{}, {}, {}, error});
+            finishCompletion(taskId, pending, ChatCompletionResult{{}, {}, {}, error});
     });
     return true;
 }
@@ -195,5 +210,34 @@ quint64 AiRequestCoordinator::latestModelTask(const QString &providerId) const {
     return m_latestModelTask.value(providerId);
 }
 void AiRequestCoordinator::setTimeoutMs(int timeoutMs) { m_timeoutMs = qBound(10, timeoutMs, 300000); }
+
+void AiRequestCoordinator::finishCompletion(quint64 taskId, const Pending &pending, ChatCompletionResult result) {
+    auto &d = result.diagnostics;
+    d.elapsedMs = pending.elapsed.elapsed();
+    d.providerTimeoutMs = pending.budget.providerMs;
+    d.coordinatorTimeoutMs = pending.budget.coordinatorMs;
+    if (result.error.code == "timeout" && d.timeoutSource.isEmpty()) d.timeoutSource = QStringLiteral("coordinator");
+    if (!d.httpStatus) d.httpStatus = result.error.httpStatus;
+    // Only bounded identifier characters are logged, never arbitrary provider text.
+    auto identifier = [](const QString &value) {
+        static const QRegularExpression allowed(QStringLiteral("^[A-Za-z0-9_.:/-]{0,128}$"));
+        return allowed.match(value).hasMatch() ? value : QStringLiteral("invalid");
+    };
+    QJsonObject log{{"task_id", double(taskId)}, {"operation", "completion"},
+        {"model", identifier(pending.modelId)}, {"thinking", pending.thinkingEnabled},
+        {"effort", identifier(pending.reasoningEffort)}, {"started_at_ms", double(pending.startedAtMs)},
+        {"ended_at_ms", double(QDateTime::currentMSecsSinceEpoch())}, {"elapsed_ms", double(d.elapsedMs)},
+        {"provider_timeout_ms", d.providerTimeoutMs}, {"coordinator_timeout_ms", d.coordinatorTimeoutMs},
+        {"http_status", d.httpStatus}, {"network_error", d.networkError}, {"response_bytes", double(d.responseBytes)},
+        {"timeout_source", identifier(d.timeoutSource)}, {"finish_reason", identifier(result.finishReason)},
+        {"error", identifier(result.error.code)}, {"usage_available", result.usage.available}};
+    if (result.usage.available) {
+        log["input_tokens"] = double(result.usage.inputTokens);
+        log["output_tokens"] = double(result.usage.outputTokens);
+        log["total_tokens"] = double(result.usage.totalTokens);
+    }
+    qInfo().noquote() << "relaxer.ai" << QJsonDocument(log).toJson(QJsonDocument::Compact);
+    emit completionFinished(taskId, pending.providerId, result);
+}
 
 } // namespace relaxer::ai

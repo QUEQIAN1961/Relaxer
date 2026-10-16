@@ -35,6 +35,10 @@ class AiInfrastructureTests final : public QObject {
     void networkFailureAndProviderTimeoutAreTerminal();
     void catalogPersistenceFailureKeepsPreviousState();
     void apiKeysAndNumericMetadataAreValidated();
+    void completionFinishReasonsPreserveUsage_data();
+    void completionFinishReasonsPreserveUsage();
+    void operationBudgetsAllowSlowTranslationWithoutExtendingModelLookup();
+    void completionTimeoutsAreSingleTerminalAndIdentifyTheirLayer();
 
 };
 
@@ -708,6 +712,111 @@ void AiInfrastructureTests::apiKeysAndNumericMetadataAreValidated() {
         QVERIFY(result.ok());
         QVERIFY(!result.usage.available);
         finished.clear();
+    }
+}
+
+void AiInfrastructureTests::completionFinishReasonsPreserveUsage_data() {
+    QTest::addColumn<QString>("reason");
+    QTest::addColumn<QJsonValue>("content");
+    QTest::addColumn<QString>("error");
+    QTest::newRow("filter-null") << QString("content_filter") << QJsonValue(QJsonValue::Null) << QString("content_filter");
+    QTest::newRow("filter-empty") << QString("content_filter") << QJsonValue("") << QString("content_filter");
+    QTest::newRow("filter-text") << QString("content_filter") << QJsonValue("private-response-sentinel") << QString("content_filter");
+    QTest::newRow("resource-null") << QString("insufficient_system_resource") << QJsonValue(QJsonValue::Null) << QString("insufficient_system_resource");
+    QTest::newRow("aborted-null") << QString("aborted") << QJsonValue(QJsonValue::Null) << QString("aborted");
+    QTest::newRow("length-null") << QString("length") << QJsonValue(QJsonValue::Null) << QString("truncated");
+    QTest::newRow("tools-null") << QString("tool_calls") << QJsonValue(QJsonValue::Null) << QString("unexpected_tool_calls");
+    QTest::newRow("unknown") << QString("private-unknown-sentinel") << QJsonValue(QJsonValue::Null) << QString("incomplete");
+    QTest::newRow("stop-null") << QString("stop") << QJsonValue(QJsonValue::Null) << QString("invalid_response");
+    QTest::newRow("stop-blank") << QString("stop") << QJsonValue("  ") << QString("empty_content");
+    QTest::newRow("stop-ok") << QString("stop") << QJsonValue("{}") << QString();
+}
+
+void AiInfrastructureTests::completionFinishReasonsPreserveUsage() {
+    QFETCH(QString, reason); QFETCH(QJsonValue, content); QFETCH(QString, error);
+    HttpMock server; QVERIFY(server.listen());
+    DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl()});
+    FakeCredentials credentials; QVERIFY(credentials.store("deepseek", "fake-finish-key", nullptr));
+    ProviderRegistry providers; QVERIFY(providers.add(&provider));
+    ModelRegistry models; models.applyLiveCatalog("deepseek", {model()});
+    AiRequestCoordinator coordinator(&providers, &credentials, &models);
+    QSignalSpy finished(&coordinator, &AiRequestCoordinator::completionFinished);
+    QJsonObject response{{"choices", QJsonArray{QJsonObject{{"finish_reason",reason},
+        {"message",QJsonObject{{"content",content},{"reasoning_content","private-reasoning-sentinel"}}}}}},
+        {"usage",QJsonObject{{"prompt_tokens",17},{"completion_tokens",23},{"total_tokens",40}}}};
+    server.enqueue(200, QJsonDocument(response).toJson(QJsonDocument::Compact));
+    ChatCompletionRequest request{"deepseek-flash", QJsonArray{QJsonObject{{"role","user"},{"content","private-request-sentinel json"}}},false,{},1024};
+    const auto task = coordinator.complete("deepseek",request);
+    QTRY_COMPARE_WITH_TIMEOUT(finished.size(),1,3000);
+    const auto result = qvariant_cast<ChatCompletionResult>(finished[0][2]);
+    QCOMPARE(result.error.code,error);
+    QVERIFY(result.usage.available); QCOMPARE(result.usage.totalTokens,qint64(40));
+    QCOMPARE(result.diagnostics.httpStatus,200);
+    QCOMPARE(result.diagnostics.providerTimeoutMs,180000);
+    QCOMPARE(result.diagnostics.coordinatorTimeoutMs,185000);
+    QVERIFY(result.diagnostics.responseBytes>0);
+    if (!error.isEmpty()) QVERIFY(result.content.isEmpty());
+    QVERIFY(!result.content.contains("private-reasoning-sentinel"));
+    QVERIFY(!result.error.message.contains("private-response-sentinel"));
+    QVERIFY(!coordinator.isPending(task));
+    QTest::qWait(40); QCOMPARE(finished.size(),1); QCOMPARE(server.requestCount(),1);
+}
+
+void AiInfrastructureTests::operationBudgetsAllowSlowTranslationWithoutExtendingModelLookup() {
+    HttpMock server; QVERIFY(server.listen()); server.setHold(true);
+    DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl()});
+    QCOMPARE(provider.timeoutBudget(RequestOperation::Models).coordinatorMs,31000);
+    QCOMPARE(provider.timeoutBudget(RequestOperation::Completion).coordinatorMs,185000);
+    provider.setTimeoutMs(RequestOperation::Models,1000);
+    provider.setTimeoutMs(RequestOperation::Completion,3000);
+    FakeCredentials credentials; QVERIFY(credentials.store("deepseek","fake-slow-key",nullptr));
+    ProviderRegistry providers; QVERIFY(providers.add(&provider));
+    ModelRegistry models; models.applyLiveCatalog("deepseek",{model()});
+    AiRequestCoordinator coordinator(&providers,&credentials,&models);
+    QSignalSpy lookup(&coordinator,&AiRequestCoordinator::modelsFinished);
+    QSignalSpy translated(&coordinator,&AiRequestCoordinator::completionFinished);
+    const auto listTask=coordinator.fetchModels("deepseek");
+    ChatCompletionRequest request{"deepseek-flash",QJsonArray{QJsonObject{{"role","user"},{"content","json"}}},false,{},1024};
+    const auto translationTask=coordinator.complete("deepseek",request);
+    provider.setTimeoutMs(RequestOperation::Completion,1000); // pending task keeps its captured 3 s budget
+    // Both start together. The old shared 1 s duration would kill both.
+    QTimer::singleShot(1600,&server,[&server]{
+        server.enqueue(200,R"({"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]})");
+        server.releaseHeld();
+    });
+    QTRY_COMPARE_WITH_TIMEOUT(lookup.size(),1,3000);
+    QCOMPARE(qvariant_cast<ProviderError>(lookup[0][3]).code,QString("timeout"));
+    QTRY_COMPARE_WITH_TIMEOUT(translated.size(),1,4000);
+    const auto result=qvariant_cast<ChatCompletionResult>(translated[0][2]);
+    QVERIFY(result.ok()); QVERIFY(result.diagnostics.elapsedMs>=1000);
+    QCOMPARE(result.diagnostics.providerTimeoutMs,3000);
+    QCOMPARE(result.diagnostics.coordinatorTimeoutMs,8000);
+    QVERIFY(!coordinator.isPending(listTask)); QVERIFY(!coordinator.isPending(translationTask));
+    QCOMPARE(server.requestCount(),2);
+    // A new budget cannot mutate an already dispatched request's captured deadline.
+    const auto maximum=timeoutBudgetFor(RequestOperation::Completion,300000);
+    QVERIFY(maximum.coordinatorMs>maximum.providerMs); QCOMPARE(maximum.coordinatorMs,300000);
+}
+
+void AiInfrastructureTests::completionTimeoutsAreSingleTerminalAndIdentifyTheirLayer() {
+    for (const bool watchdog : {false,true}) {
+        HttpMock server; QVERIFY(server.listen()); server.setHold(true);
+        DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl()});
+        provider.setTimeoutMs(RequestOperation::Completion,1000);
+        FakeCredentials credentials; QVERIFY(credentials.store("deepseek","fake-timeout-key",nullptr));
+        ProviderRegistry providers; QVERIFY(providers.add(&provider));
+        ModelRegistry models; models.applyLiveCatalog("deepseek",{model()});
+        AiRequestCoordinator coordinator(&providers,&credentials,&models);
+        if(watchdog)coordinator.setTimeoutMs(100); // fault injection: force outer watchdog first
+        QSignalSpy finished(&coordinator,&AiRequestCoordinator::completionFinished);
+        ChatCompletionRequest request{"deepseek-flash",QJsonArray{QJsonObject{{"role","user"},{"content","json"}}},false,{},1024};
+        const auto task=coordinator.complete("deepseek",request);
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(),1,3000);
+        const auto result=qvariant_cast<ChatCompletionResult>(finished[0][2]);
+        QCOMPARE(result.error.code,QString("timeout"));
+        QCOMPARE(result.diagnostics.timeoutSource,watchdog?QString("coordinator"):QString("provider"));
+        QVERIFY(!result.usage.available); QVERIFY(!coordinator.isPending(task));
+        QTest::qWait(80); QCOMPARE(finished.size(),1); QCOMPARE(server.requestCount(),1);
     }
 }
 

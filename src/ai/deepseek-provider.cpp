@@ -146,7 +146,17 @@ QUrl DeepSeekProvider::endpoint(const QString &path) const {
     return url;
 }
 
-void DeepSeekProvider::setTimeoutMs(int timeoutMs) { m_timeoutMs = qBound(1000, timeoutMs, 300000); }
+void DeepSeekProvider::setTimeoutMs(int timeoutMs) {
+    setTimeoutMs(RequestOperation::Models, timeoutMs);
+    setTimeoutMs(RequestOperation::Completion, timeoutMs);
+}
+void DeepSeekProvider::setTimeoutMs(RequestOperation operation, int timeoutMs) {
+    auto &duration = operation == RequestOperation::Models ? m_modelsTimeoutMs : m_completionTimeoutMs;
+    duration = timeoutBudgetFor(operation, timeoutMs).providerMs;
+}
+TimeoutBudget DeepSeekProvider::timeoutBudget(RequestOperation operation) const {
+    return timeoutBudgetFor(operation, operation == RequestOperation::Models ? m_modelsTimeoutMs : m_completionTimeoutMs);
+}
 
 quint64 DeepSeekProvider::listModels(const QString &apiKey) {
     return send(Kind::Models, apiKey);
@@ -193,7 +203,9 @@ quint64 DeepSeekProvider::send(Kind kind, const QString &apiKey, const QByteArra
     auto *reply = kind == Kind::Models ? m_network.get(request) : m_network.post(request, body);
     auto *timer = new QTimer(this);
     timer->setSingleShot(true);
-    m_pending.insert(id, Pending{kind, reply, timer});
+    Pending pending{kind, reply, timer, {}, timeoutBudget(kind == Kind::Models ? RequestOperation::Models : RequestOperation::Completion)};
+    pending.elapsed.start();
+    m_pending.insert(id, pending);
     connect(timer, &QTimer::timeout, reply, [reply] {
         if (!reply->isFinished()) {
             reply->setProperty("relaxerTimedOut", true);
@@ -201,7 +213,7 @@ quint64 DeepSeekProvider::send(Kind kind, const QString &apiKey, const QByteArra
         }
     });
     connect(reply, &QNetworkReply::finished, this, [this, id] { finish(id); });
-    timer->start(m_timeoutMs);
+    timer->start(pending.budget.providerMs);
     return id;
 }
 
@@ -232,6 +244,19 @@ void DeepSeekProvider::finish(quint64 requestId) {
     const bool timedOut = reply->property("relaxerTimedOut").toBool();
     const bool networkError = reply->error() != QNetworkReply::NoError;
     const auto body = !cancelled && reply->isOpen() ? reply->readAll() : QByteArray();
+    RequestDiagnostics diagnostics;
+    diagnostics.elapsedMs = pending.elapsed.elapsed();
+    diagnostics.responseBytes = body.size();
+    diagnostics.httpStatus = status;
+    diagnostics.networkError = int(reply->error());
+    diagnostics.providerTimeoutMs = pending.budget.providerMs;
+    diagnostics.coordinatorTimeoutMs = pending.budget.coordinatorMs;
+    if (timedOut) diagnostics.timeoutSource = QStringLiteral("provider");
+    auto complete = [this, requestId, diagnostics](ChatCompletionResult result) {
+        result.diagnostics = diagnostics;
+        if (!result.ok()) result.content.clear();
+        emit completionFinished(requestId, result);
+    };
     reply->deleteLater();
 
     if (cancelled) {
@@ -242,7 +267,7 @@ void DeepSeekProvider::finish(quint64 requestId) {
         if (pending.kind == Kind::Models)
             emit modelsFinished(requestId, {}, error);
         else
-            emit completionFinished(requestId, ChatCompletionResult{{}, {}, {}, error});
+            complete(ChatCompletionResult{{}, {}, {}, error});
         return;
     }
     if (networkError || status < 200 || status >= 300) {
@@ -251,7 +276,7 @@ void DeepSeekProvider::finish(quint64 requestId) {
         if (pending.kind == Kind::Models)
             emit modelsFinished(requestId, {}, error);
         else
-            emit completionFinished(requestId, ChatCompletionResult{{}, {}, {}, error});
+            complete(ChatCompletionResult{{}, {}, {}, error});
         return;
     }
 
@@ -267,21 +292,10 @@ void DeepSeekProvider::finish(quint64 requestId) {
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(body, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        emit completionFinished(requestId, ChatCompletionResult{{}, {}, {}, invalidResponse("DeepSeek 返回了无效 JSON")});
+        complete(ChatCompletionResult{{}, {}, {}, invalidResponse("DeepSeek 返回了无效 JSON")});
         return;
     }
     const auto root = document.object();
-    const auto choicesValue = root.value("choices");
-    if (!choicesValue.isArray() || choicesValue.toArray().size() != 1 || !choicesValue.toArray().first().isObject()) {
-        emit completionFinished(requestId, ChatCompletionResult{{}, {}, {}, invalidResponse("DeepSeek 响应缺少唯一结果")});
-        return;
-    }
-    const auto choice = choicesValue.toArray().first().toObject();
-    const auto message = choice.value("message");
-    if (!message.isObject() || !message.toObject().value("content").isString()) {
-        emit completionFinished(requestId, ChatCompletionResult{{}, {}, {}, invalidResponse("DeepSeek 响应正文为空或类型错误")});
-        return;
-    }
     const auto usage = root.value("usage");
     TokenUsage tokenUsage;
     if (usage.isObject()) {
@@ -293,19 +307,40 @@ void DeepSeekProvider::finish(quint64 requestId) {
         tokenUsage.available = inputValid && outputValid && totalValid;
     }
     ChatCompletionResult result;
-    result.content = message.toObject().value("content").toString();
-    result.finishReason = choice.value("finish_reason").toString();
     result.usage = tokenUsage;
-    if (result.finishReason != "stop") {
-        ProviderError error;
-        error.code = result.finishReason == "length" ? "truncated" : "incomplete";
-        error.message = result.finishReason == "length"
-            ? QStringLiteral("模型输出达到长度上限，歌词未保存")
-            : QStringLiteral("模型未正常完成响应");
-        result.error = error;
-    } else if (result.content.trimmed().isEmpty()) {
-        result.error = invalidResponse("DeepSeek 返回了空内容");
+    const auto choicesValue = root.value("choices");
+    if (!choicesValue.isArray() || choicesValue.toArray().size() != 1 || !choicesValue.toArray().first().isObject()) {
+        result.error = invalidResponse("DeepSeek 响应缺少唯一结果");
+        complete(result);
+        return;
     }
-    emit completionFinished(requestId, result);
+    const auto choice = choicesValue.toArray().first().toObject();
+    result.finishReason = choice.value("finish_reason").toString();
+    if (result.finishReason != "stop") {
+        if (result.finishReason == "length")
+            result.error = {"truncated", QStringLiteral("模型输出达到长度上限，歌词未保存")};
+        else if (result.finishReason == "content_filter")
+            result.error = {"content_filter", QStringLiteral("供应商过滤了本次内容，未保存歌词；请检查原文后手动处理")};
+        else if (result.finishReason == "insufficient_system_resource")
+            result.error = {"insufficient_system_resource", QStringLiteral("供应商推理资源不足，请稍后手动重试")};
+        else if (result.finishReason == "aborted")
+            result.error = {"aborted", QStringLiteral("供应商中断了生成，请稍后手动重试")};
+        else if (result.finishReason == "tool_calls")
+            result.error = {"unexpected_tool_calls", QStringLiteral("供应商返回了意外工具调用，歌词未保存")};
+        else {
+            result.finishReason = QStringLiteral("unknown");
+            result.error = {"incomplete", QStringLiteral("模型未正常完成响应")};
+        }
+    } else {
+        const auto message = choice.value("message");
+        if (!message.isObject() || !message.toObject().value("content").isString())
+            result.error = invalidResponse("DeepSeek 响应正文为空或类型错误");
+        else {
+            result.content = message.toObject().value("content").toString();
+            if (result.content.trimmed().isEmpty())
+                result.error = {"empty_content", QStringLiteral("DeepSeek 返回了空内容，未保存歌词")};
+        }
+    }
+    complete(result);
 }
 } // namespace relaxer::ai

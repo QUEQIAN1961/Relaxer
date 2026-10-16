@@ -8,6 +8,19 @@
 
 namespace relaxer::ai {
 
+enum class RequestOperation { Models, Completion };
+struct TimeoutBudget {
+    int providerMs;
+    int coordinatorMs;
+};
+// One policy for both layers; reserve room under the 300 s watchdog ceiling.
+inline TimeoutBudget timeoutBudgetFor(RequestOperation operation, int requestedMs = 0) {
+    const bool completion = operation == RequestOperation::Completion;
+    const int grace = completion ? 5000 : 1000;
+    const int duration = qBound(1000, requestedMs > 0 ? requestedMs : (completion ? 180000 : 30000), 300000 - grace);
+    return {duration, duration + grace};
+}
+
 struct ProviderError {
     QString code;
     QString message;
@@ -31,11 +44,23 @@ struct ChatCompletionRequest {
     qint64 maxTokens = 0;
 };
 
+// Metadata only: never store request/response text, credentials or reasoning here.
+struct RequestDiagnostics {
+    qint64 elapsedMs = 0;
+    qint64 responseBytes = 0;
+    int httpStatus = 0;
+    int networkError = 0;
+    int providerTimeoutMs = 0;
+    int coordinatorTimeoutMs = 0;
+    QString timeoutSource;
+};
+
 struct ChatCompletionResult {
     QString content;
     QString finishReason;
     TokenUsage usage;
     ProviderError error;
+    RequestDiagnostics diagnostics{};
     bool ok() const { return error.isEmpty(); }
 };
 
@@ -48,6 +73,7 @@ class AiProvider : public QObject {
     ~AiProvider() override = default;
     virtual QString providerId() const = 0;
     virtual bool usesMockEndpoint() const { return false; }
+    virtual TimeoutBudget timeoutBudget(RequestOperation operation) const { return timeoutBudgetFor(operation); }
   protected:
     friend class AiRequestCoordinator;
     // Only the coordinator dispatches requests after credentials/capabilities are checked.

@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QTimer>
+#include <QElapsedTimer>
 
 namespace relaxer::ai {
 
@@ -51,6 +52,11 @@ class AiRequestCoordinator final : public QObject {
         quint64 providerRequestId = 0;
         Kind kind = Kind::Models;
         QPointer<QTimer> timer;
+        QElapsedTimer elapsed;
+        qint64 startedAtMs = 0;
+        TimeoutBudget budget{0, 0};
+        QString modelId, reasoningEffort;
+        bool thinkingEnabled = false;
     };
     ProviderRegistry *m_providers;
     CredentialStore *m_credentials;
@@ -61,7 +67,7 @@ class AiRequestCoordinator final : public QObject {
     QHash<AiProvider *, quint64> m_watched;
     quint64 m_nextProviderGeneration = 0;
     quint64 m_nextTaskId = 0;
-    int m_timeoutMs = 31000;
+    int m_timeoutMs = 0; // Explicit watchdog override for fault-injection tests only.
     QString providerRequestKey(quint64 providerGeneration, quint64 requestId) const;
     quint64 begin(const QString &providerId, Kind kind);
     bool readKey(quint64 taskId, QString *key);
@@ -70,6 +76,7 @@ class AiRequestCoordinator final : public QObject {
     void finishError(quint64 taskId, const ProviderError &error);
     void dispatch(quint64 taskId, const QString &key, const ChatCompletionRequest *request = nullptr);
     void watch(AiProvider *provider);
+    void finishCompletion(quint64 taskId, const Pending &pending, ChatCompletionResult result);
 };
 
 } // namespace relaxer::ai
