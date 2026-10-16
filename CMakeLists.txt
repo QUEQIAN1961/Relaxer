@@ -8,6 +8,10 @@ include(scripts/source-fingerprint.cmake)
 relaxer_track_source_content("${CMAKE_CURRENT_SOURCE_DIR}")
 option(RELAXER_QUEUE_ONLY "Build only the independent Queue and its tests" OFF)
 option(RELAXER_LYRIC_MATCH_ONLY "Build only the independent lyric matching tests" OFF)
+option(RELAXER_STORAGE_ONLY "Build storage/appearance tests without Widgets" OFF)
+if(RELAXER_STORAGE_ONLY AND (RELAXER_QUEUE_ONLY OR RELAXER_LYRIC_MATCH_ONLY))
+  message(FATAL_ERROR "Select only one independent test configuration")
+endif()
 if(RELAXER_QUEUE_ONLY AND RELAXER_LYRIC_MATCH_ONLY)
   message(FATAL_ERROR "Select only one independent test configuration")
 endif()
@@ -33,7 +37,7 @@ function(relaxer_add_qt_test test_name target)
   set_tests_properties(${test_name} PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_MEDIA_BACKEND=ffmpeg;RELAXER_SKIP_AUDIO_DEVICE_TESTS=1" TIMEOUT 120)
 endfunction()
-if(NOT RELAXER_LYRIC_MATCH_ONLY)
+if(NOT RELAXER_LYRIC_MATCH_ONLY AND NOT RELAXER_STORAGE_ONLY)
 add_executable(relaxer_queue_tests tests/queue-tests.cpp)
 target_link_libraries(relaxer_queue_tests PRIVATE relaxer_domain Qt6::Test)
 relaxer_add_qt_test(relaxer_queue relaxer_queue_tests)
@@ -58,6 +62,7 @@ endif()
 if(RELAXER_QUEUE_ONLY)
   return()
 endif()
+if(NOT RELAXER_STORAGE_ONLY)
 # The parser is compiled only into this standalone test as an unchanged fixture
 # adapter. relaxer_domain itself never calls it and has no core-library edge.
 add_executable(relaxer_lyric_match_tests tests/lyric-match-tests.cpp src/lyrics.cpp)
@@ -83,8 +88,9 @@ endif()
 if(RELAXER_LYRIC_MATCH_ONLY)
   return()
 endif()
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Sql Multimedia Svg Test Network)
-add_library(relaxer_core src/library.cpp src/storage/settings-store.cpp src/importer.cpp src/lyrics.cpp src/lyric-text.cpp src/playback.cpp)
+endif()
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Sql Multimedia Test)
+add_library(relaxer_core src/library.cpp src/storage/settings-store.cpp src/storage/appearance-store.cpp src/appearance-image.cpp src/importer.cpp src/lyrics.cpp src/lyric-text.cpp src/playback.cpp)
 target_include_directories(relaxer_core PUBLIC src)
 target_link_libraries(relaxer_core PUBLIC relaxer_domain Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia)
 if(WIN32)
@@ -95,6 +101,30 @@ if(MSVC)
 else()
   target_compile_options(relaxer_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+# Storage lives in the existing core to reuse the one Library implementation.
+# Gui is required by QColor/QImage; Multimedia remains core's existing public
+# dependency. Neither these sources nor this independent configuration use Widgets.
+add_executable(relaxer_settings_appearance_tests tests/settings-appearance-tests.cpp)
+target_compile_definitions(relaxer_settings_appearance_tests PRIVATE RELAXER_SETTINGS_FACADE=1)
+target_link_libraries(relaxer_settings_appearance_tests PRIVATE relaxer_core Qt6::Test)
+relaxer_add_qt_test(relaxer_settings_appearance relaxer_settings_appearance_tests)
+if(CMAKE_OBJDUMP AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+  add_custom_command(TARGET relaxer_settings_appearance_tests POST_BUILD
+    COMMAND "${CMAKE_COMMAND}"
+      "-DRELAXER_TEST_EXECUTABLE=$<TARGET_FILE:relaxer_settings_appearance_tests>"
+      "-DRELAXER_OBJDUMP=${CMAKE_OBJDUMP}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-settings-appearance-link.cmake"
+    VERBATIM)
+  add_test(NAME relaxer_settings_appearance_link COMMAND "${CMAKE_COMMAND}"
+    "-DRELAXER_TEST_EXECUTABLE=$<TARGET_FILE:relaxer_settings_appearance_tests>"
+    "-DRELAXER_OBJDUMP=${CMAKE_OBJDUMP}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify-settings-appearance-link.cmake")
+  set_tests_properties(relaxer_settings_appearance_link PROPERTIES TIMEOUT 10)
+endif()
+if(RELAXER_STORAGE_ONLY)
+  return()
+endif()
+find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Svg Network)
 add_library(relaxer_services STATIC src/browser-translation.cpp src/lyric-remote.cpp)
 target_include_directories(relaxer_services PUBLIC src)
 target_link_libraries(relaxer_services PUBLIC Qt6::Core Qt6::Network)
@@ -269,3 +299,12 @@ add_executable(relaxer_lyric_match_compat_tests tests/lyric-match-compat-tests.c
 target_link_libraries(relaxer_lyric_match_compat_tests PRIVATE relaxer_ui Qt6::Test)
 target_compile_definitions(relaxer_lyric_match_compat_tests PRIVATE RELAXER_LYRIC_MATCH_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/lyric-match-baseline.json")
 relaxer_add_qt_test(relaxer_lyric_match_compat relaxer_lyric_match_compat_tests)
+
+# Legacy include/API compatibility uses the same frozen assertions as the new
+# no-Widgets facade test; product implementations have one core compilation owner.
+add_executable(relaxer_settings_appearance_compat_tests tests/settings-appearance-tests.cpp)
+target_link_libraries(relaxer_settings_appearance_compat_tests PRIVATE relaxer_ui Qt6::Test)
+relaxer_add_qt_test(relaxer_settings_appearance_compat relaxer_settings_appearance_compat_tests)
+add_executable(relaxer_settings_appearance_widgets_tests tests/settings-appearance-widgets-tests.cpp)
+target_link_libraries(relaxer_settings_appearance_widgets_tests PRIVATE relaxer_ui Qt6::Test)
+relaxer_add_qt_test(relaxer_settings_appearance_widgets relaxer_settings_appearance_widgets_tests)

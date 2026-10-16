@@ -1,5 +1,7 @@
 #pragma once
 #include "library.h"
+#include "storage/appearance-store.h"
+#include "appearance-image.h"
 #include <QColor>
 #include <QWidget>
 #include <QImage>
@@ -11,11 +13,6 @@
 class QPushButton;
 class QTimer;
 namespace relaxer {
-QImage gaussianBlur(QImage image, double strength);
-QImage fixedGaussianBlur(QImage image,int strength);
-double blurRadius(double percent);
-QColor autoInk(const QColor &color);
-QImage backgroundImage(const QString &path, int maximum = 1600);
 class Surface : public QWidget {
     Q_OBJECT
   public:
@@ -33,24 +30,6 @@ class Surface : public QWidget {
     QPixmap m_scaled;
     QSize m_canvas;
     QPointer<QWidget> m_shared;
-};
-class AppearanceStore {
-  public:
-    explicit AppearanceStore(Library *library) : m_library(library) {}
-    static QJsonObject defaults();
-    QJsonObject state() const;
-    QJsonObject active() const;
-    QJsonObject draft(QJsonObject theme) const;
-    QString imagePath(const QJsonObject &theme, const QString &region) const;
-    bool save(QJsonObject theme, const QString &replaceId, QString *error = nullptr);
-    QJsonObject withProgressColors(QJsonObject theme, bool refreshRecommendation = false) const;
-    bool initializeProgressColors();
-    bool use(const QString &id);
-    bool rename(const QString &id, const QString &name);
-    bool remove(const QString &id);
-
-  private:
-    Library *m_library;
 };
 class AppearancePage : public QWidget {
     Q_OBJECT

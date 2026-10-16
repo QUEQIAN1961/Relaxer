@@ -389,7 +389,7 @@ private slots:
         QCOMPARE(searching,10);QCOMPARE(waiting,2);dialog.findChild<QPushButton *>("lyricsStop")->click();
     }
     void queueBackgroundRestoresWhenPlayerCollapses(){
-        QTemporaryDir dir;Library l(dir.filePath("data"));QVERIFY(l.open());const auto a=seed(l,"当前歌曲","cache-a"),b=seed(l,"待播放歌曲","cache-b");
+        QTemporaryDir dir;Library l(dir.filePath("data"));QVERIFY(l.open());QVERIFY(l.setSetting("theme",0));const auto a=seed(l,"当前歌曲","cache-a"),b=seed(l,"待播放歌曲","cache-b");
         l.setSetting("queue",QJsonArray{double(a.id),double(b.id)});l.setSetting("current",double(a.id));
         Window w(&l);w.playback()->media()->setAudioOutput(nullptr);w.resize(1240,790);w.show();w.showNowPlaying();QTest::qWait(500);
         w.findChild<QPushButton *>("playerCollapse")->click();QTRY_VERIFY(!w.findChild<QWidget *>("pageMotion")->isVisible());QTest::qWait(30);
