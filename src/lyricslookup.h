@@ -147,6 +147,7 @@ private:
     void cancelAiTranslation(const QString &reason={});
     void cancelAiTranslationForTrack(qint64 id);
     void resetTranslationProgress();
+    void setTranslationProgress(const QString &status,const QString &details,int value=0);
     int rowForTrack(qint64 id) const;
     void applyLookupStyle();
     void changeEvent(QEvent *event) override;

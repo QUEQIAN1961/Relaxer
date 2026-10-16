@@ -33,6 +33,7 @@ struct ValidationResult {
 
 PreparedLyrics prepare(const QByteArray &source);
 QString systemPrompt();
+QString blockedLinePlaceholder();
 QJsonArray chatMessages(const QString &title, const QString &artist, const QString &targetLanguage,
                         const QString &stylePrompt, const PreparedLyrics &lyrics);
 ValidationResult validateResponse(const QString &content, const PreparedLyrics &lyrics);

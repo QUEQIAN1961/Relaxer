@@ -244,6 +244,8 @@ class AiLyricsTranslationTests final : public QObject {
     void encodedLyricsNormalizeWithoutChangingTextOrTiming();
     void inlineOffsetsAndBilingualMarkersMatchTheExistingParser();
     void unsupportedLanguageDoesNotSendRequest();
+    void filteredResponseLeavesShortFailureAndPreservesUsage();
+    void maskedLinePreviewsAndSavesWithoutChangingOriginal();
 };
 
 void AiLyricsTranslationTests::preparePreservesRepeatedTimestampRowsAndRejectsExistingBilingualLyrics() {
@@ -354,7 +356,8 @@ void AiLyricsTranslationTests::wholeSongRequestPreviewsWithoutSavingThenSavesOnC
     clickConsentAndStart(dialog);
     QTRY_COMPARE_WITH_TIMEOUT(server.requestCount(), 1, 3000);
     QTRY_VERIFY_WITH_TIMEOUT(dialog.findChild<QLabel *>(QStringLiteral("lyricsTranslationProgressLabel"))->text().contains(QStringLiteral("翻译完成")), 3000);
-    QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lyricsTranslationProgressLabel"))->text().contains(QStringLiteral("输入 17，输出 23，总计 40")));
+    QCOMPARE(dialog.findChild<QLabel *>(QStringLiteral("lyricsTranslationProgressLabel"))->text(),QStringLiteral("翻译完成"));
+    QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lyricsStatus"))->text().contains(QStringLiteral("输入 17，输出 23，总计 40")));
     QCOMPARE(server.requestCount(), 1);
     QVERIFY(server.request(0).startsWith("POST /chat/completions "));
     QVERIFY(server.request(0).contains("Authorization: Bearer test-only-fake-key"));
@@ -630,6 +633,7 @@ void AiLyricsTranslationTests::failedSaveKeepsOriginalLyricsAndPreviewRetryable(
     QVERIFY(save->isEnabled());
     save->click();
     QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lyricsStatus"))->text().startsWith(QStringLiteral("未保存：")));
+    QCOMPARE(dialog.findChild<QLabel *>("lyricsTranslationProgressLabel")->text(),QStringLiteral("未保存"));
     QVERIFY(save->isEnabled());
     CloseHandle(blocker);
 
@@ -774,6 +778,7 @@ void AiLyricsTranslationTests::explicitCancelAndLateResultCannotWriteLyrics() {
     const auto oldTask = finished[0][0].toULongLong();
     QVERIFY(!runtime.requests()->isPending(oldTask));
     QVERIFY(!cancel->isEnabled());
+    QCOMPARE(dialog.findChild<QLabel *>("lyricsTranslationProgressLabel")->text(),QStringLiteral("已取消"));
     QVERIFY(dialog.findChild<QPushButton *>("lyricsTranslate")->isEnabled());
     // The real HTTP request was aborted; also exercise the dialog guard with
     // an already-queued successful result from the previous task.
@@ -963,6 +968,69 @@ void AiLyricsTranslationTests::unsupportedLanguageDoesNotSendRequest() {
     dialog.findChild<QPushButton *>("lyricsTranslate")->click();
     QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("只支持简体中文")));
     QCOMPARE(server.requestCount(), 0);
+}
+
+void AiLyricsTranslationTests::filteredResponseLeavesShortFailureAndPreservesUsage() {
+    QTemporaryDir directory; Library library(directory.filePath("data")); QVERIFY(library.open());
+    const auto track=seed(library,"Filtered","filtered-ui");
+    const QByteArray original="[00:01.00]Move your body and soul";
+    QVERIFY(library.saveLyrics(track.id,original));
+    TranslationHttpMock server; QVERIFY(server.listen());
+    server.enqueue(R"({"choices":[{"finish_reason":"content_filter","message":{"content":null,"reasoning_content":"private-reasoning-sentinel"}}],"usage":{"prompt_tokens":17,"completion_tokens":23,"total_tokens":40}})");
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"),{},true,&runtime);
+    dialog.show(); dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    clickConsentAndStart(dialog);
+    auto *status=dialog.findChild<QLabel *>("lyricsTranslationProgressLabel");
+    QTRY_COMPARE_WITH_TIMEOUT(status->text(),QStringLiteral("翻译失败"),3000);
+    const auto detail=dialog.findChild<QLabel *>("lyricsStatus")->text();
+    QVERIFY(detail.contains(QStringLiteral("供应商过滤"))); QVERIFY(detail.contains(QStringLiteral("输入 17，输出 23，总计 40")));
+    QVERIFY(!detail.contains(QStringLiteral("超时"))); QVERIFY(!detail.contains("private-reasoning-sentinel"));
+    QVERIFY(!dialog.findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
+    QVERIFY(dialog.findChild<QPushButton *>("lyricsTranslate")->isEnabled());
+    QVERIFY(!dialog.findChild<QPushButton *>("lyricsCancelTranslation")->isEnabled());
+    QCOMPARE(dialog.findChild<QProgressBar *>("lyricsTranslationProgress")->maximum(),1);
+    QByteArray after; QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&after)); QCOMPARE(after,original);
+    QTest::qWait(80); QCOMPARE(server.requestCount(),1);
+    if(!qEnvironmentVariableIsEmpty("RELAXER_AI_TRANSLATION_SCREENSHOT_DIR")) {
+        QDir().mkpath(qEnvironmentVariable("RELAXER_AI_TRANSLATION_SCREENSHOT_DIR"));
+        QVERIFY(dialog.grab().save(QDir(qEnvironmentVariable("RELAXER_AI_TRANSLATION_SCREENSHOT_DIR")).filePath("translation-failure.png")));
+    }
+}
+
+void AiLyricsTranslationTests::maskedLinePreviewsAndSavesWithoutChangingOriginal() {
+    QTemporaryDir directory; Library library(directory.filePath("data")); QVERIFY(library.open());
+    const auto track=seed(library,"Masked line","masked-ui");
+    const QByteArray original="[00:01.00]Move your body and soul\n[00:02.00]Second line\n[00:03.00]Move your body and soul";
+    QVERIFY(library.saveLyrics(track.id,original));
+    TranslationHttpMock server; QVERIFY(server.listen());
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("舞动身心")},{1,lyrics::blockedLinePlaceholder()},{2,QStringLiteral("舞动身心")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"),{},true,&runtime);
+    dialog.show(); dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    clickConsentAndStart(dialog);
+    QTRY_COMPARE_WITH_TIMEOUT(dialog.findChild<QLabel *>("lyricsTranslationProgressLabel")->text(),QStringLiteral("翻译完成"),3000);
+    QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("1 行屏蔽占位")));
+    const auto request=QJsonDocument::fromJson(server.requestBody(0)).object();
+    const auto messages=request["messages"].toArray();
+    QVERIFY(messages[0].toObject()["content"].toString().contains(lyrics::blockedLinePlaceholder()));
+    QVERIFY(messages[1].toObject()["content"].toString().contains("Move your body and soul"));
+    QByteArray before; QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&before)); QCOMPARE(before,original);
+    auto *left=dialog.findChild<QLabel *>("lyricsStatus"); auto *right=dialog.findChild<QLabel *>("lyricsTranslationProgressLabel");
+    QVERIFY(right->width()<dialog.width()/2); QVERIFY(!left->text().isEmpty());
+    if(!qEnvironmentVariableIsEmpty("RELAXER_AI_TRANSLATION_SCREENSHOT_DIR")) {
+        QDir().mkpath(qEnvironmentVariable("RELAXER_AI_TRANSLATION_SCREENSHOT_DIR"));
+        QVERIFY(dialog.grab().save(QDir(qEnvironmentVariable("RELAXER_AI_TRANSLATION_SCREENSHOT_DIR")).filePath("translation-success.png")));
+    }
+    dialog.findChild<QPushButton *>("lyricsSaveTranslation")->click();
+    QCOMPARE(right->text(),QStringLiteral("已保存"));
+    QByteArray saved; QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&saved));
+    const auto expected=QStringLiteral("[re:relaxer-bilingual]\n[00:01.00]Move your body and soul\n[00:01.00]舞动身心\n[00:02.00]Second line\n[00:02.00]（内容已屏蔽）\n[00:03.00]Move your body and soul\n[00:03.00]舞动身心").toUtf8();
+    QCOMPARE(saved,expected); QCOMPARE(server.requestCount(),1);
 }
 
 QTEST_MAIN(AiLyricsTranslationTests)

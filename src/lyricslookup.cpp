@@ -340,7 +340,8 @@ QByteArray LyricsLookup::currentAiConfigurationDigest() const{
     const auto task=m_aiRuntime->translationConfiguration();
     const QJsonObject snapshot{{"providerId",task.providerId},{"modelId",task.modelId},
         {"thinkingEnabled",task.thinkingEnabled},{"reasoningEffort",task.reasoningEffort},
-        {"targetLanguage",configuration.targetLanguage},{"translationStylePrompt",configuration.translationStylePrompt}};
+        {"targetLanguage",configuration.targetLanguage},{"translationStylePrompt",configuration.translationStylePrompt},
+        {"systemPrompt",ai::lyrics::systemPrompt()}};
     return QCryptographicHash::hash(QJsonDocument(snapshot).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256);
 }
 bool LyricsLookup::currentAiTranslationSnapshot(QString *error) const{
@@ -370,11 +371,20 @@ void LyricsLookup::clearAiTranslationPreview(){
     if(shown)updatePreview();
 }
 void LyricsLookup::resetTranslationProgress(){
-    if(m_translationProgressLabel)m_translationProgressLabel->setText(QStringLiteral("翻译尚未开始"));
-    if(m_translationProgress){m_translationProgress->setRange(0,1);m_translationProgress->setValue(0);}
+    setTranslationProgress(QStringLiteral("翻译尚未开始"),{});
+}
+void LyricsLookup::setTranslationProgress(const QString &status,const QString &details,int value){
+    if(m_translationProgressLabel){m_translationProgressLabel->setText(status);m_translationProgressLabel->setToolTip(details);}
+    if(m_translationProgress){
+        m_translationProgress->setRange(0,value<0?0:1);m_translationProgress->setValue(qMax(0,value));
+        m_translationProgress->setAccessibleName(QStringLiteral("整首歌词翻译状态"));
+        m_translationProgress->setAccessibleDescription(details);m_translationProgress->setToolTip(details);
+    }
+    if(!details.isEmpty()&&m_status)m_status->setText(details);
 }
 void LyricsLookup::cancelAiTranslation(const QString &reason){
     const auto requestId=m_aiTaskId;
+    const bool hadTranslation=requestId||m_hasAiPreview;
     if(requestId){
         ++m_aiGeneration;m_aiTaskId=0;
         if(m_aiRuntime&&m_aiRuntime->requests()&&m_aiRuntime->requests()->isPending(requestId))m_aiRuntime->requests()->cancel(requestId);
@@ -385,6 +395,7 @@ void LyricsLookup::cancelAiTranslation(const QString &reason){
         if(row>=0)setRowStatus(row,QStringLiteral("已取消"));
     }
     if(m_hasAiPreview)clearAiTranslationPreview();
+    if(hadTranslation)setTranslationProgress(QStringLiteral("已取消"),reason.isEmpty()?QStringLiteral("本地翻译任务已取消；远端可能继续处理或计费。"):reason);
     if(!reason.isEmpty()&&m_status)m_status->setText(reason);
 }
 void LyricsLookup::cancelAiTranslationForTrack(qint64 id){
@@ -406,43 +417,50 @@ bool LyricsLookup::confirmStopTranslations(){
 void LyricsLookup::completeAiTranslation(quint64 taskId,const ai::ChatCompletionResult &result){
     if(!taskId||taskId!=m_aiTaskId||m_aiGeneration!=m_aiActiveGeneration)return;
     m_aiTaskId=0;if(m_translate)m_translate->setEnabled(true);if(m_aiCancelTranslation)m_aiCancelTranslation->setEnabled(false);
-    if(m_translationProgress)m_translationProgress->setRange(0,1);
+    const auto usage=result.usage.available?
+        QStringLiteral("费用按 DeepSeek 实际计费；本次 token：输入 %1，输出 %2，总计 %3。")
+            .arg(result.usage.inputTokens).arg(result.usage.outputTokens).arg(result.usage.totalTokens):
+        QStringLiteral("本次 token 用量未知；费用以 DeepSeek 实际账单为准。");
+    auto fail=[this,&usage](const QString &message){
+        const auto detail=QStringLiteral("翻译失败：")+message+QStringLiteral("。 ")+usage;
+        setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译失败：")+message);
+        setTranslationProgress(QStringLiteral("翻译失败"),detail);
+    };
     QString snapshotError;
     if(!currentAiTranslationSnapshot(&snapshotError)){
-        setRowStatus(rowForTrack(m_aiTrackId),snapshotError);m_status->setText(snapshotError);clearAiTranslationPreview();return;
+        fail(snapshotError);clearAiTranslationPreview();return;
     }
     if(!result.ok()){
         const auto message=result.error.message.isEmpty()?QStringLiteral("AI 翻译请求失败"):result.error.message;
-        setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译失败：")+message);m_status->setText(QStringLiteral("翻译失败：")+message);return;
+        fail(message);return;
     }
     const auto validation=ai::lyrics::validateResponse(result.content,m_aiPrepared);
     if(!validation.ok()){
-        setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译失败：")+validation.error);m_status->setText(QStringLiteral("翻译失败：")+validation.error);return;
+        fail(validation.error);return;
     }
     QString mergeError;
     const auto merged=ai::lyrics::merge(m_aiSourceBytes,m_aiPrepared,validation.translations,&mergeError);
     if(merged.isEmpty()){
-        setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译失败：")+mergeError);m_status->setText(QStringLiteral("翻译失败：")+mergeError);return;
+        fail(mergeError);return;
     }
     m_aiTranslations=validation.translations;m_aiMergedBytes=merged;m_hasAiPreview=true;
     m_aiSaveTranslation->setEnabled(true);setAiTranslationPreview();
-    QString usage=QStringLiteral("翻译完成，请核对双栏预览后再保存。费用按 DeepSeek 实际计费；");
-    if(result.usage.available)usage+=QStringLiteral("本次 token：输入 %1，输出 %2，总计 %3。")
-        .arg(result.usage.inputTokens).arg(result.usage.outputTokens).arg(result.usage.totalTokens);
-    else usage+=QStringLiteral("本次 token 用量不可用。");
-    m_translationProgressLabel->setText(usage);m_translationProgress->setValue(1);
-    m_translationProgress->setAccessibleName(QStringLiteral("整首歌词翻译状态"));m_translationProgress->setAccessibleDescription(usage);m_translationProgress->setToolTip(usage);
-    setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译完成，等待你预览并保存"));m_status->setText(usage);
+    QString details=QStringLiteral("翻译完成，请核对双栏预览后再保存。 ");
+    const auto masked=validation.translations.count(ai::lyrics::blockedLinePlaceholder());
+    if(masked)details+=QStringLiteral("译文含 %1 行屏蔽占位，请核对；原文保留。 ").arg(masked);
+    details+=usage;
+    setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译完成，等待你预览并保存"));
+    setTranslationProgress(QStringLiteral("翻译完成"),details,1);
 }
 void LyricsLookup::saveAiTranslation(){
     if(!m_hasAiPreview)return;
     QString snapshotError;
     if(!currentAiTranslationSnapshot(&snapshotError)){
-        setRowStatus(rowForTrack(m_aiTrackId),snapshotError);m_status->setText(snapshotError);clearAiTranslationPreview();return;
+        setRowStatus(rowForTrack(m_aiTrackId),snapshotError);setTranslationProgress(QStringLiteral("未保存"),snapshotError);clearAiTranslationPreview();return;
     }
     if(!m_library->saveLyricsPreservingText(m_aiTrackId,m_aiMergedBytes)){
         const auto error=m_library->lastError().isEmpty()?QStringLiteral("歌词保存失败，原歌词仍保留"):m_library->lastError();
-        setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("未保存：")+error);m_status->setText(QStringLiteral("未保存：")+error);return;
+        setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("未保存：")+error);setTranslationProgress(QStringLiteral("未保存"),QStringLiteral("未保存：")+error);return;
     }
     const auto savedTrackId=m_aiTrackId;
     const auto savedLanguage=m_aiTargetLanguage;
@@ -453,7 +471,7 @@ void LyricsLookup::saveAiTranslation(){
     // document through the normal reader rather than keeping stale preview state.
     clearAiTranslationPreview();
     setRowStatus(rowForTrack(savedTrackId),QStringLiteral("已保存 AI 双语歌词"));
-    m_status->setText(message);m_translationProgressLabel->setText(message);
+    setTranslationProgress(QStringLiteral("已保存"),message,1);
     updatePreview();
 }
 void LyricsLookup::closeEvent(QCloseEvent *event){if(!confirmStopTranslations()){event->ignore();return;}QDialog::closeEvent(event);}
@@ -874,8 +892,8 @@ void LyricsLookup::translateSelected(){
     m_aiTaskId=m_aiRuntime->requests()->complete(taskConfiguration.providerId,request);
     if(!m_aiTaskId){m_status->setText(QStringLiteral("AI 请求未能启动。"));return;}
     m_translate->setEnabled(false);m_aiCancelTranslation->setEnabled(true);
-    m_translationProgress->setRange(0,0);m_translationProgressLabel->setText(QStringLiteral("已发送一次整首歌词请求，正在等待 DeepSeek 响应。"));
-    m_status->setText(QStringLiteral("正在等待整首歌词翻译。"));setRowStatus(row,QStringLiteral("正在翻译整首歌词"));
+    setTranslationProgress(QStringLiteral("正在翻译"),QStringLiteral("已发送一次整首歌词请求，正在等待 DeepSeek 响应，可取消。"),-1);
+    setRowStatus(row,QStringLiteral("正在翻译整首歌词"));
 }LyricsLookup::RankResult LyricsLookup::computeRank(const ScoreSnap &snap){
     RankResult result;
     result.id=snap.id;result.hash=snap.hash;result.fpO=snap.fpO;result.fpM=snap.fpM;result.generation=snap.generation;result.epoch=snap.epoch;result.cached=snap.cached;result.timedRequired=snap.timedRequired;result.payload=snap.payload;
