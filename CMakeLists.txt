@@ -89,6 +89,13 @@ if(RELAXER_LYRIC_MATCH_ONLY)
   return()
 endif()
 endif()
+# Freeze B4's local lyric parser and file-read behavior before extraction.
+add_executable(relaxer_lyrics_document_baseline_tests
+  tests/lyrics-document-baseline-tests.cpp src/lyrics.cpp)
+target_include_directories(relaxer_lyrics_document_baseline_tests PRIVATE src)
+target_link_libraries(relaxer_lyrics_document_baseline_tests PRIVATE Qt6::Core Qt6::Test)
+relaxer_add_qt_test(relaxer_lyrics_document_baseline relaxer_lyrics_document_baseline_tests)
+
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Sql Multimedia Test)
 add_library(relaxer_core src/library.cpp src/storage/settings-store.cpp src/storage/appearance-store.cpp src/appearance-image.cpp src/importer.cpp src/lyrics.cpp src/lyric-text.cpp src/playback.cpp)
 target_include_directories(relaxer_core PUBLIC src)
