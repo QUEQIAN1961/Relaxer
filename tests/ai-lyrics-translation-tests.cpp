@@ -5,6 +5,7 @@
 #include "lyricslookup.h"
 
 #include <QApplication>
+#include <QEvent>
 #include <QFile>
 #include <QFileDialog>
 #include <qscopeguard.h>
@@ -29,6 +30,47 @@
 
 using namespace relaxer;
 using namespace relaxer::ai;
+
+namespace relaxer {
+class LyricsLookupDiagnostics final {
+  public:
+    static QJsonObject metrics(const LyricsLookup &dialog) {
+        const auto &m=dialog.m_filterMetrics;
+        return {{"full_passes",double(m.fullPasses)},{"row_visits",double(m.rowVisits)},
+            {"assessments",double(m.assessments)},{"file_reads",double(m.fileReads)},
+            {"bytes_read",double(m.bytesRead)},{"digest_computations",double(m.digestComputations)},
+            {"digest_bytes",double(m.digestBytes)},{"audit_passes",double(m.auditPasses)},
+            {"audit_files",double(m.auditFiles)}};
+    }
+    static QByteArray digest(const LyricsLookup &dialog,qint64 id) {
+        return dialog.m_translationAssessments.value(id).contentDigest;
+    }
+    static QString cachedPath(const LyricsLookup &dialog,qint64 id) {
+        return dialog.m_translationAssessments.value(id).path;
+    }
+    static QString cachedHash(const LyricsLookup &dialog,qint64 id) {
+        return dialog.m_translationAssessments.value(id).hash;
+    }
+    static QString cachedTitle(const LyricsLookup &dialog,qint64 id) {
+        return dialog.m_translationAssessments.value(id).title;
+    }
+    static QString cachedArtist(const LyricsLookup &dialog,qint64 id) {
+        return dialog.m_translationAssessments.value(id).artist;
+    }
+    static bool hasCache(const LyricsLookup &dialog,qint64 id) {
+        return dialog.m_translationAssessments.contains(id);
+    }
+    static bool auditing(const LyricsLookup &dialog) {
+        return dialog.m_translationAuditInFlight||(dialog.m_translationAuditDebounce&&dialog.m_translationAuditDebounce->isActive());
+    }
+    static void startAudit(LyricsLookup &dialog) { dialog.startTranslationCacheAudit(); }
+    static void reactivate(LyricsLookup &dialog) {
+        dialog.activateWindow();
+        QEvent activation(QEvent::ActivationChange);
+        QApplication::sendEvent(&dialog,&activation);
+    }
+};
+}
 
 namespace {
 class FakeCredentialStore final : public CredentialStore {
@@ -263,6 +305,8 @@ class AiLyricsTranslationTests final : public QObject {
     void candidateHashChangePreventsReplacement();
     void filterUpdatesAfterPasteImportAndInstrumental();
     void missingTranslationFilterIncludesUncertainAndRefreshesLocalFiles();
+    void translationCacheAuditHandlesFileStateAndMetadataChanges();
+    void translationCacheAuditRejectsStaleTrackIdentity();
     void missingTranslationFilterPreservesPaidPreview();
     void missingTranslationFilterCancelReleasesOwner();
 };
@@ -1298,11 +1342,20 @@ void AiLyricsTranslationTests::missingTranslationFilterIncludesUncertainAndRefre
     QCOMPARE(item(english.id)->data(Qt::UserRole+4).toString(),QStringLiteral("待翻译"));
     QCOMPARE(item(mixed.id)->data(Qt::UserRole+4).toString(),QStringLiteral("待确认"));
     QVERIFY(item(mixed.id)->toolTip().contains(QStringLiteral("待确认")));
+    const auto digestBefore=LyricsLookupDiagnostics::digest(dialog,english.id);QCOMPARE(digestBefore.size(),32);
+    item(english.id)->setSelected(false);QVERIFY(!item(english.id)->isSelected());
     const auto path=library.absolute(library.track(english.id).lyrics);const auto stamp=QFileInfo(path).lastModified();
     QByteArray changed=QStringLiteral("你好世界").toUtf8();changed+=QByteArray(original.size()-changed.size(),' ');
     QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly|QIODevice::Truncate));QCOMPARE(file.write(changed),qint64(changed.size()));
     QVERIFY(file.setFileTime(stamp,QFileDevice::FileModificationTime));file.close();
-    refresh->click();QVERIFY(item(english.id)->isHidden());
+    QCOMPARE(QFileInfo(path).size(),qint64(original.size()));QCOMPARE(QFileInfo(path).lastModified(),stamp);
+    const auto previousAudits=quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble());
+    LyricsLookupDiagnostics::reactivate(dialog);
+    QTRY_VERIFY_WITH_TIMEOUT(quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble())>previousAudits,5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(dialog),5000);
+    QVERIFY(item(english.id)->isHidden());QVERIFY(!item(english.id)->isSelected());
+    QVERIFY(LyricsLookupDiagnostics::digest(dialog,english.id)!=digestBefore);
+    QVERIFY(LyricsLookupDiagnostics::metrics(dialog)["digest_computations"].toDouble()>0);
     missing->setChecked(true);QVERIFY(!filter->isChecked());QVERIFY(!refresh->isEnabled());QVERIFY(!item(empty.id)->isHidden());
     filter->setChecked(true);incomplete->setChecked(true);QVERIFY(!filter->isChecked());
     filter->setChecked(true);rows->setCurrentItem(item(mixed.id));
@@ -1331,6 +1384,97 @@ void AiLyricsTranslationTests::missingTranslationFilterIncludesUncertainAndRefre
     }
 }
 
+void AiLyricsTranslationTests::translationCacheAuditHandlesFileStateAndMetadataChanges() {
+    QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Cache Audit","cache-audit");
+    const QByteArray original="[00:01.00]Hello my good friend\n[00:02.00]Wonderful music in the world";
+    QVERIFY(library.saveLyrics(track.id,original));
+    TranslationHttpMock server;QVERIFY(server.listen());
+    LyricsLookup dialog(&library,{track.id},nullptr,server.baseUrl());dialog.show();
+    auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");auto *filter=dialog.findChild<QCheckBox *>("lyricsMissingTranslationOnly");QVERIFY(rows&&filter);
+    auto *row=rows->item(0);QVERIFY(row);filter->setChecked(true);QVERIFY(!row->isHidden());
+    const auto path=library.absolute(library.track(track.id).lyrics);const auto firstDigest=LyricsLookupDiagnostics::digest(dialog,track.id);QCOMPARE(firstDigest.size(),32);
+    auto audit=[&]{
+        const auto before=quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble());
+        LyricsLookupDiagnostics::startAudit(dialog);
+        QTRY_VERIFY_WITH_TIMEOUT(quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble())>before,5000);
+        QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(dialog),5000);
+    };
+
+    const auto originalStamp=QFileInfo(path).lastModified();
+    const QByteArray longer=original+"\n[00:03.00]Another English line";
+    QFile longerFile(path);QVERIFY(longerFile.open(QIODevice::WriteOnly|QIODevice::Truncate));QCOMPARE(longerFile.write(longer),qint64(longer.size()));
+    QVERIFY(longerFile.setFileTime(originalStamp.addSecs(120),QFileDevice::FileModificationTime));longerFile.close();
+    QVERIFY(QFileInfo(path).size()!=original.size());QVERIFY(QFileInfo(path).lastModified()!=originalStamp);
+    audit();QVERIFY(!row->isHidden());QVERIFY(LyricsLookupDiagnostics::digest(dialog,track.id)!=firstDigest);
+
+    const QByteArray translated=QStringLiteral("你好朋友").toUtf8();QFile translatedFile(path);
+    QVERIFY(translatedFile.open(QIODevice::WriteOnly|QIODevice::Truncate));QCOMPARE(translatedFile.write(translated),qint64(translated.size()));
+    QVERIFY(translatedFile.setFileTime(originalStamp.addSecs(240),QFileDevice::FileModificationTime));translatedFile.close();
+    audit();QVERIFY(row->isHidden());QCOMPARE(row->data(Qt::UserRole+4).toString(),QString());
+    QVERIFY(QFile::remove(path));audit();QVERIFY(row->isHidden());QVERIFY(row->toolTip().contains(QStringLiteral("本地歌词文件不存在")));
+
+    QFile recreated(path);QVERIFY(recreated.open(QIODevice::WriteOnly));QCOMPARE(recreated.write(original),qint64(original.size()));recreated.close();
+    audit();QVERIFY(!row->isHidden());QCOMPARE(row->data(Qt::UserRole+4).toString(),QStringLiteral("待翻译"));
+
+#ifdef Q_OS_WIN
+    HANDLE denyRead=CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    QVERIFY(denyRead!=INVALID_HANDLE_VALUE);audit();QVERIFY(row->isHidden());QVERIFY(row->toolTip().contains(QStringLiteral("歌词无法完整读取")));
+    CloseHandle(denyRead);audit();QVERIFY(!row->isHidden());
+#endif
+
+    const QString alternateRelative=QStringLiteral("External/alternate.lrc");const QString alternate=library.absolute(alternateRelative);
+    QVERIFY(QDir().mkpath(QFileInfo(alternate).absolutePath()));QFile alternateFile(alternate);QVERIFY(alternateFile.open(QIODevice::WriteOnly));
+    QCOMPARE(alternateFile.write(translated),qint64(translated.size()));alternateFile.close();
+    const auto previousAudits=quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble());
+    LyricsLookupDiagnostics::startAudit(dialog);
+    bool metadataChanged=false;
+    for(const auto &name:QSqlDatabase::connectionNames()){
+        const auto db=QSqlDatabase::database(name);if(db.databaseName()!=library.absolute("relaxer.sqlite"))continue;
+        QSqlQuery query(db);query.prepare("UPDATE tracks SET hash=?,title=?,artist=?,lyrics=? WHERE id=?");
+        query.addBindValue("cache-audit-renamed-hash");query.addBindValue("Renamed cache track");query.addBindValue("Renamed artist");
+        query.addBindValue(alternateRelative);query.addBindValue(track.id);QVERIFY(query.exec());metadataChanged=true;
+    }
+    QVERIFY(metadataChanged);
+    QTRY_VERIFY_WITH_TIMEOUT(quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble())>previousAudits,5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(dialog),5000);QVERIFY(row->isHidden());
+    QCOMPARE(LyricsLookupDiagnostics::cachedPath(dialog,track.id),alternate);
+    QCOMPARE(LyricsLookupDiagnostics::cachedHash(dialog,track.id),QStringLiteral("cache-audit-renamed-hash"));
+    QCOMPARE(LyricsLookupDiagnostics::cachedTitle(dialog,track.id),QStringLiteral("Renamed cache track"));
+    QCOMPARE(LyricsLookupDiagnostics::cachedArtist(dialog,track.id),QStringLiteral("Renamed artist"));
+    QCOMPARE(server.requestCount(),0);
+}
+
+void AiLyricsTranslationTests::translationCacheAuditRejectsStaleTrackIdentity() {
+    QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto first=seed(library,"Identity A","cache-identity-a"),second=seed(library,"Identity B","cache-identity-b");
+    const QByteArray english="[00:01.00]Hello my good friend\n[00:02.00]Wonderful music in the world";
+    QVERIFY(library.saveLyrics(first.id,english));QVERIFY(library.saveLyrics(second.id,english));
+    TranslationHttpMock server;QVERIFY(server.listen());
+    LyricsLookup dialog(&library,{first.id,second.id},nullptr,server.baseUrl());dialog.show();
+    auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");auto *filter=dialog.findChild<QCheckBox *>("lyricsMissingTranslationOnly");QVERIFY(rows&&filter);
+    filter->setChecked(true);QVERIFY(rows->count()==2);QVERIFY(!rows->item(0)->isHidden());QVERIFY(!rows->item(1)->isHidden());
+    const auto secondDigest=LyricsLookupDiagnostics::digest(dialog,second.id);QCOMPARE(secondDigest.size(),32);
+    const auto previousAudits=quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble());
+    LyricsLookupDiagnostics::startAudit(dialog);
+    const qint64 replacementId=9000000000LL;bool changed=false;
+    for(const auto &name:QSqlDatabase::connectionNames()){
+        const auto db=QSqlDatabase::database(name);if(db.databaseName()!=library.absolute("relaxer.sqlite"))continue;
+        QSqlQuery query(db);QVERIFY(query.exec("PRAGMA foreign_keys=OFF"));
+        query.prepare("UPDATE lyrics_playback SET track=? WHERE track=?");query.addBindValue(replacementId);query.addBindValue(first.id);QVERIFY(query.exec());
+        query.prepare("UPDATE tracks SET id=? WHERE id=?");query.addBindValue(replacementId);query.addBindValue(first.id);QVERIFY(query.exec());
+        QVERIFY(query.exec("PRAGMA foreign_keys=ON"));changed=true;
+    }
+    QVERIFY(changed);QVERIFY(library.track(replacementId).id==replacementId);
+    QTRY_VERIFY_WITH_TIMEOUT(quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble())>previousAudits,5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(dialog),5000);
+    QVERIFY(rows->item(0)->isHidden());QVERIFY(!rows->item(1)->isHidden());
+    QCOMPARE(rows->item(1)->data(Qt::UserRole+4).toString(),QStringLiteral("待翻译"));
+    QVERIFY(!LyricsLookupDiagnostics::hasCache(dialog,replacementId));
+    QCOMPARE(LyricsLookupDiagnostics::digest(dialog,second.id),secondDigest);
+    QCOMPARE(server.requestCount(),0);
+}
+
 void AiLyricsTranslationTests::missingTranslationFilterPreservesPaidPreview() {
     QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
     const auto track=seed(library,"Owner","filter-owner");
@@ -1342,10 +1486,16 @@ void AiLyricsTranslationTests::missingTranslationFilterPreservesPaidPreview() {
     dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
     auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");rows->setCurrentRow(0);clickConsentAndStart(dialog);QTRY_COMPARE(server.heldCount(),1);
     auto *filter=dialog.findChild<QCheckBox *>("lyricsMissingTranslationOnly");filter->setChecked(true);QVERIFY(!rows->item(0)->isHidden());
+    auto *cancel=dialog.findChild<QPushButton *>("lyricsCancelTranslation");QVERIFY(cancel->isEnabled());
+    auto audit=[&]{const auto before=quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble());LyricsLookupDiagnostics::startAudit(dialog);
+        QTRY_VERIFY_WITH_TIMEOUT(quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble())>before,5000);
+        QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(dialog),5000);};
+    audit();QCOMPARE(server.heldCount(),1);QCOMPARE(server.requestCount(),1);QVERIFY(cancel->isEnabled());
     QVERIFY(server.releaseHeld());auto *save=dialog.findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
-    dialog.findChild<QPushButton *>("lyricsRefreshTranslationFilter")->click();QVERIFY(!rows->item(0)->isHidden());QVERIFY(save->isEnabled());
+    audit();QVERIFY(!rows->item(0)->isHidden());QVERIFY(save->isEnabled());QCOMPARE(server.requestCount(),1);
     QByteArray before;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&before));QCOMPARE(before,original);
     save->click();QVERIFY(!save->isEnabled());QVERIFY(rows->item(0)->isHidden());QCOMPARE(server.requestCount(),1);
+    QByteArray bilingual;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bilingual));QVERIFY(bilingual.contains("[re:relaxer-bilingual]"));
 }
 
 

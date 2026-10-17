@@ -26,7 +26,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
-class QLabel;class QListWidget;class QPlainTextEdit;class QFrame;class QPushButton;class QLineEdit;class QCheckBox;class QSpinBox;class QComboBox;class QThreadPool;class QCloseEvent;
+class QLabel;class QListWidget;class QPlainTextEdit;class QFrame;class QPushButton;class QLineEdit;class QCheckBox;class QSpinBox;class QComboBox;class QThreadPool;class QCloseEvent;class QTimer;
 namespace relaxer {
 struct LyricHttpResult {
     quint64 token = 0;
@@ -116,20 +116,47 @@ private:
     QLabel *m_emptyHint=nullptr;
     QPushButton *m_refreshTranslationFilter=nullptr;
     friend class LyricsLookupDiagnostics;
-    struct FilterMetrics { quint64 fullPasses=0,rowVisits=0,assessments=0,fileReads=0,bytesRead=0,jsonKeys=0; };
+    struct FilterMetrics {
+        quint64 fullPasses=0,rowVisits=0,assessments=0,fileReads=0,bytesRead=0,jsonKeys=0;
+        quint64 digestComputations=0,digestBytes=0,auditPasses=0,auditFiles=0;
+    };
     FilterMetrics m_filterMetrics;
     struct AssessmentCache {
         QString path,hash,title,artist;
         qint64 size=0,modified=0;
+        bool instrumental=false,fileExists=false,readable=false,tooLarge=false;
+        quint64 revision=0;
+        QByteArray contentDigest;
         ai::lyrics::TranslationAssessment value;
     };
+    struct TranslationAuditSnapshot {
+        qint64 id=0;
+        int row=-1;
+        QString path;
+        Track track;
+        bool instrumental=false;
+        AssessmentCache previous;
+    };
+    struct TranslationAuditResult {
+        TranslationAuditSnapshot snapshot;
+        AssessmentCache current;
+        bool readAttempted=false,digestComputed=false;
+        qint64 bytesRead=0,digestBytes=0;
+    };
     QHash<qint64,AssessmentCache> m_translationAssessments;
+    quint64 m_translationAssessmentRevision=0;
     int m_filterVisibleCount=0;
     bool m_filterReady=false,m_filterUpdating=false;
     bool filterRow(int row);
     void updateFilterRow(int row);
     void finishFilterUpdate();
     ai::lyrics::TranslationAssessment translationAssessment(const Track &track);
+    void requestTranslationCacheAudit();
+    void startTranslationCacheAudit();
+    void applyTranslationCacheAudit(const QVector<TranslationAuditResult> &results,const FilterMetrics &work);
+    QTimer *m_translationAuditDebounce=nullptr;
+    std::shared_ptr<std::atomic_bool> m_translationAuditCancel=std::make_shared<std::atomic_bool>(false);
+    bool m_translationAuditInFlight=false,m_translationAuditPending=false;
     QHash<qint64,LyricsSaveSnapshot> m_lyricsSnapshots;
     QString m_storeError;
     bool m_snapshotConflict=false;
