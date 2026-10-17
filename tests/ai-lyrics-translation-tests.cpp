@@ -438,7 +438,7 @@ void AiLyricsTranslationTests::wholeSongRequestPreviewsWithoutSavingThenSavesOnC
     clickConsentAndStart(dialog);
     QTRY_COMPARE_WITH_TIMEOUT(server.requestCount(), 1, 3000);
     QTRY_VERIFY_WITH_TIMEOUT(dialog.findChild<QLabel *>(QStringLiteral("lyricsTranslationProgressLabel"))->text().contains(QStringLiteral("翻译完成")), 3000);
-    QCOMPARE(dialog.findChild<QLabel *>(QStringLiteral("lyricsTranslationProgressLabel"))->text(),QStringLiteral("翻译完成"));
+    QCOMPARE(dialog.findChild<QLabel *>(QStringLiteral("lyricsTranslationProgressLabel"))->text(),QStringLiteral("翻译完成 · 未保存"));
     QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lyricsStatus"))->text().contains(QStringLiteral("输入 17，输出 23，总计 40")));
     QCOMPARE(server.requestCount(), 1);
     QVERIFY(server.request(0).startsWith("POST /chat/completions "));
@@ -1101,7 +1101,7 @@ void AiLyricsTranslationTests::maskedLinePreviewsAndSavesWithoutChangingOriginal
     dialog.show(); dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
     dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
     clickConsentAndStart(dialog);
-    QTRY_COMPARE_WITH_TIMEOUT(dialog.findChild<QLabel *>("lyricsTranslationProgressLabel")->text(),QStringLiteral("翻译完成"),3000);
+    QTRY_COMPARE_WITH_TIMEOUT(dialog.findChild<QLabel *>("lyricsTranslationProgressLabel")->text(),QStringLiteral("翻译完成 · 未保存"),3000);
     QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("1 行屏蔽占位")));
     const auto request=QJsonDocument::fromJson(server.requestBody(0)).object();
     const auto messages=request["messages"].toArray();
@@ -1164,7 +1164,7 @@ void AiLyricsTranslationTests::cloudPayloadContainsOnlyLyricsAndRequiredControls
     dialog.show(); dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
     dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
     clickConsentAndStart(dialog);
-    QTRY_COMPARE_WITH_TIMEOUT(dialog.findChild<QLabel *>("lyricsTranslationProgressLabel")->text(),QStringLiteral("翻译完成"),3000);
+    QTRY_COMPARE_WITH_TIMEOUT(dialog.findChild<QLabel *>("lyricsTranslationProgressLabel")->text(),QStringLiteral("翻译完成 · 未保存"),3000);
     const auto body=server.requestBody(0);
     QVERIFY(!body.contains("Private title")); QVERIFY(!body.contains("Private artist")); QVERIFY(!body.contains("Local author sentinel"));
     QVERIFY(!body.contains(track.file.toUtf8())); QVERIFY(!body.contains(".mp3"));
