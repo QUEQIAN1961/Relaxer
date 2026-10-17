@@ -94,7 +94,7 @@ class PhaseBStorageTests final : public QObject {
             QVERIFY(sql(db, "INSERT INTO tracks(id,hash,file,title,duration,cover_origin) "
                             "VALUES(42,'legacy-second','Music/second.wav','Second',10000,'none')"));
             QVERIFY(sql(db, "INSERT INTO playlists(id,name,cover,tags,description) VALUES(7,'Legacy "
-                            "Playlist','Artwork/legacy.png','[\"旧标签\"]','保留描述')"));
+                            "Playlist','Artwork/legacy.png','[\"流行\"]','保留描述')"));
             QVERIFY(sql(db, "INSERT INTO playlist_tracks VALUES(7,42,0),(7,41,1)"));
             QVERIFY(sql(db, "INSERT INTO lyrics_playback(track,offset_ms,instrumental) VALUES(41,-250,0)"));
             QVERIFY(sql(db, "INSERT INTO sessions(id,track,heard,duration,sought,counted,finished) "
@@ -133,7 +133,7 @@ class PhaseBStorageTests final : public QObject {
             QCOMPARE(library.tracks(7).size(), 2);
             QCOMPARE(library.tracks(7)[0].id, qint64(42));
             QCOMPARE(library.tracks(7)[1].id, qint64(41));
-            QCOMPARE(library.playlists()[0].tags, QStringList{"旧标签"});
+            QCOMPARE(library.playlists()[0].tags, QStringList{"流行"});
             QCOMPARE(library.playlists()[0].description, QString("保留描述"));
             QCOMPARE(library.lyricOffset(41), -250);
             QVERIFY(library.lookupCache(41).fresh);
@@ -146,7 +146,7 @@ class PhaseBStorageTests final : public QObject {
             AiRuntime runtime(&library, std::make_unique<FakeCredentialStore>());
             QCOMPARE(runtime.configuration().defaults.providerId, QString("deepseek"));
             QCOMPARE(runtime.configuration().extensions["future"].toObject(), unknown());
-            PlaybackFacade player(&library, nullptr, true);
+            PlaybackFacade player(&library, nullptr, false);
             player.restore();
             QTRY_VERIFY(player.seekable());
             QTRY_COMPARE(player.position(), qint64(1200));
@@ -155,6 +155,13 @@ class PhaseBStorageTests final : public QObject {
             QCOMPARE(player.volume(), 37);
             QCOMPARE(player.mode(), Mode::Shuffle);
             QCOMPARE(player.queue().items, QVector<qint64>({41, 42}));
+            {
+                LyricsLookup lookup(&library,{41,42},nullptr,QUrl("http://127.0.0.1:1"),{},false,&runtime);
+                lookup.findChild<QCheckBox *>("lyricsMissingTranslationOnly")->setChecked(true);
+                auto *rows=lookup.findChild<QListWidget *>("lyricsTracks");bool assessed=false;
+                for(int n=0;n<rows->count();++n)if(rows->item(n)->data(Qt::UserRole).toLongLong()==41){QVERIFY(rows->item(n)->isHidden());assessed=true;}
+                QVERIFY(assessed);QVERIFY(lookup.close());
+            }
             QCOMPARE(bytes(library.absolute(track.lyrics)), bilingual);
             QCOMPARE(bytes(library.absolute(track.cover)), coverBytes);
             QVERIFY(player.shutdown());
