@@ -9,7 +9,7 @@
 #include "lyricslookup.h"
 #include <QTimer>
 #include "chrome.h"
-#include "importer.h"
+#include "import-coordinator.h"
 #include "playback.h"
 #include "shortcuts.h"
 #include "widgets.h"
@@ -22,7 +22,6 @@
 #include <QProgressBar>
 #include <QStackedWidget>
 #include <QSystemTrayIcon>
-#include <QThread>
 namespace relaxer {
 class Window : public QMainWindow {
     Q_OBJECT
@@ -139,16 +138,11 @@ class Window : public QMainWindow {
     QLabel *m_importLabel;
     QPushButton *m_cancel;
     QSystemTrayIcon *m_tray = nullptr;
-    QPointer<QThread> m_importThread;
-    QPointer<Importer> m_importer;
-    QPointer<QThread> m_artworkThread;
-    QPointer<ArtworkRepair> m_artworkRepair;
-    int m_artworkCorrections = 0;
+    ImportCoordinator *m_importCoordinator=nullptr;
+    bool m_closePending=false;
     qint64 m_scope = 0;
     QString m_view = "local";
     bool m_dark = false, m_refreshing = false, m_quitting = false, m_statsPending = false;
-    int m_added = 0, m_duplicates = 0, m_failures = 0;
-    QStringList m_importErrors;
     QVector<Track> visibleTracks() const;
     void buildSidebar(QWidget *);
     QWidget *buildLibrary();

@@ -74,6 +74,8 @@ static QPushButton *checkableSetting(const QString &caption,const QString &name,
 }
 Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(new Playback(l, this)) {
     initializeResources();
+    m_importCoordinator=new ImportCoordinator(m_library,this);
+    m_importCoordinator->setObjectName("importCoordinator");
     m_aiRuntime = new ai::AiRuntime(m_library, this);
     installSmoothScrolling(qApp);
     setWindowTitle("Relaxer V1.10");
@@ -162,13 +164,31 @@ Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(
     ip->addWidget(m_cancel);
     importPanel->hide();
     connect(m_cancel, &QPushButton::clicked, this, [this] {
-        if (m_importer)
-            m_importer->cancel();
+        m_importCoordinator->cancel();
         m_cancel->setEnabled(false);
         m_importLabel->setText("正在结束当前文件…");
     });
     outer->addWidget(importPanel);
     importPanel->setObjectName("importPanel");
+    connect(m_importCoordinator,&ImportCoordinator::progress,this,[this](quint64,int current,int total,const QString &name){
+        m_importProgress->setRange(0,total);m_importProgress->setValue(current);
+        if(!m_closePending)m_importLabel->setText(QString("导入 %1 / %2 · %3").arg(current).arg(total).arg(name));
+    });
+    connect(m_importCoordinator,&ImportCoordinator::finished,this,[this,importPanel](const ImportSummary &result){
+        importPanel->hide();QPixmapCache::clear();refresh();
+        const auto summary=QString(result.cancelled?"导入已取消：新增 %1 首，重复 %2 首，未导入 %3 首，跳过或未开始 %4 项。":"导入完成：新增 %1 首，重复 %2 首，未导入 %3 首，跳过或未开始 %4 项。")
+            .arg(result.added).arg(result.duplicates).arg(result.failed).arg(result.skipped);
+        if(m_closePending)return;
+        toast(summary);
+        if(result.failed||result.playlistFailures||!result.fatalError.isEmpty())
+            QMessageBox::information(this,"导入结果",summary+"\n\n"+result.errors.join('\n')+(result.fatalError.isEmpty()?QString():"\n"+result.fatalError));
+    });
+    connect(m_importCoordinator,&ImportCoordinator::artworkUpdated,this,[this](qint64 id){if(m_player->current().id==id)refreshTrack();});
+    connect(m_importCoordinator,&ImportCoordinator::artworkFinished,this,[this](int corrected){
+        if(!corrected)return;
+        QPixmapCache::clear();refresh();if(!m_closePending)toast(QString("已校正 %1 首歌曲的自动封面。").arg(corrected));
+    });
+    connect(m_importCoordinator,&ImportCoordinator::shutdownReady,this,[this]{if(m_closePending)QTimer::singleShot(0,this,[this]{close();});});
     m_bottomStack=new QStackedWidget; m_bottomStack->setObjectName("bottomStack");m_bottomStack->setFixedHeight(98);m_bottomStack->setAutoFillBackground(false);
     m_footerSurface=new Surface;m_footerSurface->setObjectName("footerSurface");auto *footerLayout=new QVBoxLayout(m_footerSurface);footerLayout->setContentsMargins(0,0,0,0);footerLayout->setSpacing(0);
     m_bottomStack->addWidget(buildPlayerBar());m_bottomStack->addWidget(buildBulkBar());footerLayout->addWidget(m_bottomStack);outer->addWidget(m_footerSurface);
@@ -291,20 +311,7 @@ Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(
     QTimer::singleShot(0,this,[this]{m_restoringWindow=false;if(m_library->setting("windowMaximized",false).toBool())showMaximized();});
 }
 Window::~Window() {
-    saveWindowSize();
-    if (m_importer)
-        m_importer->cancel();
-    if (m_importThread) {
-        m_importThread->quit();
-        m_importThread->wait();
-    }
-    if (m_artworkRepair)
-        m_artworkRepair->cancel();
-    if (m_artworkThread) {
-        m_artworkThread->quit();
-        m_artworkThread->wait();
-    }
-    m_player->save();
+    saveWindowSize();m_importCoordinator->shutdown();m_player->save();
 }
 void Window::buildSidebar(QWidget *side) {
     auto *v = new QVBoxLayout(side);
@@ -1438,105 +1445,11 @@ void Window::chooseFolder() {
         importSources({p});
 }
 void Window::importSources(const QStringList &paths) {
-    if (m_importThread) {
-        toast("当前导入尚未结束，请稍候。");
-        return;
-    }
-    auto *panel = findChild<QWidget *>("importPanel");
-    panel->show();
-    m_cancel->setEnabled(true);
-    m_importProgress->setRange(0, 0);
-    m_added = m_duplicates = m_failures = 0;
-    m_importErrors.clear();
-    qint64 target = m_scope > 0 ? m_scope : 0;
-    auto *thread = new QThread(this);
-    auto *worker = new Importer(m_library->root(), paths);
-    m_importThread = thread;
-    m_importer = worker;
-    worker->moveToThread(thread);
-    connect(thread, &QThread::started, worker, &Importer::run);
-    connect(worker, &Importer::progress, this, [this](int i, int total, const QString &n) {
-        m_importProgress->setRange(0, total);
-        m_importProgress->setValue(i);
-        m_importLabel->setText(QString("导入 %1 / %2 · %3").arg(i).arg(total).arg(n));
-    });
-    connect(worker, &Importer::imported, this, [this, target](const ImportResult &r) {
-        if (!r.error.isEmpty()) {
-            ++m_failures;
-            if (m_importErrors.size() < 8)
-                m_importErrors << QFileInfo(r.source).fileName() + "：" + r.error;
-            return;
-        }
-        QSignalBlocker batch(m_library);
-        auto before = m_library->tracks().size();
-        auto id = m_library->insert(r.track);
-        if (!id) {
-            ++m_failures;
-            m_importErrors << m_library->lastError();
-            return;
-        }
-        if (m_library->tracks().size() > before)
-            ++m_added;
-        else
-            ++m_duplicates;
-        if (target)
-            check(m_library->addToPlaylist(target, {id}));
-    });
-    connect(worker, &Importer::finished, thread, &QThread::quit, Qt::DirectConnection);
-    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
-    connect(thread, &QThread::finished, this, [this, panel, thread] {
-        m_importThread = nullptr;
-        m_importer = nullptr;
-        thread->deleteLater();
-        panel->hide();
-        QPixmapCache::clear();
-        refresh();
-        QString summary = QString("导入完成：新增 %1 首，重复 %2 首，未导入 %3 首。")
-                              .arg(m_added)
-                              .arg(m_duplicates)
-                              .arg(m_failures);
-        toast(summary);
-        if (m_failures)
-            QMessageBox::information(this, "导入结果", summary + "\n\n" + m_importErrors.join('\n'));
-    });
-    thread->start();
+    const ImportRequest request{paths,m_scope>0?m_scope:0};
+    if(!m_importCoordinator->start(request)){toast(m_importCoordinator->lastError());return;}
+    findChild<QWidget *>("importPanel")->show();m_cancel->setEnabled(true);m_importProgress->setRange(0,0);
 }
-void Window::repairLegacyArtwork() {
-    QVector<Track> pending;
-    for (const auto &track : m_library->tracks())
-        if (track.coverOrigin.isEmpty() && track.cover == "Artwork/" + track.hash + ".png")
-            pending << track;
-    if (pending.isEmpty())
-        return;
-    qRegisterMetaType<ArtworkResult>();
-    auto *thread = new QThread(this);
-    auto *worker = new ArtworkRepair(m_library->root(), pending);
-    m_artworkThread = thread;
-    m_artworkRepair = worker;
-    worker->moveToThread(thread);
-    connect(thread, &QThread::started, worker, &ArtworkRepair::run);
-    connect(worker, &ArtworkRepair::repaired, this, [this](const ArtworkResult &result) {
-        QSignalBlocker batch(m_library);
-        if (m_library->applyArtworkRepair(result)) {
-            ++m_artworkCorrections;
-            if (m_player->current().id == result.id)
-                refreshTrack();
-        }
-    });
-    connect(worker, &ArtworkRepair::finished, thread, &QThread::quit, Qt::DirectConnection);
-    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
-    connect(thread, &QThread::finished, this, [this, thread] {
-        m_artworkThread = nullptr;
-        m_artworkRepair = nullptr;
-        thread->deleteLater();
-        if (m_artworkCorrections) {
-            QPixmapCache::clear();
-            refresh();
-            toast(QString("已校正 %1 首歌曲的自动封面。").arg(m_artworkCorrections));
-        }
-    });
-    thread->start();
-}
+void Window::repairLegacyArtwork() {m_importCoordinator->repairLegacyArtwork();}
 bool Window::check(bool ok) {
     if (!ok)
         QMessageBox::warning(this, "Relaxer",
@@ -1559,16 +1472,15 @@ void Window::positionToast(){
 }
 void Window::closeEvent(QCloseEvent *e) {
     saveWindowSize();
-    if (!m_quitting && m_tray && m_library->setting("closeToTray", false).toBool()) {
-        hide();
-        e->ignore();
-        return;
+    if(!m_closePending&&!m_quitting&&m_tray&&m_library->setting("closeToTray",false).toBool()){
+        hide();e->ignore();return;
     }
-    if(m_appearancePage&&m_pages->currentWidget()==m_appearancePage&&!m_appearancePage->confirmLeave()){e->ignore();return;}
-    m_player->save();
-    if (m_importer)
-        m_importer->cancel();
-    e->accept();
+    if(!m_closePending&&m_appearancePage&&m_pages->currentWidget()==m_appearancePage&&!m_appearancePage->confirmLeave()){e->ignore();return;}
+    if(!m_importCoordinator->isIdle()){
+        e->ignore();m_closePending=true;m_cancel->setEnabled(false);m_importLabel->setText("正在结束当前文件并安全关闭…");
+        m_importCoordinator->shutdown();return;
+    }
+    m_importCoordinator->shutdown();m_player->save();e->accept();
 }
 void Window::dragEnterEvent(QDragEnterEvent *e) {
     if (e->mimeData()->hasUrls())
