@@ -22,6 +22,8 @@ function(collect output)
   endforeach()
 endfunction()
 file(GLOB_RECURSE plugins "${DEST}/*.dll")
+# Helpers have their own DLL closure; do not mix equal DLL names from bin/ into the application scan.
+list(FILTER plugins EXCLUDE REGEX "/bin/")
 collect("${DEST}" EXECUTABLES "${DEST}/Relaxer.exe" LIBRARIES ${plugins})
 # Helpers load from bin/. Do not use Relaxer's root DLLs to satisfy their closure.
 collect("${DEST}/bin" EXECUTABLES "${DEST}/bin/ffmpeg.exe" "${DEST}/bin/ffprobe.exe")
