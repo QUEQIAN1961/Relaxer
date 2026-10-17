@@ -196,6 +196,43 @@ private slots:
         QVERIFY(!f.web());for(const auto id:ids){QVERIFY(f.coordinator->cancel(id));QVERIFY(f.coordinator->forget(id));}
         QVERIFY(f.web());QVERIFY(f.browser->calls.isEmpty());
     }
+    void twoWindowsReverseAiCompletionStayWithTheirSongs(){
+        Fixture f;QVERIFY(f.ok);f.http.setHold(true);f.response();f.response();
+        TranslationCoordinator second(&f.library,f.runtime.get());
+        const auto a=f.ai(),b=second.prepareAi(f.b.id);QVERIFY(a!=b);
+        f.coordinator->start(a);second.start(b);QTRY_COMPARE(f.http.heldCount(),2);
+        QVERIFY(f.http.releaseHeldAt(1));QTRY_COMPARE(second.summary(b).state,State::CompletedPendingSave);
+        QCOMPARE(f.state(a),State::Running);QCOMPARE(second.summary(b).trackId,f.b.id);
+        QVERIFY(second.save(b));QCOMPARE(f.bytes(f.a.id),f.source);QVERIFY(f.bytes(f.b.id).contains("relaxer-bilingual"));
+        QVERIFY(f.http.releaseHeld());QTRY_COMPARE(f.state(a),State::CompletedPendingSave);
+        QVERIFY(f.coordinator->save(a));QCOMPARE(f.http.requestCount(),2);
+    }
+    void requestDisconnectedDoesNotRetry(){
+        Fixture f;QVERIFY(f.ok);f.http.setHold(true);const auto id=f.ai();f.coordinator->start(id);
+        QTRY_COMPARE(f.http.heldCount(),1);f.http.disconnectHeld();QTRY_COMPARE(f.state(id),State::Failed);
+        QCOMPARE(f.http.requestCount(),1);QCOMPARE(f.bytes(),f.source);QVERIFY(!f.coordinator->save(id));
+    }
+    void browserSourceReplacedWhileWaitingCannotResume(){
+        Fixture f;QVERIFY(f.ok);const auto id=f.web();f.coordinator->start(id);QTRY_COMPARE(f.browser->calls.size(),1);
+        f.browser->wait();QTRY_COMPARE(f.state(id),State::NeedsAttention);QVERIFY(f.library.saveLyrics(f.a.id,"Changed source"));
+        QVERIFY(!f.coordinator->resume(id));QCOMPARE(f.state(id),State::Invalidated);QCOMPARE(f.browser->resumes,0);
+    }
+    void browserSourceReplacedBeforeCompletionCannotSave(){
+        Fixture f;QVERIFY(f.ok);const auto id=f.web();f.coordinator->start(id);QTRY_COMPARE(f.browser->calls.size(),1);
+        f.browser->answer();QTRY_COMPARE(f.browser->calls.size(),2);QVERIFY(f.library.saveLyrics(f.a.id,"Changed source"));
+        f.browser->answer();QTRY_COMPARE(f.state(id),State::Invalidated);QVERIFY(!f.coordinator->save(id));QCOMPARE(f.bytes(),QByteArray("Changed source"));
+    }
+    void destructionCancelsAiAndDropsQueuedDelivery(){
+        Fixture f;QVERIFY(f.ok);f.http.setHold(true);f.response();const auto id=f.ai();f.coordinator->start(id);
+        QTRY_COMPARE(f.http.heldCount(),1);QSignalSpy requestDone(f.runtime->requests(),&AiRequestCoordinator::completionFinished);
+        QPointer<TranslationCoordinator> guard=f.coordinator.get();f.coordinator.reset();QVERIFY(!guard);
+        QTRY_COMPARE(requestDone.size(),1);const auto result=qvariant_cast<ChatCompletionResult>(requestDone.first().at(2));
+        QVERIFY(result.error.cancelled);f.http.releaseHeld();QCoreApplication::sendPostedEvents();QCOMPARE(f.bytes(),f.source);
+    }
+    void completedPreviewShutdownIsExplicitDiscard(){
+        Fixture f;QVERIFY(f.ok);f.response();const auto id=f.ai();f.coordinator->start(id);QTRY_COMPARE(f.state(id),State::CompletedPendingSave);
+        f.coordinator->shutdown();QCOMPARE(f.state(id),State::Cancelled);QCOMPARE(f.bytes(),f.source);QCOMPARE(f.http.requestCount(),1);
+    }
 };
 QTEST_GUILESS_MAIN(TranslationCoordinatorTests)
 #include "translation-coordinator-tests.moc"

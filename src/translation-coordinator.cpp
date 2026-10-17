@@ -247,6 +247,8 @@ bool TranslationCoordinator::resume(quint64 id){
     if(!ownerThread())return false;
     const auto task=m_tasks.value(id);
     if(!task||m_active!=id||task->value.state!=TranslationState::NeedsAttention)return false;
+    QString error;
+    if(!current(task,&error)){finish(task,TranslationState::Invalidated,QStringLiteral("翻译失败"),error,"snapshot");return false;}
     // Change state before backend call: repeated clicks cannot dispatch twice.
     task->value.state=TranslationState::Running;task->value.status=QStringLiteral("正在翻译");publish(task);m_browser->resume();return true;
 }
@@ -269,6 +271,7 @@ bool TranslationCoordinator::forget(quint64 id){
     return m_tasks.remove(id)>0;
 }
 void TranslationCoordinator::shutdown(){
+    if(!ownerThread())return;
     if(m_stopping)return;
     m_stopping=true;m_queue.clear();
     for(const auto &task:m_tasks.values())if(!task->value.terminal())

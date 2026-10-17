@@ -264,6 +264,8 @@ void clickConsentAndStart(LyricsLookup &dialog) {
 class AiLyricsTranslationTests final : public QObject {
     Q_OBJECT
   private slots:
+    void productionCoordinatorOwnsPreviewAndCloseLifecycle();
+    void declinedConsentDoesNotDispatchBusinessTask();
     void preparePreservesRepeatedTimestampRowsAndRejectsExistingBilingualLyrics();
     void rejectsEmptyInstrumentalAndMetadataOnlyLyrics();
     void responseValidationIsStrictAndMapsIdsLocally();
@@ -1621,6 +1623,43 @@ void AiLyricsTranslationTests::missingTranslationFilterCancelReleasesOwner() {
     QVERIFY(!dialog.findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
     QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,original);
     QCOMPARE(server.requestCount(),1);
+}
+
+
+void AiLyricsTranslationTests::productionCoordinatorOwnsPreviewAndCloseLifecycle() {
+    QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"B7 production","b7-widgets");const QByteArray original="[00:01.00]Hello world";
+    QVERIFY(library.saveLyrics(track.id,original));TranslationHttpMock server;QVERIFY(server.listen());
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("你好世界")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    auto dialog=std::make_unique<LyricsLookup>(&library,QVector<qint64>{track.id},nullptr,QUrl("http://127.0.0.1:1"),QUrl(),true,&runtime);
+    dialog->show();dialog->findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog->findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    QPointer<TranslationCoordinator> coordinator=dialog->findChild<TranslationCoordinator *>();QVERIFY(coordinator);
+    QSignalSpy changed(coordinator,&TranslationCoordinator::taskChanged);
+    clickConsentAndStart(*dialog);QTRY_VERIFY(dialog->findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
+    QTRY_VERIFY(!changed.isEmpty());TranslationSummary preview;
+    for(const auto &event:changed){const auto value=qvariant_cast<TranslationSummary>(event.first());if(value.hasPreview())preview=value;}
+    QVERIFY(preview.taskId);QCOMPARE(preview.trackId,track.id);QVERIFY(!coordinator->cancel(preview.taskId));
+    dialog->findChild<QPushButton *>("lyricsCancelTranslation")->click(); // Disabled after completion.
+    QVERIFY(coordinator->summary(preview.taskId).hasPreview());
+    dialog->close(); // Baseline: completed preview does not show the pending-close dialog.
+    dialog.reset();QVERIFY(!coordinator);QCOMPARE(server.requestCount(),1);
+    QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,original);
+}
+void AiLyricsTranslationTests::declinedConsentDoesNotDispatchBusinessTask() {
+    QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Decline","b7-decline");QVERIFY(library.saveLyrics(track.id,"[00:01.00]Hello world"));
+    TranslationHttpMock server;QVERIFY(server.listen());
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:1"),{},true,&runtime);
+    dialog.show();dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    auto *coordinator=dialog.findChild<TranslationCoordinator *>();QVERIFY(coordinator);QSignalSpy done(coordinator,&TranslationCoordinator::finished);
+    QTimer::singleShot(0,&dialog,[]{for(auto *widget:QApplication::topLevelWidgets())if(widget->objectName()=="lyricsAiCloudConsent")widget->findChild<QPushButton *>("lyricsAiConsentCancel")->click();});
+    dialog.findChild<QPushButton *>("lyricsTranslate")->click();QTRY_COMPARE(done.size(),1);
+    QCOMPARE(qvariant_cast<TranslationSummary>(done.first().first()).state,TranslationState::Cancelled);QCOMPARE(server.requestCount(),0);
 }
 
 QTEST_MAIN(AiLyricsTranslationTests)

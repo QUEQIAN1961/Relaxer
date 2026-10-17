@@ -86,6 +86,13 @@ class TranslationHttpMock final : public QObject {
         }
         return false;
     }
+    bool releaseHeldAt(int index) {
+        if(index<0||index>=m_held.size())return false;
+        auto *socket=m_held.takeAt(index);
+        if(!socket||socket->state()!=QAbstractSocket::ConnectedState)return false;
+        respond(socket);return true;
+    }
+    void disconnectHeld() { for(auto *socket:m_held)socket->disconnectFromHost(); }
   private:
     QTcpServer m_server;
     QHash<QTcpSocket *, QByteArray> m_buffers;
