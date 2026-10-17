@@ -115,8 +115,12 @@ private slots:
         LyricsLookup::resetLyricRankRuns();
         LyricsLookup dialog(&l,{t.id},nullptr,s.endpoint());dialog.setProperty("lyricScoreDelayMs",400);dialog.setProperty("lyricsRequestTimeoutMs",400);dialog.show();relaxerClickSearch(&dialog);
         QTRY_VERIFY_WITH_TIMEOUT(s.held.size()>=2,8000);
+        // Wait for both search responses used by this race, rather than any
+        // two requests (which may be one /get and only one /search).
+        QTRY_VERIFY_WITH_TIMEOUT(std::count_if(s.urls.begin(),s.urls.end(),[](const QUrl &url){return url.path().endsWith("/search");})>=2,8000);
         int sent=0;
         for(int i=0;i<s.held.size();++i){const bool search=s.urls.value(i).path().endsWith("/search");if(search&&sent<2){auto r=record(sent==0?"甲候选":"乙候选",sent==0?"别人一":"别人二",30+sent,sent==0?"甲一":"乙一",sent==0?"甲二":"乙二");Phase03Server::send(s.held[i],200,QJsonDocument(QJsonArray{r}).toJson());++sent;}else Phase03Server::send(s.held[i],s.urls.value(i).path().endsWith("/get")?404:200,s.urls.value(i).path().endsWith("/get")?QByteArray("{}"):QByteArray("[]"));}
+        QCOMPARE(sent,2);
         s.hold=false;s.reply=[](const QUrl &u){return qMakePair(u.path().endsWith("/get")?404:200,u.path().endsWith("/get")?QByteArray("{}"):QByteArray("[]"));};
         auto *tasks=dialog.findChild<QListWidget *>("lyricsTracks");
         QTRY_VERIFY_WITH_TIMEOUT(tasks->item(0)->data(Qt::UserRole+2).toString().contains("2 个"),15000);

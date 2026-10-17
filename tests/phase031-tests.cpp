@@ -351,6 +351,8 @@ private slots:
         LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));
         dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint("/translate"));dialog.show();
         dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+        dialog.findChild<QPushButton *>("lyricsNeedsTranslation")->click();
+        QVERIFY(dialog.findChild<QPushButton *>("lyricsNeedsTranslation")->isChecked());
         dialog.findChild<QPushButton *>("lyricsTranslate")->click();
         QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains("AI 服务不可用"));
         QCOMPARE(retiredWeb.requests,0);
@@ -364,7 +366,9 @@ private slots:
         dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint("/translate"));dialog.show();
         dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);dialog.findChild<QPushButton *>("lyricsMultiSelect")->click();
         dialog.findChild<QPushButton *>("lyricsSelectAll")->click();dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-        QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains("一次只处理一首"));
+        QVERIFY(!dialog.findChild<QPushButton *>("lyricsTranslate")->isEnabled());
+        QVERIFY(dialog.findChild<QPushButton *>("lyricsTranslate")->toolTip().contains("一首"));
+        QCOMPARE(dialog.findChild<QListWidget *>("lyricsTracks")->selectedItems().size(),2);
         QCOMPARE(retiredWeb.requests,0);
     }    void localLyricsAreCompleteAndStablyGroupedLast() {
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
@@ -403,7 +407,9 @@ private slots:
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());const auto track=seed(library,"外语原文","translation-state");const auto original=synced("hello","world");QVERIFY(library.saveLyrics(track.id,original));
         Phase031Server retiredWeb;retiredWeb.relaxerOnly=false;QVERIFY(retiredWeb.listen(QHostAddress::LocalHost));
         LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint());dialog.show();dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
-        auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),2);rows->setCurrentRow(0);dialog.findChild<QPushButton *>("lyricsTranslate")->click();
+        auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),2);rows->setCurrentRow(0);
+        dialog.findChild<QPushButton *>("lyricsNeedsTranslation")->click();QVERIFY(dialog.findChild<QPushButton *>("lyricsNeedsTranslation")->isChecked());
+        dialog.findChild<QPushButton *>("lyricsTranslate")->click();
         QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains("AI 服务不可用"));QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),2);QCOMPARE(retiredWeb.requests,0);
         const auto saved=LyricsDocumentReader::readFile(library.absolute(library.track(track.id).lyrics));QVERIFY(saved.opened);QCOMPARE(saved.bytes,original);
     }
@@ -563,6 +569,7 @@ private slots:
         Phase031Server retiredWeb;retiredWeb.relaxerOnly=false;QVERIFY(retiredWeb.listen(QHostAddress::LocalHost));
         LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));dialog.setProperty("lyricTranslateUrl",retiredWeb.endpoint("/translate"));dialog.show();
         dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+        dialog.findChild<QPushButton *>("lyricsNeedsTranslation")->click();QVERIFY(dialog.findChild<QPushButton *>("lyricsNeedsTranslation")->isChecked());
         dialog.findChild<QPushButton *>("lyricsTranslate")->click();QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains("AI 服务不可用"));
         QCOMPARE(retiredWeb.requests,0);dialog.close();QVERIFY(!dialog.isVisible());
         for(auto *widget:QApplication::topLevelWidgets())QVERIFY(widget->objectName()!="lyricsTranslateCloseConfirm");
