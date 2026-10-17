@@ -1,4 +1,5 @@
 #include "window.h"
+#include "release-version.h"
 #include "media-smoke.h"
 #include <QApplication>
 #include <QAudioDevice>
@@ -51,7 +52,7 @@ static bool selfTest(Library &lib) {
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("Relaxer");
-    app.setApplicationVersion("1.10.0");
+    app.setApplicationVersion(QString::fromLatin1(release::Numeric));
     app.setOrganizationName("Relaxer");
     app.setStyle("Fusion");
     app.setWindowIcon(QIcon(":/icon.svg"));

@@ -1,4 +1,5 @@
 #include "lyrics-search-coordinator.h"
+#include "release-version.h"
 #include "domain/lyric-match.h"
 #include "importer.h"
 #include "lyric-text.h"
@@ -887,7 +888,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
                                               : QString("歌名和歌手")));
     QNetworkRequest req(url);
     req.setHeader(QNetworkRequest::UserAgentHeader,
-                  source.kind >= 2 ? "Mozilla/5.0" : "Relaxer/1.10 (local music player)");
+                  source.kind >= 2 ? "Mozilla/5.0" : release::UserAgent);
     req.setRawHeader("Accept", "application/json");
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     for (const auto &header : extraHeaders)

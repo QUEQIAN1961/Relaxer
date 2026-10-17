@@ -1,0 +1,11 @@
+{
+  "numericVersion": "0.2.0",
+  "prerelease": "rc1",
+  "displayVersion": "V0.2.0-rc1",
+  "status": "release-candidate",
+  "applicationName": "Relaxer",
+  "organizationName": "Relaxer",
+  "dataIdentityChanged": false,
+  "schemaChanged": false,
+  "officialReleaseApproved": false
+}
