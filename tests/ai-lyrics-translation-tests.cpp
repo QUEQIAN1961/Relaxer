@@ -253,6 +253,11 @@ class AiLyricsTranslationTests final : public QObject {
     void cloudPayloadContainsOnlyLyricsAndRequiredControls();
     void translationNeedClassification_data();
     void translationNeedClassification();
+    void localBilingualCandidatePlan_data();
+    void localBilingualCandidatePlan();
+    void staleExternalLyricsRejected_data();
+    void staleExternalLyricsRejected();
+    void missingSourceKeepsPaidPreview();
     void savedLyricsCanBeReselectedRepeatedly();
     void replacementFailureKeepsPaidPreviewAndCanRetry();
     void candidateHashChangePreventsReplacement();
@@ -1153,6 +1158,87 @@ void AiLyricsTranslationTests::translationNeedClassification() {
     const auto assessment=lyrics::assessTranslation(source,"Demo","Singer");
     QCOMPARE(int(assessment.need),need);QVERIFY(!assessment.reason.isEmpty());
     QCOMPARE(assessment.missing(),need==int(lyrics::TranslationNeed::Missing)||need==int(lyrics::TranslationNeed::Review));
+}
+
+
+void AiLyricsTranslationTests::localBilingualCandidatePlan_data() {
+    QTest::addColumn<bool>("metadata");QTest::addColumn<QByteArray>("candidate");QTest::addColumn<bool>("keepTranslation");QTest::addColumn<bool>("accept");
+    const QByteArray source="[offset:100]\n[00:01.00]Hello friend\n[00:02.00]Wonderful world";
+    QTest::newRow("same-source-and-timeline")<<true<<source<<true<<true;
+    QTest::newRow("changed-timeline")<<true<<QByteArray("[offset:100]\n[00:03.00]Hello friend\n[00:04.00]Wonderful world")<<false<<true;
+    QTest::newRow("changed-offset")<<true<<QByteArray("[offset:200]\n[00:01.00]Hello friend\n[00:02.00]Wonderful world")<<false<<true;
+    QTest::newRow("changed-source")<<true<<QByteArray("[00:01.00]Another source\n[00:02.00]Another ending")<<false<<true;
+    QTest::newRow("cancel-replacement")<<true<<QByteArray("[00:01.00]Another source\n[00:02.00]Another ending")<<false<<false;
+    QTest::newRow("same-without-metadata")<<false<<QByteArray("[00:01.00]Hello friend\n[00:02.00]Wonderful world")<<true<<true;
+    QTest::newRow("different-time-without-metadata")<<false<<QByteArray("[00:03.00]Hello friend\n[00:04.00]Wonderful world")<<false<<true;
+}
+void AiLyricsTranslationTests::localBilingualCandidatePlan() {
+    QFETCH(bool,metadata);QFETCH(QByteArray,candidate);QFETCH(bool,keepTranslation);QFETCH(bool,accept);
+    QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Bilingual replacement","r4-plan");
+    const QByteArray source="[offset:100]\n[00:01.00]Hello friend\n[00:02.00]Wonderful world";
+    const auto actualSource=metadata?source:source.mid(source.indexOf('\n')+1);
+    const auto bilingual=lyrics::merge(actualSource,lyrics::prepare(actualSource),{QStringLiteral("朋友你好"),QStringLiteral("美好世界")});
+    QVERIFY(!bilingual.isEmpty());QVERIFY(library.saveLyricsPreservingText(track.id,bilingual));
+    QVERIFY(library.saveLookupCache(track.id,QJsonArray{QJsonObject{{"trackName",track.title},{"artistName",track.artist},{"syncedLyrics",QString::fromUtf8(candidate)}}},false));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    auto *translated=dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview");
+    QCOMPARE(!translated->toPlainText().isEmpty(),keepTranslation);
+    QTimer::singleShot(0,&dialog,[accept]{for(auto *w:QApplication::topLevelWidgets())if(auto *box=qobject_cast<QMessageBox *>(w))
+        if(box->objectName()=="lyricsReplaceConfirm")box->button(accept?QMessageBox::Yes:QMessageBox::No)->click();});
+    dialog.findChild<QPushButton *>("lyricsApply")->click();
+    QByteArray saved;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&saved));
+    QCOMPARE(saved,keepTranslation||!accept?bilingual:candidate);
+}
+void AiLyricsTranslationTests::staleExternalLyricsRejected_data() {
+    QTest::addColumn<QString>("mode");
+    for(const auto &mode:{"same-size-mtime","during-confirmation","removed","unreadable-directory"})QTest::newRow(mode)<<QString::fromLatin1(mode);
+}
+void AiLyricsTranslationTests::staleExternalLyricsRejected() {
+    QFETCH(QString,mode);
+    QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"External edit","r4-external");
+    const QByteArray original="[00:01.00]Original source",external="[00:01.00]External source",candidate="[00:01.00]Selected candidate";
+    QCOMPARE(original.size(),external.size());QVERIFY(library.saveLyrics(track.id,original));
+    QVERIFY(library.saveLookupCache(track.id,QJsonArray{QJsonObject{{"trackName",track.title},{"artistName",track.artist},{"syncedLyrics",QString::fromUtf8(candidate)}}},false));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    const auto path=library.absolute(library.track(track.id).lyrics);const auto stamp=QFileInfo(path).lastModified();
+    auto change=[&]{if(mode=="removed"){QVERIFY(QFile::remove(path));return;}if(mode=="unreadable-directory"){QVERIFY(QFile::remove(path));QVERIFY(QDir().mkdir(path));return;}
+        QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly|QIODevice::Truncate));QCOMPARE(file.write(external),qint64(external.size()));
+        QVERIFY(file.setFileTime(stamp,QFileDevice::FileModificationTime));file.close();QCOMPARE(QFileInfo(path).lastModified(),stamp);};
+    if(mode!="during-confirmation")change();
+    QTimer::singleShot(0,&dialog,[&]{for(auto *w:QApplication::topLevelWidgets())if(auto *box=qobject_cast<QMessageBox *>(w))
+        if(box->objectName()=="lyricsReplaceConfirm"){if(mode=="during-confirmation")change();box->button(QMessageBox::Yes)->click();}});
+    dialog.findChild<QPushButton *>("lyricsApply")->click();
+    if(mode=="removed")QVERIFY(!QFileInfo::exists(path));
+    else if(mode=="unreadable-directory")QVERIFY(QFileInfo(path).isDir());
+    else {QByteArray saved;QVERIFY(readFile(path,&saved));QCOMPARE(saved,external);}
+    QVERIFY2(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("刷新")),qPrintable(dialog.findChild<QLabel *>("lyricsStatus")->text()));
+    if(mode=="same-size-mtime"){
+        auto *refresh=dialog.findChild<QPushButton *>("lyricsRefreshTranslationFilter");QVERIFY(refresh->isEnabled());refresh->click();
+        QTimer::singleShot(0,&dialog,[]{for(auto *w:QApplication::topLevelWidgets())if(auto *box=qobject_cast<QMessageBox *>(w))
+            if(box->objectName()=="lyricsReplaceConfirm")box->button(QMessageBox::Yes)->click();});
+        dialog.findChild<QPushButton *>("lyricsApply")->click();QByteArray saved;QVERIFY(readFile(path,&saved));QCOMPARE(saved,candidate);
+    }
+}
+void AiLyricsTranslationTests::missingSourceKeepsPaidPreview() {
+    QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Missing paid source","r4-paid-missing");
+    QVERIFY(library.saveLyrics(track.id,"[00:01.00]Hello my friend\n[00:02.00]Wonderful world"));
+    QVERIFY(library.saveLookupCache(track.id,QJsonArray{QJsonObject{{"trackName",track.title},{"artistName",track.artist},{"syncedLyrics","[00:01.00]Different candidate"}}},false));
+    TranslationHttpMock server;QVERIFY(server.listen());server.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("你好朋友")},{1,QStringLiteral("美好世界")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"),{},false,&runtime);dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    clickConsentAndStart(dialog);auto *save=dialog.findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
+    const auto path=library.absolute(library.track(track.id).lyrics);QVERIFY(QFile::remove(path));
+    QTimer::singleShot(0,&dialog,[]{for(auto *w:QApplication::topLevelWidgets())if(auto *box=qobject_cast<QMessageBox *>(w))
+        if(box->objectName()=="lyricsReplaceConfirm")box->button(QMessageBox::Yes)->click();});
+    dialog.findChild<QPushButton *>("lyricsApply")->click();QVERIFY(save->isEnabled());QVERIFY(!QFileInfo::exists(path));QCOMPARE(server.requestCount(),1);
 }
 
 void AiLyricsTranslationTests::savedLyricsCanBeReselectedRepeatedly() {
