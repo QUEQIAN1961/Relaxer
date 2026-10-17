@@ -1,0 +1,48 @@
+[
+  {
+    "commit": "faa44ded636e4808600e2ded04c93352918a8dda",
+    "libraryOpenSha256": "27a10c72d9e6b35c30566777924c8223304ceebd08017476ca0bebb288432b05",
+    "statements": [
+      "PRAGMA foreign_keys=ON",
+      "PRAGMA journal_mode=WAL",
+      "PRAGMA busy_timeout=5000",
+      "CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY,hash TEXT NOT NULL UNIQUE,file TEXT NOT NULL,title TEXT,artist TEXT,album TEXT,cover TEXT,lyrics TEXT,duration INTEGER DEFAULT 0,plays INTEGER DEFAULT 0,heard INTEGER DEFAULT 0,favorite INTEGER DEFAULT 0,added TEXT DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY,name TEXT NOT NULL,cover TEXT DEFAULT '')",
+      "CREATE TABLE IF NOT EXISTS playlist_tracks(playlist INTEGER REFERENCES playlists(id) ON DELETE CASCADE,track INTEGER REFERENCES tracks(id) ON DELETE CASCADE,position INTEGER NOT NULL,PRIMARY KEY(playlist,track))",
+      "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+      "INSERT OR IGNORE INTO settings(key,value) VALUES('theme','[2]')",
+      "CREATE TABLE IF NOT EXISTS lyrics_lookup(track INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,payload TEXT NOT NULL,fetched TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,no_result INTEGER DEFAULT 0)",
+      "CREATE TABLE IF NOT EXISTS lyrics_playback(track INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,offset_ms INTEGER NOT NULL DEFAULT 0,instrumental INTEGER NOT NULL DEFAULT 0)",
+      "CREATE TABLE IF NOT EXISTS sessions(id INTEGER PRIMARY KEY,track INTEGER REFERENCES tracks(id) ON DELETE CASCADE,heard INTEGER DEFAULT 0,duration INTEGER DEFAULT 0,sought INTEGER DEFAULT 0,counted INTEGER DEFAULT 0,finished INTEGER DEFAULT 0,started TEXT DEFAULT CURRENT_TIMESTAMP,updated TEXT DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE INDEX IF NOT EXISTS session_track ON sessions(track)",
+      "ALTER TABLE tracks ADD COLUMN cover_origin TEXT NOT NULL DEFAULT ''",
+      "UPDATE tracks SET cover_origin='manual' WHERE cover_origin='' AND COALESCE(cover,'')<>'' AND cover<>'Artwork/'||hash||'.png'",
+      "UPDATE tracks SET cover_origin='none' WHERE cover_origin='' AND COALESCE(cover,'')=''",
+      "ALTER TABLE playlists ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+      "ALTER TABLE playlists ADD COLUMN description TEXT NOT NULL DEFAULT ''"
+    ]
+  },
+  {
+    "commit": "6bd1910f4ce7ae768ff38aa9d162d4f016f2ea16",
+    "libraryOpenSha256": "27a10c72d9e6b35c30566777924c8223304ceebd08017476ca0bebb288432b05",
+    "statements": [
+      "PRAGMA foreign_keys=ON",
+      "PRAGMA journal_mode=WAL",
+      "PRAGMA busy_timeout=5000",
+      "CREATE TABLE IF NOT EXISTS tracks(id INTEGER PRIMARY KEY,hash TEXT NOT NULL UNIQUE,file TEXT NOT NULL,title TEXT,artist TEXT,album TEXT,cover TEXT,lyrics TEXT,duration INTEGER DEFAULT 0,plays INTEGER DEFAULT 0,heard INTEGER DEFAULT 0,favorite INTEGER DEFAULT 0,added TEXT DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY,name TEXT NOT NULL,cover TEXT DEFAULT '')",
+      "CREATE TABLE IF NOT EXISTS playlist_tracks(playlist INTEGER REFERENCES playlists(id) ON DELETE CASCADE,track INTEGER REFERENCES tracks(id) ON DELETE CASCADE,position INTEGER NOT NULL,PRIMARY KEY(playlist,track))",
+      "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+      "INSERT OR IGNORE INTO settings(key,value) VALUES('theme','[2]')",
+      "CREATE TABLE IF NOT EXISTS lyrics_lookup(track INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,payload TEXT NOT NULL,fetched TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,no_result INTEGER DEFAULT 0)",
+      "CREATE TABLE IF NOT EXISTS lyrics_playback(track INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,offset_ms INTEGER NOT NULL DEFAULT 0,instrumental INTEGER NOT NULL DEFAULT 0)",
+      "CREATE TABLE IF NOT EXISTS sessions(id INTEGER PRIMARY KEY,track INTEGER REFERENCES tracks(id) ON DELETE CASCADE,heard INTEGER DEFAULT 0,duration INTEGER DEFAULT 0,sought INTEGER DEFAULT 0,counted INTEGER DEFAULT 0,finished INTEGER DEFAULT 0,started TEXT DEFAULT CURRENT_TIMESTAMP,updated TEXT DEFAULT CURRENT_TIMESTAMP)",
+      "CREATE INDEX IF NOT EXISTS session_track ON sessions(track)",
+      "ALTER TABLE tracks ADD COLUMN cover_origin TEXT NOT NULL DEFAULT ''",
+      "UPDATE tracks SET cover_origin='manual' WHERE cover_origin='' AND COALESCE(cover,'')<>'' AND cover<>'Artwork/'||hash||'.png'",
+      "UPDATE tracks SET cover_origin='none' WHERE cover_origin='' AND COALESCE(cover,'')=''",
+      "ALTER TABLE playlists ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+      "ALTER TABLE playlists ADD COLUMN description TEXT NOT NULL DEFAULT ''"
+    ]
+  }
+]
