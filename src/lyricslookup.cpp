@@ -282,7 +282,7 @@ LyricsLookup::LyricsLookup(Library *library,QVector<qint64> ids,QWidget *parent,
     m_status=new QLabel("等待开始查找",left);m_status->setObjectName("lyricsStatus");m_status->setWordWrap(true);leftLayout->addWidget(m_status);
     applyLookupStyle();
     connect(m_start,&QPushButton::clicked,this,&LyricsLookup::start);connect(m_stop,&QPushButton::clicked,this,&LyricsLookup::stop);connect(m_translate,&QPushButton::clicked,this,&LyricsLookup::translateSelected);connect(m_aiCancelTranslation,&QPushButton::clicked,this,[this]{cancelAiTranslation(QStringLiteral("本地翻译任务已取消；DeepSeek 可能已收到请求并继续处理或计费。"));});connect(m_aiSaveTranslation,&QPushButton::clicked,this,&LyricsLookup::saveAiTranslation);connect(m_manualSearch,&QPushButton::clicked,this,&LyricsLookup::manualSearch);connect(m_searchTitle,&QLineEdit::returnPressed,this,&LyricsLookup::manualSearch);connect(m_searchArtist,&QLineEdit::returnPressed,this,&LyricsLookup::manualSearch);connect(m_fragment,&QLineEdit::returnPressed,this,&LyricsLookup::manualSearch);
-    connect(m_tracks,&QListWidget::itemSelectionChanged,this,[this]{const int row=m_tracks->currentRow();const qint64 selected=row>=0&&row<m_ids.size()?m_ids[row]:0;if(m_aiTaskId&&selected!=m_aiTrackId)cancelAiTranslation(QStringLiteral("已切换歌曲，旧翻译请求不会写入新歌曲。"));if(m_hasAiPreview&&selected!=m_aiTrackId)clearAiTranslationPreview();selectTrack();});connect(m_incomplete,&QPushButton::toggled,this,[this](bool on){m_incomplete->setText(on?"✓ 只显示未完成":"只显示未完成");if(on&&m_missingTranslationOnly){QSignalBlocker block(m_missingTranslationOnly);m_missingTranslationOnly->setChecked(false);}updateFilter();});
+    connect(m_tracks,&QListWidget::itemSelectionChanged,this,[this]{const int row=m_tracks->currentRow();const qint64 selected=row>=0&&row<m_ids.size()?m_ids[row]:0;if(aiTaskId()&&selected!=aiTrackId())cancelAiTranslation(QStringLiteral("已切换歌曲，旧翻译请求不会写入新歌曲。"));if(hasAiPreview()&&selected!=aiTrackId())clearAiTranslationPreview();selectTrack();});connect(m_incomplete,&QPushButton::toggled,this,[this](bool on){m_incomplete->setText(on?"✓ 只显示未完成":"只显示未完成");if(on&&m_missingTranslationOnly){QSignalBlocker block(m_missingTranslationOnly);m_missingTranslationOnly->setChecked(false);}updateFilter();});
     connect(m_missingOnly,&QCheckBox::toggled,this,[this](bool on){if(on){QSignalBlocker block(m_missingTranslationOnly);m_missingTranslationOnly->setChecked(false);}updateFilter();});
     connect(m_missingTranslationOnly,&QCheckBox::toggled,this,[this](bool on){
         if(on){QSignalBlocker a(m_missingOnly),b(m_incomplete);m_missingOnly->setChecked(false);m_incomplete->setChecked(false);m_incomplete->setText("只显示未完成");}
@@ -297,7 +297,7 @@ LyricsLookup::LyricsLookup(Library *library,QVector<qint64> ids,QWidget *parent,
     });
     connect(m_offset,qOverload<int>(&QSpinBox::valueChanged),this,[this]{updatePreview();});
     connect(m_versions,&QListWidget::currentRowChanged,this,[this](int row){const int track=m_tracks->currentRow();const auto records=m_candidates.value(m_ids.value(track));const int index=m_visibleRecords.value(row,-1);if(track<0||row<0||index<0||index>=records.size()){m_apply->setEnabled(false);updatePreview();return;}const auto r=records[index].toObject();updatePreview();m_candidateTitle->setText("候选版本 · "+matchReason(m_library->track(m_ids[track]),r));updateApplyButton();});
-    connect(m_apply,&QPushButton::clicked,this,[this]{applySelected();});connect(close,&QPushButton::clicked,this,[this]{if(!m_multi&&m_apply->isEnabled()&&!applySelected())return;if(!confirmStopTranslations())return;stop();accept();});if(m_aiRuntime&&m_aiRuntime->requests())connect(m_aiRuntime->requests(),&ai::AiRequestCoordinator::completionFinished,this,[this](quint64 taskId,const QString &,const ai::ChatCompletionResult &result){completeAiTranslation(taskId,result);});m_missingOnly->setChecked(true);updateFilter();selectTrack();m_library->deferChanges(true);
+    connect(m_apply,&QPushButton::clicked,this,[this]{applySelected();});connect(close,&QPushButton::clicked,this,[this]{if(!m_multi&&m_apply->isEnabled()&&!applySelected())return;if(!confirmStopTranslations())return;stop();accept();});m_translation=new TranslationCoordinator(m_library,m_aiRuntime,this);connect(m_translation,&TranslationCoordinator::taskChanged,this,[this](const TranslationSummary &value){if(value.taskId==m_translationTaskId)renderAiTranslation();});m_missingOnly->setChecked(true);updateFilter();selectTrack();m_library->deferChanges(true);
 }
 LyricsLookup::~LyricsLookup(){if(m_proxyState)m_proxyState->store(true);if(m_translationAuditCancel)m_translationAuditCancel->store(true);if(m_translationAuditDebounce)m_translationAuditDebounce->stop();cancelAiTranslation();stop();if(m_library)m_library->deferChanges(false);}
 void LyricsLookup::applyLookupStyle(){
@@ -335,12 +335,13 @@ void LyricsLookup::setPreviewLyrics(const QByteArray &data){
     m_translationPreview->setPlainText(hasTranslation?translation.join('\n'):QString());
 }
 void LyricsLookup::setAiTranslationPreview(){
+    const auto value=aiSummary();
     QStringList original,translated;
-    for(int i=0;i<m_aiPrepared.lines.size();++i){
-        const auto &line=m_aiPrepared.lines.at(i);
+    for(int i=0;i<value.prepared.lines.size();++i){
+        const auto &line=value.prepared.lines.at(i);
         const auto prefix=line.timestampPrefixes.isEmpty()?QString():line.timestampPrefixes.first()+QStringLiteral(" ");
         original<<prefix+line.text;
-        translated<<prefix+m_aiTranslations.value(i);
+        translated<<prefix+value.translations.value(i);
     }
     m_preview->setPlainText(original.join('\n'));
     m_translationPreview->setPlainText(translated.join('\n'));
@@ -386,7 +387,7 @@ bool LyricsLookup::checkLyricsSnapshot(qint64 id){
 }
 void LyricsLookup::updatePreview(){
     const int row=m_tracks->currentRow();
-    if(m_hasAiPreview&&!m_multi&&row>=0&&m_ids.value(row)==m_aiTrackId&&m_tracks->currentItem()&&m_tracks->currentItem()->isSelected()&&!m_tracks->currentItem()->isHidden()){
+    if(hasAiPreview()&&!m_multi&&row>=0&&m_ids.value(row)==aiTrackId()&&m_tracks->currentItem()&&m_tracks->currentItem()->isSelected()&&!m_tracks->currentItem()->isHidden()){
         setAiTranslationPreview();return;
     }
     if(m_multi||row<0||!m_tracks->currentItem()||!m_tracks->currentItem()->isSelected()||m_tracks->currentItem()->isHidden()){setPreviewLyrics({});return;}
@@ -399,40 +400,15 @@ void LyricsLookup::updatePreview(){
     }
     setPreviewLyrics(data);
 }
-QByteArray LyricsLookup::currentAiConfigurationDigest() const{
-    if(!m_aiRuntime)return {};
-    const auto configuration=m_aiRuntime->configuration();
-    const auto task=m_aiRuntime->translationConfiguration();
-    const QJsonObject snapshot{{"providerId",task.providerId},{"modelId",task.modelId},
-        {"thinkingEnabled",task.thinkingEnabled},{"reasoningEffort",task.reasoningEffort},
-        {"targetLanguage",configuration.targetLanguage},{"translationStylePrompt",configuration.translationStylePrompt},
-        {"systemPrompt",ai::lyrics::systemPrompt()}};
-    return QCryptographicHash::hash(QJsonDocument(snapshot).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256);
-}
-bool LyricsLookup::currentAiTranslationSnapshot(QString *error) const{
-    auto fail=[error](const QString &message){if(error)*error=message;return false;};
-    if(!m_library||m_aiTrackId<=0)return fail(QStringLiteral("歌曲身份已失效，未保存译文"));
-    const int row=m_tracks?m_tracks->currentRow():-1;
-    if(row<0||m_ids.value(row)!=m_aiTrackId||m_multi)return fail(QStringLiteral("当前选择的歌曲已变化，旧译文已丢弃"));
-    const auto current=m_library->track(m_aiTrackId);
-    if(!current.id||current.id!=m_aiTrackSnapshot.id||current.hash!=m_aiTrackSnapshot.hash||
-       current.title!=m_aiTrackSnapshot.title||current.artist!=m_aiTrackSnapshot.artist||current.lyrics!=m_aiLyricsPath)
-        return fail(QStringLiteral("歌曲身份或歌词文件已变化，旧译文已丢弃"));
-    const auto document=LyricsDocumentReader::readFile(m_library->absolute(current.lyrics));
-    if(!document.opened||document.tooLarge||!document.complete)
-        return fail(QStringLiteral("当前歌词无法完整读取，旧译文已丢弃"));
-    if(QCryptographicHash::hash(document.bytes,QCryptographicHash::Sha256)!=m_aiSourceDigest)
-        return fail(QStringLiteral("歌词内容已变化，旧译文已丢弃"));
-    if(!m_aiRuntime||currentAiConfigurationDigest()!=m_aiConfigurationDigest)
-        return fail(QStringLiteral("AI 翻译配置已变化，请重新翻译"));
-    if(error)error->clear();
-    return true;
-}
+TranslationSummary LyricsLookup::aiSummary() const{return m_translation?m_translation->summary(m_translationTaskId):TranslationSummary{};}
+quint64 LyricsLookup::aiTaskId() const{const auto value=aiSummary();return value.pending()?value.taskId:0;}
+qint64 LyricsLookup::aiTrackId() const{return aiSummary().trackId;}
+bool LyricsLookup::hasAiPreview() const{return aiSummary().hasPreview();}
 void LyricsLookup::clearAiTranslationPreview(){
-    const bool shown=m_hasAiPreview;
-    m_hasAiPreview=false;m_aiMergedBytes.clear();m_aiTranslations.clear();m_aiPrepared={};
+    const bool shown=hasAiPreview();
+    const auto id=m_translationTaskId;m_translationTaskId=0;
+    if(m_translation&&id){m_translation->discard(id);m_translation->forget(id);}
     if(m_aiSaveTranslation)m_aiSaveTranslation->setEnabled(false);
-    m_aiTrackId=0;m_aiLyricsPath.clear();m_aiSourceBytes.clear();m_aiSourceDigest.clear();m_aiConfigurationDigest.clear();
     if(shown)updatePreview();
 }
 void LyricsLookup::resetTranslationProgress(){
@@ -448,27 +424,20 @@ void LyricsLookup::setTranslationProgress(const QString &status,const QString &d
     if(!details.isEmpty()&&m_status)m_status->setText(details);
 }
 void LyricsLookup::cancelAiTranslation(const QString &reason){
-    const auto requestId=m_aiTaskId;
-    const bool hadTranslation=requestId||m_hasAiPreview;
-    if(requestId){
-        ++m_aiGeneration;m_aiTaskId=0;
-        if(m_aiRuntime&&m_aiRuntime->requests()&&m_aiRuntime->requests()->isPending(requestId))m_aiRuntime->requests()->cancel(requestId);
-        if(m_translate)m_translate->setEnabled(true);
-        if(m_aiCancelTranslation)m_aiCancelTranslation->setEnabled(false);
-        resetTranslationProgress();
-        const int row=rowForTrack(m_aiTrackId);
-        if(row>=0)setRowStatus(row,QStringLiteral("已取消"));
-    }
-    if(m_hasAiPreview)clearAiTranslationPreview();
+    const auto value=aiSummary();const bool hadTranslation=value.pending()||value.hasPreview();
+    clearAiTranslationPreview();
+    if(m_translate)m_translate->setEnabled(true);
+    if(m_aiCancelTranslation)m_aiCancelTranslation->setEnabled(false);
+    if(value.pending())setRowStatus(rowForTrack(value.trackId),QStringLiteral("已取消"));
     if(hadTranslation)setTranslationProgress(QStringLiteral("已取消"),reason.isEmpty()?QStringLiteral("本地翻译任务已取消；远端可能继续处理或计费。"):reason);
     if(!reason.isEmpty()&&m_status)m_status->setText(reason);
     if(hadTranslation&&m_missingTranslationOnly&&m_missingTranslationOnly->isChecked())updateFilter();
 }
 void LyricsLookup::cancelAiTranslationForTrack(qint64 id){
-    if(id>0&&(m_aiTrackId==id)&&(m_aiTaskId||m_hasAiPreview))
+    if(id>0&&(aiTrackId()==id)&&(aiTaskId()||hasAiPreview()))
         cancelAiTranslation(QStringLiteral("歌词已变更，先前的 AI 翻译结果已丢弃。"));
 }
-bool LyricsLookup::translationPending() const{return m_aiTaskId!=0;}
+bool LyricsLookup::translationPending() const{return aiTaskId()!=0;}
 int LyricsLookup::rowForTrack(qint64 id) const{for(int row=0;row<m_ids.size();++row)if(m_ids.at(row)==id)return row;return -1;}
 bool LyricsLookup::confirmStopTranslations(){
     if(!translationPending())return true;
@@ -480,61 +449,29 @@ bool LyricsLookup::confirmStopTranslations(){
     box.exec();if(box.clickedButton()!=quit)return false;
     cancelAiTranslation(QStringLiteral("本地翻译任务已取消；DeepSeek 可能已收到请求并继续处理或计费。"));return true;
 }
-void LyricsLookup::completeAiTranslation(quint64 taskId,const ai::ChatCompletionResult &result){
-    if(!taskId||taskId!=m_aiTaskId||m_aiGeneration!=m_aiActiveGeneration)return;
-    m_aiTaskId=0;if(m_translate)m_translate->setEnabled(true);if(m_aiCancelTranslation)m_aiCancelTranslation->setEnabled(false);
-    const auto usage=result.usage.available?
-        QStringLiteral("费用按 DeepSeek 实际计费；本次 token：输入 %1，输出 %2，总计 %3。")
-            .arg(result.usage.inputTokens).arg(result.usage.outputTokens).arg(result.usage.totalTokens):
-        QStringLiteral("本次 token 用量未知；费用以 DeepSeek 实际账单为准。");
-    auto fail=[this,&usage](const QString &message){
-        const auto detail=QStringLiteral("翻译失败：")+message+QStringLiteral("。 ")+usage;
-        setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译失败：")+message);
-        setTranslationProgress(QStringLiteral("翻译失败"),detail);
-    };
-    QString snapshotError;
-    if(!currentAiTranslationSnapshot(&snapshotError)){
-        fail(snapshotError);clearAiTranslationPreview();return;
+void LyricsLookup::renderAiTranslation(){
+    const auto value=aiSummary();if(!value.taskId)return;
+    m_translate->setEnabled(!value.pending());m_aiCancelTranslation->setEnabled(value.pending());
+    m_aiSaveTranslation->setEnabled(value.hasPreview());
+    if(value.state==TranslationState::WaitingForConsent||value.state==TranslationState::Queued)return;
+    if(value.hasPreview()){
+        setAiTranslationPreview();setRowStatus(rowForTrack(value.trackId),QStringLiteral("翻译完成，等待你预览并保存"));
+    }else if(value.state==TranslationState::Failed||value.state==TranslationState::Invalidated){
+        setRowStatus(rowForTrack(value.trackId),value.details);
     }
-    if(!result.ok()){
-        const auto message=result.error.message.isEmpty()?QStringLiteral("AI 翻译请求失败"):result.error.message;
-        fail(message);return;
-    }
-    const auto validation=ai::lyrics::validateResponse(result.content,m_aiPrepared);
-    if(!validation.ok()){
-        fail(validation.error);return;
-    }
-    QString mergeError;
-    const auto merged=ai::lyrics::merge(m_aiSourceBytes,m_aiPrepared,validation.translations,&mergeError);
-    if(merged.isEmpty()){
-        fail(mergeError);return;
-    }
-    m_aiTranslations=validation.translations;m_aiMergedBytes=merged;m_hasAiPreview=true;
-    m_aiSaveTranslation->setEnabled(true);setAiTranslationPreview();
-    QString details=QStringLiteral("翻译完成，请核对双栏预览后再保存。 ");
-    const auto masked=validation.translations.count(ai::lyrics::blockedLinePlaceholder());
-    if(masked)details+=QStringLiteral("译文含 %1 行屏蔽占位，请核对；原文保留。 ").arg(masked);
-    details+=usage;
-    setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("翻译完成，等待你预览并保存"));
-    setTranslationProgress(QStringLiteral("翻译完成"),details,1);
+    setTranslationProgress(value.status,value.details,value.pending()?-1:(value.hasPreview()?1:0));
 }
 void LyricsLookup::saveAiTranslation(){
-    if(!m_hasAiPreview)return;
-    QString snapshotError;
-    if(!currentAiTranslationSnapshot(&snapshotError)){
-        setRowStatus(rowForTrack(m_aiTrackId),snapshotError);setTranslationProgress(QStringLiteral("未保存"),snapshotError);clearAiTranslationPreview();return;
+    const auto value=aiSummary();if(!value.hasPreview())return;
+    // Explicit navigation owns discard; rows never decide the destination of save.
+    QString error;
+    if(!m_translation->save(value.taskId,&error)){
+        setRowStatus(rowForTrack(value.trackId),error);renderAiTranslation();return;
     }
-    if(!m_library->saveLyricsPreservingText(m_aiTrackId,m_aiMergedBytes)){
-        const auto error=m_library->lastError().isEmpty()?QStringLiteral("歌词保存失败，原歌词仍保留"):m_library->lastError();
-        setRowStatus(rowForTrack(m_aiTrackId),QStringLiteral("未保存：")+error);setTranslationProgress(QStringLiteral("未保存"),QStringLiteral("未保存：")+error);return;
-    }
-    const auto savedTrackId=m_aiTrackId;
-    const auto savedLanguage=m_aiTargetLanguage;
+    const auto savedTrackId=value.trackId;
     m_library->clearLookupCache(savedTrackId);remember(savedTrackId);m_translationAssessments.remove(savedTrackId);m_lyricsSnapshots.insert(savedTrackId,m_library->lyricsSaveSnapshot(savedTrackId));
     const auto message=QStringLiteral("双语歌词已保存，原文与时间戳保持不变。")+
-        (savedLanguage==QStringLiteral("zh-CN")?QString():QStringLiteral(" 目标语言：")+savedLanguage);
-    // An AI preview means an unsaved result. After saving, render the persisted
-    // document through the normal reader rather than keeping stale preview state.
+        (value.targetLanguage==QStringLiteral("zh-CN")?QString():QStringLiteral(" 目标语言：")+value.targetLanguage);
     clearAiTranslationPreview();
     setRowStatus(rowForTrack(savedTrackId),QStringLiteral("已保存 AI 双语歌词"));
     setTranslationProgress(QStringLiteral("已保存"),message,1);
@@ -585,7 +522,7 @@ void LyricsLookup::controls(){
 QString LyricsLookup::reuseKey(const Track &t) const {return normalized(t.title)+"|"+normalized(t.artist);}
 void LyricsLookup::remember(qint64 id){const auto t=m_library->track(id);if(!t.lyrics.isEmpty()&&QFileInfo::exists(m_library->absolute(t.lyrics))){auto &ids=m_reuse[reuseKey(t)];if(!ids.contains(id))ids<<id;}}
 void LyricsLookup::start(){
-    if(m_aiTaskId||m_hasAiPreview)cancelAiTranslation(QStringLiteral("歌词查找开始，未保存的 AI 翻译已取消。"));
+    if(aiTaskId()||hasAiPreview())cancelAiTranslation(QStringLiteral("歌词查找开始，未保存的 AI 翻译已取消。"));
     resetTranslationProgress();
     QVector<int> visible;for(int r=0;r<m_tracks->count();++r)if(!m_tracks->item(r)->isHidden())visible<<r;
     if(visible.isEmpty()){m_status->setText("当前没有缺失歌词的歌曲，可取消勾选以查看全部歌曲。");return;}
@@ -763,7 +700,7 @@ bool LyricsLookup::filterRow(int row){
     item->setData(TranslationFilterRole,badge);
     const auto details=item->data(StatusRole).toString()+(translationOnly?QStringLiteral("\n")+(badge.isEmpty()?assessment.reason:badge+QStringLiteral("：")+assessment.reason):QString());
     item->setToolTip(item->text()+QStringLiteral("\n")+details);item->setData(Qt::AccessibleTextRole,item->text()+QStringLiteral(" · ")+details);
-    const bool ownsTranslation=id==m_aiTrackId&&(m_aiTaskId||m_hasAiPreview);
+    const bool ownsTranslation=id==aiTrackId()&&(aiTaskId()||hasAiPreview());
     item->setHidden(!ownsTranslation&&(hideMissing||hideDone||hideTranslation));
     if(item->isHidden()&&item->isSelected())item->setSelected(false);
     return !item->isHidden();
@@ -965,20 +902,20 @@ void LyricsLookup::clearTransientCooldowns(){
 void LyricsLookup::manualSearch(){
     if(m_multi)return;
     const int row=m_tracks->currentRow();if(row<0||row>=m_ids.size())return;if(m_searchTitle->text().trimmed().isEmpty()){m_status->setText("请输入用于搜索的歌曲名称。");return;}
-    if(m_aiTaskId||m_hasAiPreview)cancelAiTranslation(QStringLiteral("歌词搜索开始，未保存的 AI 翻译已取消。"));
+    if(aiTaskId()||hasAiPreview())cancelAiTranslation(QStringLiteral("歌词搜索开始，未保存的 AI 翻译已取消。"));
     stop();
     clearTransientCooldowns();
     resetTranslationProgress();m_nextRow=m_ids.size();const auto t=m_library->track(m_ids[row]);if(!t.id)return;auto j=std::make_shared<Job>();j->row=row;j->original=t;j->match=searchTrack(t);j->match.title=cleanTitle(m_searchTitle->text());j->match.artist=m_searchArtist->text().trimmed();j->manual=true;j->generation=m_generation;m_jobs[t.id]=j;m_running=true;controls();rebuildCandidates();beginOnline(j);
 }
 void LyricsLookup::selectTrack(){
-    const int row=m_tracks->currentRow();const qint64 selected=row>=0&&row<m_ids.size()?m_ids[row]:0;if((m_multi||selected!=m_aiTrackId)&&(m_aiTaskId||m_hasAiPreview))cancelAiTranslation(QStringLiteral("歌曲选择已变化，旧翻译不会写入其他歌曲。"));const bool chosen=row>=0&&row<m_ids.size()&&m_tracks->currentItem()&&m_tracks->currentItem()->isSelected();m_searchTitle->setEnabled(chosen);m_searchArtist->setEnabled(chosen);m_fragment->setEnabled(chosen);m_manualSearch->setEnabled(chosen);m_mark->setEnabled(chosen);m_offset->setEnabled(chosen);
+    const int row=m_tracks->currentRow();const qint64 selected=row>=0&&row<m_ids.size()?m_ids[row]:0;if((m_multi||selected!=aiTrackId())&&(aiTaskId()||hasAiPreview()))cancelAiTranslation(QStringLiteral("歌曲选择已变化，旧翻译不会写入其他歌曲。"));const bool chosen=row>=0&&row<m_ids.size()&&m_tracks->currentItem()&&m_tracks->currentItem()->isSelected();m_searchTitle->setEnabled(chosen);m_searchArtist->setEnabled(chosen);m_fragment->setEnabled(chosen);m_manualSearch->setEnabled(chosen);m_mark->setEnabled(chosen);m_offset->setEnabled(chosen);
     if(chosen){ensureLyricsSnapshot(selected);m_translationAssessments.remove(selected);}
     if(chosen&&m_searchTitle->property("trackId").toLongLong()!=m_ids[row]){const auto t=searchTrack(m_library->track(m_ids[row]));m_searchTitle->setText(t.title);m_searchArtist->setText(knownArtist(t.artist)?t.artist:QString());m_fragment->clear();m_offset->setValue(0);m_searchTitle->setProperty("trackId",m_ids[row]);}
     const bool pure=chosen&&m_tracks->item(row)->data(StatusRole).toString().contains("需确认纯音乐");m_instrumentHint->setText("有纯音乐线索，请确认；没有歌词本身不能证明是纯音乐。");m_instrumentHint->setVisible(pure);m_continue->setVisible(pure);findChild<QPushButton *>("lyricsConfirmInstrumental")->setVisible(!m_multi&&pure);rebuildCandidates();controls();
 }
 void LyricsLookup::rebuildCandidates(){
     const auto previousTrack=m_versions->property("trackId").toLongLong();const int previousRecord=m_visibleRecords.value(m_versions->currentRow(),-1);
-    m_visibleRecords.clear();m_versions->clear();const int row=m_tracks->currentRow();m_versions->setProperty("trackId",m_ids.value(row));if(m_hasAiPreview&&row>=0&&m_ids.value(row)==m_aiTrackId)setAiTranslationPreview();else setPreviewLyrics({});m_apply->setEnabled(false);const auto records=m_candidates.value(m_ids.value(row));const bool show=!m_multi&&row>=0&&m_tracks->currentItem()&&m_tracks->currentItem()->isSelected()&&!m_tracks->currentItem()->isHidden()&&!records.isEmpty();m_candidateTitle->setText("候选版本 · 搜索后在此选择");if(!show){updatePreview();return;}const auto t=m_library->track(m_ids[row]);m_candidateTitle->setText(t.title+" · 候选版本");
+    m_visibleRecords.clear();m_versions->clear();const int row=m_tracks->currentRow();m_versions->setProperty("trackId",m_ids.value(row));if(hasAiPreview()&&row>=0&&m_ids.value(row)==aiTrackId())setAiTranslationPreview();else setPreviewLyrics({});m_apply->setEnabled(false);const auto records=m_candidates.value(m_ids.value(row));const bool show=!m_multi&&row>=0&&m_tracks->currentItem()&&m_tracks->currentItem()->isSelected()&&!m_tracks->currentItem()->isHidden()&&!records.isEmpty();m_candidateTitle->setText("候选版本 · 搜索后在此选择");if(!show){updatePreview();return;}const auto t=m_library->track(m_ids[row]);m_candidateTitle->setText(t.title+" · 候选版本");
     for(int i=0;i<records.size();++i){const auto r=records[i].toObject();if(m_sourceFilter->currentIndex()>0&&r["source"].toString()!=m_sourceFilter->currentText())continue;if(m_syncedOnly->isChecked()&&r["syncedLyrics"].toString().isEmpty())continue;const double seconds=r["duration"].toDouble(-1);const auto duration=seconds>0?QString("%1:%2").arg(int(seconds)/60).arg(int(seconds)%60,2,10,QChar('0')):QString("时长未知");const auto difference=t.duration>0&&seconds>0?QString(" · 相差 %1 秒").arg(qAbs(t.duration/1000.-seconds),0,'f',1):QString();const auto title=(m_visibleRecords.isEmpty()?QString("★ 最推荐  ·  "):QString())+r["trackName"].toString();const auto details=r["source"].toString("LRCLIB")+" · "+r["artistName"].toString()+" · "+r["albumName"].toString()+" · "+duration+" · "+(r["instrumental"].toBool()?QString("纯音乐"):r["syncedLyrics"].toString().isEmpty()?QString("普通歌词"):QString("滚动歌词"))+difference;auto *item=new QListWidgetItem(title+"\n"+details,m_versions);item->setToolTip(details+"\n"+matchReason(t,r));item->setData(Qt::UserRole,m_visibleRecords.isEmpty());item->setData(Qt::UserRole+3,i);item->setSizeHint(QSize(0,76));m_visibleRecords<<i;}
     const int previous=previousTrack==t.id?m_visibleRecords.indexOf(previousRecord):-1;
     m_versions->setCurrentRow(m_visibleRecords.isEmpty()?-1:qMax(0,previous));
@@ -986,10 +923,10 @@ void LyricsLookup::rebuildCandidates(){
 bool LyricsLookup::saveManual(const QByteArray &data,const QString &status,bool preserveText){
     const int row=m_tracks->currentRow();if(row<0||row>=m_ids.size())return false;const auto t=m_library->track(m_ids[row]);if(!t.id)return false;if(data.size()>4*1024*1024||Lyrics::parse(data).lines.isEmpty()){m_status->setText("歌词为空、格式无效或超过4 MB。");return false;}
     if(!checkLyricsSnapshot(t.id)){m_status->setText(m_storeError);setRowStatus(row,m_storeError);return false;}
-    if((!t.lyrics.isEmpty()&&QFileInfo::exists(m_library->absolute(t.lyrics)))||(m_aiTrackId==t.id&&(m_aiTaskId||m_hasAiPreview))){
+    if((!t.lyrics.isEmpty()&&QFileInfo::exists(m_library->absolute(t.lyrics)))||(aiTrackId()==t.id&&(aiTaskId()||hasAiPreview()))){
         QMessageBox confirm(QMessageBox::Question,QStringLiteral("替换歌词"),preserveText?QStringLiteral("该版本的原文与时间轴一致，将保留本地已有译文。是否使用？"):QStringLiteral("使用这份内容替换已有歌词？如果存在译文，也会一起替换，不会自动套用到新版本。"),QMessageBox::Yes|QMessageBox::No,this);
         confirm.setObjectName("lyricsReplaceConfirm");confirm.setDefaultButton(QMessageBox::No);
-        if(m_aiTaskId||m_hasAiPreview)confirm.setInformativeText(QStringLiteral("确认替换后，当前翻译任务或未保存的 AI 结果将作废。"));
+        if(aiTaskId()||hasAiPreview())confirm.setInformativeText(QStringLiteral("确认替换后，当前翻译任务或未保存的 AI 结果将作废。"));
         if(confirm.exec()!=QMessageBox::Yes)return false;
     }
     cancelJob(t.id);if(!store(t,withOffset(data,m_offset->value()),true,preserveText)){m_status->setText("未保存："+m_storeError);setRowStatus(row,"未保存："+m_storeError);return false;}cancelAiTranslationForTrack(t.id);++m_saved;setRowStatus(row,status);updateFilter();selectNextIncomplete(row);pumpTracks();return true;
@@ -1018,7 +955,7 @@ void LyricsLookup::importLyrics(){if(m_multi||m_tracks->currentRow()<0)return;co
 void LyricsLookup::saveOffsets(){
     const auto rows=batchRows();if(rows.isEmpty())return;const int offset=m_offset->value();stop();int saved=0,skipped=0,failed=0;
     for(int row:rows){const auto track=m_library->track(m_ids[row]);if(track.lyrics.isEmpty()){++skipped;continue;}const auto document=LyricsDocumentReader::readDocument(m_library->absolute(track.lyrics));if(!document.file.opened||document.file.tooLarge){++skipped;continue;}const auto &data=document.file.bytes;const auto &parsed=document.lyrics;if(!parsed.timed||parsed.instrumental){++skipped;continue;}
-        ensureLyricsSnapshot(track.id);if(track.id==m_aiTrackId&&(m_aiTaskId||m_hasAiPreview)&&QMessageBox::question(this,"替换歌词",QStringLiteral("保存偏移会替换当前歌词并清除未保存的 AI 结果，是否继续？"),QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes){++skipped;continue;}if(store(track,withOffset(data,offset),true)){cancelAiTranslationForTrack(track.id);++saved;setRowStatus(row,"已保存时间偏移");}else{++failed;setRowStatus(row,"未保存："+m_storeError);}
+        ensureLyricsSnapshot(track.id);if(track.id==aiTrackId()&&(aiTaskId()||hasAiPreview())&&QMessageBox::question(this,"替换歌词",QStringLiteral("保存偏移会替换当前歌词并清除未保存的 AI 结果，是否继续？"),QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes){++skipped;continue;}if(store(track,withOffset(data,offset),true)){cancelAiTranslationForTrack(track.id);++saved;setRowStatus(row,"已保存时间偏移");}else{++failed;setRowStatus(row,"未保存："+m_storeError);}
     }
     m_saved+=saved;selectTrack();m_status->setText(QString("时间偏移已保存 %1 首，跳过 %2 首，失败 %3 首。").arg(saved).arg(skipped).arg(failed));controls();
 }
@@ -1032,54 +969,26 @@ void LyricsLookup::markInstrumental(){
 }
 bool LyricsLookup::productionHost() const {return !m_sources.isEmpty()&&m_sources.first().endpoint.host()=="lrclib.net";}
 void LyricsLookup::translateSelected(){
-    if(m_aiTaskId||m_aiConsentPending){m_status->setText(QStringLiteral("当前整首翻译请求仍在进行中。"));return;}
+    if(aiTaskId()||m_aiConsentPending){m_status->setText(QStringLiteral("当前整首翻译请求仍在进行中。"));return;}
     QScopedValueRollback<bool> preparing(m_aiConsentPending,true);
     if(m_multi){m_status->setText(QStringLiteral("整首 AI 翻译一次只处理一首歌，请先退出多选并选择一首歌曲。"));return;}
     const int row=m_tracks->currentRow();
     if(row<0||row>=m_ids.size()||!m_tracks->currentItem()||!m_tracks->currentItem()->isSelected()||m_tracks->currentItem()->isHidden()){
         m_status->setText(QStringLiteral("请先选择一首歌曲。"));return;
     }
-    if(m_hasAiPreview){
+    if(hasAiPreview()){
         if(QMessageBox::question(this,QStringLiteral("重新发送整首翻译"),
              QStringLiteral("当前译文预览尚未保存。再次翻译会丢弃当前预览，并发送一次新的整首歌词请求。是否继续？"),
              QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes)return;
         clearAiTranslationPreview();
     }
-    if(!m_aiRuntime||!m_aiRuntime->requests()){
-        m_status->setText(QStringLiteral("AI 服务不可用。请从主窗口打开歌词翻译。"));return;
+    clearAiTranslationPreview();
+    const auto selectedId=m_ids[row];
+    QString preparationError;
+    m_translationTaskId=m_translation->prepareAi(selectedId,&preparationError);
+    if(!m_translationTaskId){
+        setRowStatus(row,preparationError);m_status->setText(preparationError);return;
     }
-    const auto track=m_library->track(m_ids[row]);
-    if(!track.id||track.lyrics.isEmpty()){
-        setRowStatus(row,QStringLiteral("没有已保存的原文歌词，无法翻译"));m_status->setText(QStringLiteral("请先为这首歌保存歌词。"));return;
-    }
-    const auto document=LyricsDocumentReader::readDocument(m_library->absolute(track.lyrics));
-    if(!document.file.opened||document.file.tooLarge||!document.file.complete){
-        setRowStatus(row,QStringLiteral("歌词文件无法完整读取"));m_status->setText(QStringLiteral("歌词文件无法完整读取或超过 4 MB。"));return;
-    }
-    const auto prepared=ai::lyrics::prepare(document.file.bytes,track.title,track.artist);
-    if(!prepared.ok()){
-        setRowStatus(row,prepared.bilingual?QStringLiteral("已有双语歌词，未启动翻译"):QStringLiteral("没有可翻译的歌词"));
-        m_status->setText(prepared.error);return;
-    }
-    const auto taskConfiguration=m_aiRuntime->translationConfiguration();
-    const auto configurationError=m_aiRuntime->validateConfiguration(taskConfiguration);
-    if(!configurationError.isEmpty()){m_status->setText(configurationError);return;}
-    const auto *model=m_aiRuntime->model(taskConfiguration.providerId,taskConfiguration.modelId);
-    if(!model){m_status->setText(QStringLiteral("所选模型不可用，请在 AI 服务设置中刷新模型列表。"));return;}
-    const auto serviceConfiguration=m_aiRuntime->configuration();
-    const auto targetLanguage=serviceConfiguration.targetLanguage.trimmed().isEmpty()?QStringLiteral("zh-CN"):serviceConfiguration.targetLanguage.trimmed();
-    if(targetLanguage!=QStringLiteral("zh-CN")){
-        m_status->setText(QStringLiteral("当前只支持简体中文目标语言，请检查 AI 翻译设置；本次未发送请求。"));return;
-    }
-    const auto stylePrompt=serviceConfiguration.translationStylePrompt;
-    const auto messages=ai::lyrics::chatMessages(targetLanguage,stylePrompt,prepared);
-    const auto inputBound=ai::lyrics::inputTokenUpperBound(messages);
-    const auto contextWindow=model->capabilities.contextWindow;
-    const auto outputLimit=model->capabilities.maxOutputTokens;
-    if(contextWindow<=0||outputLimit<=0||inputBound>contextWindow-outputLimit){
-        m_status->setText(QStringLiteral("整首歌词与输出上限无法放入所选模型的已确认上下文窗口；本次未发送请求。请手动选择兼容模型或精简歌词后再试。"));return;
-    }
-    const auto requestConfigurationDigest=currentAiConfigurationDigest();
     QMessageBox consent(this);consent.setObjectName("lyricsAiCloudConsent");consent.setIcon(QMessageBox::Information);
     consent.setWindowTitle(QStringLiteral("发送整首歌词到 DeepSeek"));
     consent.setText(QStringLiteral("Relaxer 将把待翻译的歌词文本、目标语言和风格提示发送至 DeepSeek 官方服务器处理。\n"
@@ -1089,36 +998,17 @@ void LyricsLookup::translateSelected(){
     auto *decline=consent.addButton(QStringLiteral("不发送"),QMessageBox::RejectRole);decline->setObjectName("lyricsAiConsentCancel");
     auto *send=consent.addButton(QStringLiteral("发送一次整首歌词"),QMessageBox::AcceptRole);send->setObjectName("lyricsAiConsentSend");
     consent.setDefaultButton(qobject_cast<QPushButton *>(decline));consent.exec();
-    if(consent.clickedButton()!=send){m_status->setText(QStringLiteral("未发送歌词。"));return;}
-
-    // The modal consent dialog runs a nested event loop. Recheck the snapshot
-    // before charging, not only when the response eventually arrives.
-    const auto current=m_library->track(track.id);
-    if(!m_aiRuntime||m_multi||m_tracks->currentRow()!=row||!m_tracks->currentItem()||
-       !m_tracks->currentItem()->isSelected()||m_tracks->currentItem()->isHidden()||
-       m_ids.value(row)!=track.id||current.hash!=track.hash||current.title!=track.title||
-       current.artist!=track.artist||current.lyrics!=track.lyrics||
-       currentAiConfigurationDigest()!=requestConfigurationDigest){
-        m_status->setText(QStringLiteral("发送前歌曲或 AI 配置已变化；本次未发送请求。"));return;
+    if(consent.clickedButton()!=send){clearAiTranslationPreview();m_status->setText(QStringLiteral("未发送歌词。"));return;}
+    // The nested consent event loop may change the frontend selection. The
+    // service independently rechecks file, song and configuration before dispatch.
+    if(m_multi||m_tracks->currentRow()!=row||!m_tracks->currentItem()||
+       !m_tracks->currentItem()->isSelected()||m_tracks->currentItem()->isHidden()||m_ids.value(row)!=selectedId){
+        clearAiTranslationPreview();m_status->setText(QStringLiteral("发送前歌曲或 AI 配置已变化；本次未发送请求。"));return;
     }
-    const auto latest=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));
-    if(!latest.opened||!latest.complete||latest.tooLarge||
-       QCryptographicHash::hash(latest.bytes,QCryptographicHash::Sha256)!=prepared.sourceDigest){
-        m_status->setText(QStringLiteral("发送前歌词已变化；本次未发送请求。"));return;
+    QString error;
+    if(!m_translation->start(m_translationTaskId,&error)){
+        m_status->setText(error);clearAiTranslationPreview();return;
     }
-    const auto dispatchError=m_aiRuntime->validateConfiguration(taskConfiguration);
-    if(!dispatchError.isEmpty()){m_status->setText(dispatchError);return;}
-
-    ai::ChatCompletionRequest request;request.modelId=taskConfiguration.modelId;request.messages=messages;
-    request.thinkingEnabled=taskConfiguration.thinkingEnabled;request.reasoningEffort=taskConfiguration.reasoningEffort;
-    request.maxTokens=outputLimit;
-    m_aiTrackId=track.id;m_aiTrackSnapshot=track;m_aiLyricsPath=track.lyrics;m_aiSourceBytes=document.file.bytes;
-    m_aiSourceDigest=prepared.sourceDigest;m_aiPrepared=prepared;
-    m_aiTargetLanguage=targetLanguage;m_aiConfigurationDigest=requestConfigurationDigest;
-    m_aiTranslations.clear();m_aiMergedBytes.clear();m_hasAiPreview=false;
-    m_aiActiveGeneration=++m_aiGeneration;
-    m_aiTaskId=m_aiRuntime->requests()->complete(taskConfiguration.providerId,request);
-    if(!m_aiTaskId){m_status->setText(QStringLiteral("AI 请求未能启动。"));return;}
     m_translate->setEnabled(false);m_aiCancelTranslation->setEnabled(true);
     setTranslationProgress(QStringLiteral("正在翻译"),QStringLiteral("已发送一次整首歌词请求，正在等待 DeepSeek 响应，可取消。"),-1);
     setRowStatus(row,QStringLiteral("正在翻译整首歌词"));

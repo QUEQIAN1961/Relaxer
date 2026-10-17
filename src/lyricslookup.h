@@ -1,6 +1,6 @@
 #pragma once
 #include "ai/ai-runtime.h"
-#include "ai/whole-song-lyrics-translation.h"
+#include "translation-coordinator.h"
 #include "library.h"
 #include "lyric-remote.h"
 #include <QDialog>
@@ -179,20 +179,17 @@ private:
     QWidget *m_morePanel=nullptr;
     QSet<int> m_requestedRows;
     QSet<qint64> m_missingAtOpen,m_pinnedIds;
-    quint64 m_aiTaskId=0,m_aiGeneration=0,m_aiActiveGeneration=0;
-    qint64 m_aiTrackId=0;
-    Track m_aiTrackSnapshot;
-    QString m_aiLyricsPath,m_aiTargetLanguage;
-    QByteArray m_aiSourceBytes,m_aiSourceDigest,m_aiConfigurationDigest,m_aiMergedBytes;
-    ai::lyrics::PreparedLyrics m_aiPrepared;
-    QStringList m_aiTranslations;
-    bool m_hasAiPreview=false,m_aiConsentPending=false;
+    TranslationCoordinator *m_translation=nullptr;
+    quint64 m_translationTaskId=0; // Frontend identity only; service owns all state.
+    bool m_aiConsentPending=false;
+    TranslationSummary aiSummary() const;
+    quint64 aiTaskId() const;
+    qint64 aiTrackId() const;
+    bool hasAiPreview() const;
+    void renderAiTranslation();
     void updatePreview();
     void setPreviewLyrics(const QByteArray &data);
     void setAiTranslationPreview();
-    QByteArray currentAiConfigurationDigest() const;
-    bool currentAiTranslationSnapshot(QString *error=nullptr) const;
-    void completeAiTranslation(quint64 taskId,const ai::ChatCompletionResult &result);
     void saveAiTranslation();
     void clearAiTranslationPreview();
     void cancelAiTranslation(const QString &reason={});
