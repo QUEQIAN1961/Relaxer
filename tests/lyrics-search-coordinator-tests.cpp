@@ -1,5 +1,6 @@
 #include "domain/lyric-match.h"
 #include "lyrics-search-coordinator.h"
+#include "release-version.h"
 #include <QFile>
 #include <QJsonDocument>
 #include <QSemaphore>
@@ -134,7 +135,7 @@ class LyricsSearchTests final : public QObject {
   private slots:
     void headlessEventTraceAndCompletedNetworkBudget(){
         QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());const auto t=seed(l);
-        ControlledNetwork net;net.responder=[&](ControlledReply *r){r->respond(200,json({record(t)}));};
+        ControlledNetwork net;net.responder=[&](ControlledReply *r){QCOMPARE(r->request().rawHeader("User-Agent"),QByteArray(release::UserAgent));r->respond(200,json({record(t)}));};
         LyricsSearchCoordinator c(&l,nullptr,QUrl("http://mock.test/api"),{},&net);QSignalSpy events(&c,&LyricsSearchCoordinator::eventOccurred);
         QSignalSpy done(&c,&LyricsSearchCoordinator::finished);QSignalSpy tasks(&c,&LyricsSearchCoordinator::taskFinished);
         auto options=shortOptions();options.budgetMs=50;options.scoreDelayMs=100;

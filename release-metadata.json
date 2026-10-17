@@ -1,11 +1,14 @@
 {
   "numericVersion": "0.2.0",
-  "prerelease": "rc1",
-  "displayVersion": "V0.2.0-rc1",
+  "prerelease": "rc2",
+  "displayVersion": "V0.2.0-rc2",
   "status": "release-candidate",
   "applicationName": "Relaxer",
   "organizationName": "Relaxer",
   "dataIdentityChanged": false,
   "schemaChanged": false,
-  "officialReleaseApproved": false
+  "officialReleaseApproved": false,
+  "baselineCommit": "4f0919a132b63c62de707d7edf784f886f53ddff",
+  "classificationStorage": "existing settings rows keyed by stable trackId and content hash",
+  "independentAcceptance": "Harness R10 pending"
 }

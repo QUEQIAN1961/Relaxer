@@ -30,7 +30,7 @@ try {
             try {
                 Write-Output ('Downloading the pinned official MSYS2 base archive: ' + $url)
                 $request = [Net.HttpWebRequest]::Create([string]$url)
-                $request.UserAgent = 'Relaxer/0.2.0-rc1'
+                $request.UserAgent = 'Relaxer/0.2.0-rc2'
                 $request.Timeout = 60000; $request.ReadWriteTimeout = 60000
                 $response = $request.GetResponse()
                 $total = [long]$response.ContentLength

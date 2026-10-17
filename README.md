@@ -1,8 +1,8 @@
-# Relaxer V0.2.0-rc1 · Phase B 发布候选版
+# Relaxer V0.2.0-rc2 · Phase B 发布候选版
 
-本版使用 Windows MSYS2 UCRT64 构建。当前为 Release Candidate，等待 Harness R9 独立验收和用户正式发布确认。版本命名由历史 1.10.0 调整为 0.2.0，应用名称、资料目录与数据库格式保持兼容；不会因版本号变化清空旧数据。
+本版使用 Windows MSYS2 UCRT64 构建。当前为 Release Candidate，上游 RC1 已通过 Harness R9，本候选等待 Harness R10 独立验收和用户正式发布确认。版本命名由历史 1.10.0 调整为 0.2.0，应用名称、资料目录与数据库格式保持兼容；不会因版本号变化清空旧数据。
 
-新增内容及已知限制见 `V0.2.0-ReleaseNotes.md` 与 `V0.2.0-Known-Issues.md`。便携发行包包含已构建的 runtime；本源码包保留既有首次准备启动方式。
+新增内容及已知限制见 `V0.2.0-RC2-ReleaseNotes.md` 与 `V0.2.0-RC2-Known-Issues.md`。便携发行包包含已构建的 runtime；本源码包保留既有首次准备启动方式。
 
 解压后双击 `RelaxerStart.exe`。包内提供源码、资源、原生启动器和环境检查组件；播放器主程序在本机首次启动时编译。首次准备会优先复用已有 MSYS2 UCRT64，检查依赖、构建并验证运行文件；没有已有环境时联网准备。日常本地播放可离线使用。
 
@@ -12,7 +12,7 @@
 2. 完整解压 ZIP 到新目录。
 3. 将旧目录整个 `data` 文件夹复制到新目录，与 `RelaxerStart.exe` 同级。
 4. 如有自定义环境路径，可复制 `msys2-path.txt`。
-5. 双击新目录的启动器，首次准备完成后进入 V0.2.0-rc1。
+5. 双击新目录的启动器，首次准备完成后进入 V0.2.0-rc2。
 
 歌曲、歌单、收藏、歌词、统计和设置会继续使用。音乐仍复制到 `data/Music`，原始文件保留。`start-Relaxer.cmd` 和 `创建桌面快捷方式.vbs` 均使用同一启动入口。
 
