@@ -1,14 +1,20 @@
 {
   "numericVersion": "0.2.0",
-  "prerelease": "rc2",
-  "displayVersion": "V0.2.0-rc2",
-  "status": "release-candidate",
+  "prerelease": "",
+  "displayVersion": "V0.2.0",
+  "status": "stable",
   "applicationName": "Relaxer",
   "organizationName": "Relaxer",
   "dataIdentityChanged": false,
   "schemaChanged": false,
-  "officialReleaseApproved": false,
-  "baselineCommit": "4f0919a132b63c62de707d7edf784f886f53ddff",
+  "officialReleaseApproved": true,
+  "baselineCommit": "2540a6729a8a0fff06fe1f41d0a2d7bcc703b6a9",
   "classificationStorage": "existing settings rows keyed by stable trackId and content hash",
-  "independentAcceptance": "Harness R10 pending"
+  "independentAcceptance": "RC2: Harness R10 PASS; stable conversion verified locally",
+  "baselineTree": "4665add5343838531730236141fb5d80f8d44004",
+  "manualAcceptance": "USER-REPORTED MANUAL ACCEPTANCE — 6/6 PASS (V0.2.0-rc2)",
+  "releaseScope": "Release identity and metadata only; business logic frozen to RC2",
+  "publicPublicationAuthorized": false,
+  "stableManualAcceptance": "USER-REPORTED MANUAL ACCEPTANCE — 7/7 PASS",
+  "stableManualAcceptanceDateUTC8": "2026-10-18"
 }
