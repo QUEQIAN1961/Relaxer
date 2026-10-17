@@ -265,6 +265,10 @@ class AiLyricsTranslationTests final : public QObject {
     Q_OBJECT
   private slots:
     void productionCoordinatorOwnsPreviewAndCloseLifecycle();
+    void completedPreviewCancelThenSave_data();
+    void completedPreviewCancelThenSave();
+    void idleCloseNeedsNoConfirmation_data();
+    void idleCloseNeedsNoConfirmation();
     void declinedConsentDoesNotDispatchBusinessTask();
     void preparePreservesRepeatedTimestampRowsAndRejectsExistingBilingualLyrics();
     void rejectsEmptyInstrumentalAndMetadataOnlyLyrics();
@@ -1644,9 +1648,69 @@ void AiLyricsTranslationTests::productionCoordinatorOwnsPreviewAndCloseLifecycle
     QVERIFY(preview.taskId);QCOMPARE(preview.trackId,track.id);QVERIFY(!coordinator->cancel(preview.taskId));
     dialog->findChild<QPushButton *>("lyricsCancelTranslation")->click(); // Disabled after completion.
     QVERIFY(coordinator->summary(preview.taskId).hasPreview());
-    dialog->close(); // Baseline: completed preview does not show the pending-close dialog.
+    int confirmations=0;
+    QTimer::singleShot(0,dialog.get(),[&]{
+        auto *box=dialog->findChild<QMessageBox *>("lyricsUnsavedTranslationCloseConfirm");
+        QVERIFY(box);++confirmations;
+        QCOMPARE(box->windowTitle(),QStringLiteral("未保存的翻译"));
+        auto *keep=box->findChild<QPushButton *>("lyricsKeepTranslationPreview");QVERIFY(keep);
+        QCOMPARE(box->defaultButton(),keep);
+        // A second close while the modal confirmation is open cannot create another prompt.
+        dialog->close();QCOMPARE(dialog->findChildren<QMessageBox *>().size(),1);
+        keep->click();
+    });
+    QVERIFY(!dialog->close());QVERIFY(dialog->isVisible());QCOMPARE(confirmations,1);
+    QVERIFY(coordinator->summary(preview.taskId).hasPreview());
+    QVERIFY(dialog->findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
+    QByteArray beforeDiscard;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&beforeDiscard));QCOMPARE(beforeDiscard,original);
+    QTimer::singleShot(0,dialog.get(),[&]{
+        auto *box=dialog->findChild<QMessageBox *>("lyricsUnsavedTranslationCloseConfirm");QVERIFY(box);++confirmations;
+        box->findChild<QPushButton *>("lyricsDiscardTranslationQuit")->click();
+    });
+    QVERIFY(dialog->close());QVERIFY(!dialog->isVisible());QCOMPARE(confirmations,2);
+    QVERIFY(!coordinator->summary(preview.taskId).hasPreview());
+    QVERIFY(dialog->close());QCOMPARE(confirmations,2);
     dialog.reset();QVERIFY(!coordinator);QCOMPARE(server.requestCount(),1);
     QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,original);
+}
+void AiLyricsTranslationTests::completedPreviewCancelThenSave_data(){
+    QTest::addColumn<int>("path");
+    QTest::newRow("window-close")<<0;QTest::newRow("escape-reject")<<1;
+    QTest::newRow("save-close-button")<<2;QTest::newRow("accept-done")<<3;
+}
+void AiLyricsTranslationTests::completedPreviewCancelThenSave(){
+    QFETCH(int,path);
+    QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Close protection","close-protection");const QByteArray original="[00:01.00]Hello world";
+    QVERIFY(library.saveLyrics(track.id,original));TranslationHttpMock server;QVERIFY(server.listen());
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("你好世界")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:1"),{},true,&runtime);
+    dialog.show();dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);clickConsentAndStart(dialog);
+    auto *save=dialog.findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
+    const auto originalPreview=dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText();QVERIFY(!originalPreview.isEmpty());
+    int prompts=0;QTimer::singleShot(0,&dialog,[&]{
+        auto *box=dialog.findChild<QMessageBox *>("lyricsUnsavedTranslationCloseConfirm");QVERIFY(box);++prompts;
+        box->findChild<QPushButton *>("lyricsKeepTranslationPreview")->click();
+    });
+    if(path==0)dialog.close();else if(path==1)QTest::keyClick(&dialog,Qt::Key_Escape);
+    else if(path==2)dialog.findChild<QPushButton *>("lyricsSaveClose")->click();else static_cast<QDialog *>(&dialog)->accept();
+    QCOMPARE(prompts,1);QVERIFY(dialog.isVisible());QVERIFY(save->isEnabled());
+    QCOMPARE(dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText(),originalPreview);
+    QCOMPARE(server.requestCount(),1);save->click();QTRY_VERIFY(!save->isEnabled());
+    QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));
+    QVERIFY(bytes.contains("relaxer-bilingual"));QVERIFY(bytes.contains("Hello world"));QVERIFY(bytes.contains(QStringLiteral("你好世界").toUtf8()));
+    QVERIFY(dialog.close());QVERIFY(!dialog.isVisible());QCOMPARE(prompts,1);QCOMPARE(server.requestCount(),1);
+}
+void AiLyricsTranslationTests::idleCloseNeedsNoConfirmation_data(){completedPreviewCancelThenSave_data();}
+void AiLyricsTranslationTests::idleCloseNeedsNoConfirmation(){
+    QFETCH(int,path);QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Idle close","idle-close");TranslationHttpMock server;QVERIFY(server.listen());
+    LyricsLookup dialog(&library,{track.id},nullptr,server.baseUrl());dialog.show();
+    if(path==0)dialog.close();else if(path==1)QTest::keyClick(&dialog,Qt::Key_Escape);
+    else if(path==2)dialog.findChild<QPushButton *>("lyricsSaveClose")->click();else static_cast<QDialog *>(&dialog)->accept();
+    QVERIFY(!dialog.isVisible());QVERIFY(dialog.findChildren<QMessageBox *>().isEmpty());QCOMPARE(server.requestCount(),0);
 }
 void AiLyricsTranslationTests::declinedConsentDoesNotDispatchBusinessTask() {
     QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());

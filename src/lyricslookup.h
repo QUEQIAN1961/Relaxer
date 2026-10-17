@@ -60,6 +60,7 @@ public:
 protected:
     void reject() override;
     void closeEvent(QCloseEvent *event) override;
+    void done(int result) override;
 private:
     struct RankItem {
         QJsonObject record;
@@ -182,6 +183,7 @@ private:
     TranslationCoordinator *m_translation=nullptr;
     quint64 m_translationTaskId=0; // Frontend identity only; service owns all state.
     bool m_aiConsentPending=false;
+    bool m_translationCloseConfirmOpen=false;
     TranslationSummary aiSummary() const;
     quint64 aiTaskId() const;
     qint64 aiTrackId() const;

@@ -440,7 +440,19 @@ void LyricsLookup::cancelAiTranslationForTrack(qint64 id){
 bool LyricsLookup::translationPending() const{return aiTaskId()!=0;}
 int LyricsLookup::rowForTrack(qint64 id) const{for(int row=0;row<m_ids.size();++row)if(m_ids.at(row)==id)return row;return -1;}
 bool LyricsLookup::confirmStopTranslations(){
-    if(!translationPending())return true;
+    if(m_translationCloseConfirmOpen)return false;
+    if(!translationPending()&&!hasAiPreview())return true;
+    QScopedValueRollback<bool> confirming(m_translationCloseConfirmOpen,true);
+    if(hasAiPreview()){
+        QMessageBox box(this);box.setObjectName("lyricsUnsavedTranslationCloseConfirm");
+        box.setIcon(QMessageBox::Warning);box.setWindowTitle("未保存的翻译");
+        box.setText("当前 AI 翻译已经完成，但译文尚未保存。关闭窗口将丢弃本次翻译结果，是否确定关闭？");
+        auto *keep=box.addButton("取消",QMessageBox::RejectRole);keep->setObjectName("lyricsKeepTranslationPreview");
+        auto *discard=box.addButton("丢弃译文并关闭",QMessageBox::AcceptRole);discard->setObjectName("lyricsDiscardTranslationQuit");
+        box.setDefaultButton(qobject_cast<QPushButton *>(keep));box.setEscapeButton(keep);
+        box.exec();if(box.clickedButton()!=discard)return false;
+        cancelAiTranslation(QStringLiteral("已明确放弃未保存的 AI 译文。"));return true;
+    }
     QMessageBox box(this);box.setObjectName("lyricsTranslateCloseConfirm");box.setIcon(QMessageBox::Warning);box.setWindowTitle("翻译任务尚未完成");
     box.setText("关闭将停止本地翻译任务。DeepSeek 可能已经收到整首歌词，并可能继续处理或计费；本地取消不能撤销供应商已处理的请求。尚未确认保存的译文不会写入歌词文件。是否关闭？");
     auto *keep=box.addButton("继续等待",QMessageBox::RejectRole);keep->setObjectName("lyricsContinueTranslate");
@@ -479,6 +491,7 @@ void LyricsLookup::saveAiTranslation(){
 }
 void LyricsLookup::closeEvent(QCloseEvent *event){if(!confirmStopTranslations()){event->ignore();return;}QDialog::closeEvent(event);}
 void LyricsLookup::reject(){if(!confirmStopTranslations())return;stop();QDialog::reject();}
+void LyricsLookup::done(int result){if(!confirmStopTranslations())return;stop();QDialog::done(result);}
 bool LyricsLookup::live(const JobPtr &j) const {return m_running&&j->generation==m_generation&&m_jobs.value(j->original.id)==j;}
 void LyricsLookup::cancelJob(qint64 id){
     auto j=m_jobs.take(id);if(!j)return;
