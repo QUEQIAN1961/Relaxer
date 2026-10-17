@@ -29,8 +29,10 @@ QString toolPath(const QString &name) {
                          QCoreApplication::applicationDirPath() + "/",
                          QCoreApplication::applicationDirPath() + "/../runtime-ffmpeg/"};
     const auto configured = qEnvironmentVariable("RELAXER_FFMPEG_DIR");
-    if (!configured.isEmpty())
-        prefixes.prepend(QDir(configured).filePath(QString()) );
+    if (!configured.isEmpty()) {
+        const auto executable=QDir(configured).filePath(file);
+        if(QFileInfo::exists(executable))return QFileInfo(executable).absoluteFilePath();
+    }
     QDir dir(QCoreApplication::applicationDirPath());
     for (int i = 0; i < 4; ++i) {
         prefixes << dir.filePath("runtime-ffmpeg/");
@@ -232,7 +234,7 @@ ImportResult Importer::importOne(const QString &root, const QString &source, std
     if (!midi)
         bytes = process(toolPath("ffprobe"),
                         {"-v", "error", "-show_format", "-show_streams", "-of", "json", fi.absoluteFilePath()},
-                        20000, &err);
+                        20000, &err,cancel);
     auto json = QJsonDocument::fromJson(bytes).object();
     bool hasAudio = midi;
     QJsonObject tags = json["format"].toObject()["tags"].toObject();

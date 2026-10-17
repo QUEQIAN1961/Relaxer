@@ -142,7 +142,10 @@ add_executable(relaxer_importer_contract_tests tests/importer-contract-tests.cpp
 target_link_libraries(relaxer_importer_contract_tests PRIVATE relaxer_core Qt6::Test)
 relaxer_add_qt_test(relaxer_importer_contract relaxer_importer_contract_tests)
 
+add_executable(relaxer_import_process_fixture tests/import-process-fixture.cpp)
+set_target_properties(relaxer_import_process_fixture PROPERTIES AUTOMOC OFF AUTORCC OFF)
 add_executable(relaxer_import_coordinator_tests tests/import-coordinator-tests.cpp)
+add_dependencies(relaxer_import_coordinator_tests relaxer_import_process_fixture)
 target_link_libraries(relaxer_import_coordinator_tests PRIVATE relaxer_core Qt6::Test SQLite::SQLite3)
 relaxer_add_qt_test(relaxer_import_coordinator relaxer_import_coordinator_tests)
 if(CMAKE_OBJDUMP AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))

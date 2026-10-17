@@ -170,6 +170,25 @@ private slots:
         QVERIFY(!progress.isEmpty());QVERIFY2(progress.size()<100,"Progress signals were not coalesced");int previous=0;
         for(const auto &event:progress){QCOMPARE(event.at(0).toULongLong(),id);QVERIFY(event.at(1).toInt()>=previous);previous=event.at(1).toInt();}QCOMPARE(previous,1);
     }
+    void cancelStopsStalledProbeProcess(){
+        QTemporaryDir directory;const auto tools=directory.filePath("tools"),root=directory.filePath("data"),source=directory.filePath("source.wav"),marker=directory.filePath("probe-ready");
+        QVERIFY(QDir().mkpath(tools));QFile file(source);QVERIFY(file.open(QIODevice::WriteOnly));file.write("synthetic probe fixture");file.close();
+#ifdef Q_OS_WIN
+        const auto fixture=QCoreApplication::applicationDirPath()+"/relaxer_import_process_fixture.exe",probe=tools+"/ffprobe.exe";
+#else
+        const auto fixture=QCoreApplication::applicationDirPath()+"/relaxer_import_process_fixture",probe=tools+"/ffprobe";
+#endif
+        QVERIFY(QFile::copy(fixture,probe));
+        const auto oldTools=qgetenv("RELAXER_FFMPEG_DIR"),oldMarker=qgetenv("RELAXER_IMPORT_PROCESS_MARKER");
+        auto restore=qScopeGuard([&]{if(oldTools.isNull())qunsetenv("RELAXER_FFMPEG_DIR");else qputenv("RELAXER_FFMPEG_DIR",oldTools);if(oldMarker.isNull())qunsetenv("RELAXER_IMPORT_PROCESS_MARKER");else qputenv("RELAXER_IMPORT_PROCESS_MARKER",oldMarker);});
+        qputenv("RELAXER_FFMPEG_DIR",tools.toUtf8());qputenv("RELAXER_IMPORT_PROCESS_MARKER",QFile::encodeName(marker));
+        QCOMPARE(QFileInfo(toolPath("ffprobe")).canonicalFilePath(),QFileInfo(probe).canonicalFilePath());
+        std::atomic_bool cancel{false},complete{false};ImportResult result;
+        std::thread worker([&]{result=Importer::importOne(root,source,&cancel);complete.store(true);});
+        auto join=qScopeGuard([&]{cancel.store(true);if(worker.joinable())worker.join();});
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(marker),5000);QElapsedTimer elapsed;elapsed.start();cancel.store(true);
+        QTRY_VERIFY_WITH_TIMEOUT(complete.load(),3000);worker.join();QVERIFY(elapsed.elapsed()<3000);QCOMPARE(result.error,QStringLiteral("已取消"));QVERIFY(QFileInfo::exists(source));
+    }
     void callbackMayDestroyCoordinator_data(){QTest::addColumn<bool>("duringProgress");QTest::newRow("final-progress")<<true;QTest::newRow("final-result")<<false;}
     void callbackMayDestroyCoordinator(){
         QFETCH(bool,duringProgress);QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());auto co=std::make_unique<ControlledCoordinator>(&library);
