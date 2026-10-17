@@ -1,6 +1,7 @@
 #include "importer.h"
 #include "lyric-text.h"
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QCryptographicHash>
 #include <QDirIterator>
 #include <QFile>
@@ -47,7 +48,7 @@ QStringList Importer::extensions() {
             "kar"};
 }
 static QByteArray process(const QString &exe, const QStringList &args, int timeout,
-                          QString *error = nullptr) {
+                          QString *error = nullptr,std::atomic_bool *cancel = nullptr) {
     if (exe.isEmpty()) {
         if (error)
             *error = "缺少 FFmpeg / ffprobe，请重新完成首次准备。";
@@ -62,11 +63,13 @@ static QByteArray process(const QString &exe, const QStringList &args, int timeo
             *error = "无法启动音频读取工具";
         return {};
     }
-    if (!p.waitForFinished(timeout)) {
+    QElapsedTimer timer;timer.start();
+    while (!p.waitForFinished(100)) {
+        if((!cancel||!cancel->load())&&timer.elapsed()<timeout)continue;
         p.kill();
         p.waitForFinished(3000);
         if (error)
-            *error = "读取超时";
+            *error = cancel&&cancel->load()?QStringLiteral("已取消"):QStringLiteral("读取超时");
         return {};
     }
     if (p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0) {
@@ -119,7 +122,7 @@ static bool atomicWrite(const QString &path, const QByteArray &bytes) {
     return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size() && f.commit();
 }
 static ArtworkResult readArtwork(const QString &root, const QString &source, const QString &hash,
-                                 const QJsonObject &json, bool allowSidecar) {
+                                 const QJsonObject &json, bool allowSidecar,std::atomic_bool *cancel=nullptr) {
     ArtworkResult result;
     result.hash = hash;
     result.origin = "none";
@@ -148,7 +151,7 @@ static ArtworkResult readArtwork(const QString &root, const QString &source, con
                                       "0:" + QString::number(picture["index"].toInt()), "-frames:v", "1",
                                       "-vf", "scale=800:800:force_original_aspect_ratio=decrease", "-f",
                                       "image2pipe", "-vcodec", "png", "pipe:1"},
-                                     20000, &result.error);
+                                     20000, &result.error,cancel);
             if (!png.isEmpty() && png.size() < 12 * 1024 * 1024 && atomicWrite(destination, png)) {
                 result.cover = relative;
                 result.origin = "embedded";
@@ -193,7 +196,7 @@ ArtworkResult Importer::repairArtwork(const QString &root, const Track &track, s
     }
     const auto source = QDir(root).filePath(track.file);
     const auto bytes = process(toolPath("ffprobe"), {"-v", "error", "-show_streams", "-of", "json", source},
-                               20000, &result.error);
+                               20000, &result.error,cancel);
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(bytes, &parseError);
     if (bytes.isEmpty() || parseError.error != QJsonParseError::NoError || !document.isObject()) {
@@ -205,7 +208,7 @@ ArtworkResult Importer::repairArtwork(const QString &root, const Track &track, s
         result.error = "已取消";
         return result;
     }
-    auto artwork = readArtwork(root, source, track.hash, document.object(), false);
+    auto artwork = readArtwork(root, source, track.hash, document.object(), false,cancel);
     artwork.id = track.id;
     artwork.previousCover = track.cover;
     return artwork;
@@ -343,7 +346,7 @@ ImportResult Importer::importOne(const QString &root, const QString &source, std
     }
     // Artwork is optional; decoding is bounded and never blocks the UI thread.
     if (!stop()) {
-        const auto artwork = readArtwork(root, fi.absoluteFilePath(), r.track.hash, json, true);
+        const auto artwork = readArtwork(root, fi.absoluteFilePath(), r.track.hash, json, true,cancel);
         r.track.cover = artwork.cover;
         r.track.coverOrigin = artwork.origin;
     }
@@ -369,35 +372,37 @@ ImportResult Importer::importOne(const QString &root, const QString &source, std
 void Importer::run() {
     QStringList files;
     QSet<QString> seen;
+    int ignored=0;
     auto add = [&](const QFileInfo &fi) {
         if (fi.isFile() && extensions().contains(fi.suffix().toLower())) {
             auto p = fi.canonicalFilePath();
             if (!seen.contains(p)) {
                 seen.insert(p);
                 files << p;
-            }
-        }
+            }else ++ignored;
+        }else ++ignored;
     };
     for (const auto &s : m_sources) {
-        if (m_cancel.load())
+        if (m_cancel->load())
             break;
         QFileInfo fi(s);
         if (fi.isDir()) {
             emit progress(0, 0, "正在扫描文件夹…");
             QDirIterator it(s, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-            while (it.hasNext() && !m_cancel.load()) {
+            while (it.hasNext() && !m_cancel->load()) {
                 it.next();
                 add(it.fileInfo());
             }
         } else
             add(fi);
     }
+    emit scanned(files.size(),ignored,!m_cancel->load());
     if (files.isEmpty()) {
-        emit finished(m_cancel.load());
+        emit finished(m_cancel->load());
         return;
     }
     const int cores = qMax(1, QThread::idealThreadCount());
-    const int workers = qMin(files.size(), qMin(cores, 8));
+    const int workers = qMin(files.size(), qMin(cores, m_maximumWorkers>0?qMin(m_maximumWorkers,8):8));
     std::atomic_int doneCount{0};
     std::atomic_int next{0};
     const int total = files.size();
@@ -405,26 +410,27 @@ void Importer::run() {
     pool.setMaxThreadCount(workers);
     for (int n = 0; n < workers; ++n) {
         pool.start([this, &files, &doneCount, &next, total] {
-            while (!m_cancel.load()) {
+            while (!m_cancel->load()) {
                 const int i = next.fetch_add(1);
                 if (i >= total)
                     return;
+                if(m_cancel->load())return;
                 const auto name = QFileInfo(files[i]).fileName();
                 emit progress(doneCount.load(), total, name);
-                emit imported(importOne(m_root, files[i], &m_cancel));
+                emit imported(importOne(m_root, files[i], m_cancel.get()));
                 emit progress(doneCount.fetch_add(1) + 1, total, name);
             }
         });
     }
     pool.waitForDone();
-    emit finished(m_cancel.load());
+    emit finished(m_cancel->load());
 }
 void ArtworkRepair::run() {
     for (const auto &track : m_tracks) {
-        if (m_cancel.load())
+        if (m_cancel->load())
             break;
-        const auto result = Importer::repairArtwork(m_root, track, &m_cancel);
-        if (!m_cancel.load())
+        const auto result = Importer::repairArtwork(m_root, track, m_cancel.get());
+        if (!m_cancel->load())
             emit repaired(result);
     }
     emit finished();

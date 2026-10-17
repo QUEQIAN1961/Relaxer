@@ -34,6 +34,7 @@ class Library : public QObject {
     QVector<Track> recent() const;
     Track track(qint64 id) const;
     qint64 insert(const Track &t);
+    qint64 insertImportedTrack(const Track &t,bool *added);
     QVector<Playlist> playlists() const;
     qint64 createPlaylist(const QString &name);
     bool renamePlaylist(qint64 id, const QString &name);

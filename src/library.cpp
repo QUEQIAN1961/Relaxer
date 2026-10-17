@@ -208,7 +208,9 @@ QVector<Track> Library::recent() const {
         r.push_back(fromQuery(q));
     return r;
 }
-qint64 Library::insert(const Track &t) {
+qint64 Library::insert(const Track &t) {return insertImportedTrack(t,nullptr);}
+qint64 Library::insertImportedTrack(const Track &t,bool *added) {
+    m_error.clear();if(added)*added=false;
     QSqlQuery q(m_db);
     q.prepare("SELECT id FROM tracks WHERE hash=?");
     q.addBindValue(t.hash);
@@ -246,6 +248,7 @@ qint64 Library::insert(const Track &t) {
     last.exec("SELECT last_insert_rowid()");
     last.next();
     auto id = last.value(0).toLongLong();
+    if(added)*added=true;
     notifyChanged();
     return id;
 }
@@ -521,13 +524,15 @@ bool Library::writeLyrics(qint64 id,const QByteArray &data,const LyricsSaveSnaps
     QSaveFile out(path);
     if(!out.open(QIODevice::WriteOnly)||out.write(data)!=data.size()){
         const auto rollbackError=rollback();m_error=QStringLiteral("无法保存歌词文件");
-        if(!rollbackError.isEmpty())m_error+=QStringLiteral("；数据库回滚失败：")+rollbackError;return false;
+        if(!rollbackError.isEmpty())m_error+=QStringLiteral("；数据库回滚失败：")+rollbackError;
+        return false;
     }
     // Recheck after writing the temporary file, immediately before the atomic rename.
     if(snapshot&&!lyricsSnapshotMatches(*snapshot,&m_error)){const auto reason=m_error;rollback();m_error=reason;return false;}
     if(!out.commit()){
         const auto rollbackError=rollback();m_error=QStringLiteral("无法保存歌词文件");
-        if(!rollbackError.isEmpty())m_error+=QStringLiteral("；数据库回滚失败：")+rollbackError;return false;
+        if(!rollbackError.isEmpty())m_error+=QStringLiteral("；数据库回滚失败：")+rollbackError;
+        return false;
     }
     const bool updated=exec("UPDATE tracks SET lyrics=? WHERE id=?",{relative,id})&&
         exec("INSERT INTO lyrics_playback(track,instrumental) VALUES(?,?) ON CONFLICT(track) DO UPDATE SET instrumental=excluded.instrumental",{id,Lyrics::parse(data).instrumental?1:0});
