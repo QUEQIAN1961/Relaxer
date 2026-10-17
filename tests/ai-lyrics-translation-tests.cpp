@@ -269,6 +269,7 @@ class AiLyricsTranslationTests final : public QObject {
     void completedPreviewCancelThenSave();
     void idleCloseNeedsNoConfirmation_data();
     void idleCloseNeedsNoConfirmation();
+    void searchEventsNeverDispatchOrDiscardPaidTranslation();
     void declinedConsentDoesNotDispatchBusinessTask();
     void preparePreservesRepeatedTimestampRowsAndRejectsExistingBilingualLyrics();
     void rejectsEmptyInstrumentalAndMetadataOnlyLyrics();
@@ -1711,6 +1712,36 @@ void AiLyricsTranslationTests::idleCloseNeedsNoConfirmation(){
     if(path==0)dialog.close();else if(path==1)QTest::keyClick(&dialog,Qt::Key_Escape);
     else if(path==2)dialog.findChild<QPushButton *>("lyricsSaveClose")->click();else static_cast<QDialog *>(&dialog)->accept();
     QVERIFY(!dialog.isVisible());QVERIFY(dialog.findChildren<QMessageBox *>().isEmpty());QCOMPARE(server.requestCount(),0);
+}
+void AiLyricsTranslationTests::searchEventsNeverDispatchOrDiscardPaidTranslation(){
+    QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Search and translation","search-ai-boundary");
+    const QByteArray original="[00:01.00]Hello world\n[00:02.00]Second line";QVERIFY(library.saveLyrics(track.id,original));
+    TranslationHttpMock paid,source;QVERIFY(paid.listen());QVERIFY(source.listen());
+    const auto candidate=QJsonObject{{"id",1},{"trackName",track.title},{"artistName",track.artist},{"duration",10},
+        {"syncedLyrics","[00:01.00]Candidate first\n[00:02.00]Candidate second"}};
+    for(int n=0;n<80;++n)source.enqueue(QJsonDocument(QJsonArray{candidate}).toJson());
+    paid.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("你好世界")},{1,QStringLiteral("第二行")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{paid.baseUrl()},std::make_unique<FakeCredentialStore>());QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library,{track.id},nullptr,source.baseUrl(),{},true,&runtime);dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    auto *search=dialog.findChild<LyricsSearchCoordinator *>();QVERIFY(search);QSignalSpy finished(search,&LyricsSearchCoordinator::finished);
+    QCOMPARE(source.requestCount(),0);QCOMPARE(paid.requestCount(),0);
+    dialog.findChild<QPushButton *>("lyricsStart")->click();QTRY_COMPARE(finished.size(),1);QCOMPARE(paid.requestCount(),0);
+    dialog.findChild<QPushButton *>("lyricsManualSearch")->click();QTRY_COMPARE(finished.size(),2);QCOMPARE(paid.requestCount(),0);
+    source.setHold(true);dialog.findChild<QPushButton *>("lyricsStart")->click();QTRY_VERIFY(source.heldCount()>0);QCOMPARE(paid.requestCount(),0);
+    clickConsentAndStart(dialog);auto *save=dialog.findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
+    const auto preview=dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText();QVERIFY(!preview.isEmpty());
+    source.setHold(false);while(source.releaseHeld()){}
+    QTRY_COMPARE(finished.size(),3);QCOMPARE(paid.requestCount(),1);QVERIFY(save->isEnabled());
+    QCOMPARE(dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText(),preview);
+    dialog.findChild<QCheckBox *>("lyricsSyncedOnly")->setChecked(true);
+    dialog.findChild<QPushButton *>("lyricsRefreshTranslationFilter")->click();
+    dialog.findChild<QPushButton *>("lyricsStop")->click();QCoreApplication::processEvents();
+    QCOMPARE(paid.requestCount(),1);QVERIFY(save->isEnabled());
+    QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,original);
+    save->click();QTRY_VERIFY(!save->isEnabled());QCOMPARE(paid.requestCount(),1);
+    QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QVERIFY(bytes.contains("relaxer-bilingual"));QVERIFY(dialog.close());
 }
 void AiLyricsTranslationTests::declinedConsentDoesNotDispatchBusinessTask() {
     QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());

@@ -2,17 +2,13 @@
 #include "ai/ai-runtime.h"
 #include "translation-coordinator.h"
 #include "library.h"
-#include "lyric-remote.h"
+#include "lyrics-search-coordinator.h"
 #include <QDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
 #include <QProgressBar>
 #include <QPointer>
-#include <QProcess>
-#include <QElapsedTimer>
 #include <QSet>
 #include <memory>
 #include <atomic>
@@ -28,16 +24,6 @@
 #include <QSpinBox>
 class QLabel;class QListWidget;class QPlainTextEdit;class QFrame;class QPushButton;class QLineEdit;class QCheckBox;class QSpinBox;class QComboBox;class QThreadPool;class QCloseEvent;class QTimer;
 namespace relaxer {
-struct LyricHttpResult {
-    quint64 token = 0;
-    QByteArray body, retryAfter, remotePhase;
-    int status = 0, error = 0;
-    bool timedOut = false, tooLarge = false, remoteParsed = false;
-    qint64 remoteDuration = 0;
-    QJsonParseError parseError{};
-    QJsonDocument doc;
-    lyric_remote::Follow follow;
-};
 class LyricsLookup : public QDialog {
     Q_OBJECT
 public:
@@ -62,48 +48,9 @@ protected:
     void closeEvent(QCloseEvent *event) override;
     void done(int result) override;
 private:
-    struct RankItem {
-        QJsonObject record;
-        double score=0;
-        bool confidentOriginal=false,credible=false,confidentCover=false;
-        QString rejection;
-    };
-    struct RankResult {
-        qint64 id=0;QString hash,fpO,fpM;int generation=0;quint64 epoch=0;
-        bool cached=false,timedRequired=false,dropped=false;
-        QJsonArray payload;QVector<RankItem> ranked,all;
-    };
-    struct ScoreSnap {
-        QJsonArray payload;Track original,match;qint64 id=0;QString hash,fpO,fpM;
-        int generation=0,delayMs=0;quint64 epoch=0;bool cached=false,timedRequired=false;
-    };
-    static RankResult computeRank(const ScoreSnap &snap);
-    struct Source {QString label;QUrl endpoint;int kind=0;bool backup=false;};
-    struct Attempt {QString title,artist,album,keywords;int source=0;bool exact=false,keywordsSearch=false,cover=false;bool detailRequest=false;lyric_remote::Detail detail;};
-    struct Job {
-        Track original,match;int row=-1,generation=0,next=0,active=0,searchPass=0;bool manual=false,completeResponses=true,onlineStarted=false;
-        QVector<Attempt> attempts;QJsonArray collected;QSet<QString> keys;QStringList failures;
-        QSet<QUrl> detailUrls;
-        QSet<QNetworkReply *> replies;QSet<quint64> inflight;QPointer<QProcess> probe;QElapsedTimer clock;
-        quint64 collectionEpoch=0,cacheEpoch=0;
-        bool scoreInFlight=false,wantAccept=false,acceptCached=false;
-        bool readyValid=false,readyCached=false,readyTimed=false;
-        quint64 readyEpoch=0;QString readyFpO,readyFpM;QJsonArray cachedPayload;
-        QVector<RankItem> readyRanked,readyAll;
-    };
-    using JobPtr=std::shared_ptr<Job>;
-    Library *m_library;QVector<qint64> m_ids;QVector<Source> m_sources;QPointer<ai::AiRuntime> m_aiRuntime;
-    QNetworkAccessManager m_network;
-    QHash<qint64,JobPtr> m_jobs;
-    QVector<JobPtr> m_recoveryQueue;
-    QHash<qint64,QJsonArray> m_candidates;QHash<qint64,QString> m_candidateHashes;
-    QHash<QString,QVector<qint64>> m_reuse;QHash<QString,qint64> m_cooldowns;
-    QHash<QString,int> m_hostRequests;QSet<QString> m_rateLimitedHosts;
-    void releaseRequestSlot(QNetworkReply *reply);
-    int hostCap() const;
-    int cpuCount() const;
-    void resetParallelism();
-    void deliver(const JobPtr &job,const QNetworkRequest &req,int timeoutMs,const QString &host,const QByteArray &phase,qint64 duration,bool countHost,const std::function<void(LyricHttpResult &)> &prepare,const std::function<void(const LyricHttpResult &)> &done);
+    Library *m_library;QVector<qint64> m_ids;QPointer<ai::AiRuntime> m_aiRuntime;
+    LyricsSearchCoordinator *m_search=nullptr;
+    LyricsSearchOptions searchOptions() const;
     QListWidget *m_tracks=nullptr,*m_versions=nullptr;
     QPlainTextEdit *m_preview=nullptr,*m_translationPreview=nullptr;
     QFrame *m_candidatePanel=nullptr,*m_previewPanel=nullptr;
@@ -167,18 +114,9 @@ private:
     bool checkLyricsSnapshot(qint64 id);
     void updateApplyButton();
     QSpinBox *m_offset;QComboBox *m_sourceFilter;QVector<int> m_visibleRecords;
-    int m_generation=0,m_nextRow=0,m_saved=0,m_trackLimit=10,m_requestLimit=3,m_fastReplies=0;
-    bool m_running=false,m_proxyReady=true;
-    std::shared_ptr<std::atomic_bool> m_proxyState;
-    QThreadPool *m_netPool=nullptr;
-    quint64 m_fetchSerial=0;
-    QHash<quint64,std::shared_ptr<std::atomic<bool>>> m_fetchCancel;
-    QSet<quint64> m_openFetches;
-    QHash<quint64,QString> m_fetchHost;
-    bool m_multi=false,m_moreWasOpen=false,m_batchJobScope=false,m_pinExplicit=false;
+    bool m_multi=false,m_moreWasOpen=false,m_pinExplicit=false;
     QPushButton *m_multiButton=nullptr,*m_allButton=nullptr,*m_moreButton=nullptr,*m_pasteButton=nullptr,*m_importButton=nullptr,*m_saveOffset=nullptr;
     QWidget *m_morePanel=nullptr;
-    QSet<int> m_requestedRows;
     QSet<qint64> m_missingAtOpen,m_pinnedIds;
     TranslationCoordinator *m_translation=nullptr;
     quint64 m_translationTaskId=0; // Frontend identity only; service owns all state.
@@ -201,28 +139,14 @@ private:
     int rowForTrack(qint64 id) const;
     void applyLookupStyle();
     void changeEvent(QEvent *event) override;
-    void start();void stop();void pumpTracks();void lookup(const JobPtr &job);
-    void beginOnline(const JobPtr &job);void pumpQueries(const JobPtr &job);void request(const JobPtr &job,int stage,int retry=0);
-    void acceptRecords(const JobPtr &job,const QJsonArray &records,bool cached=false);
-    void scheduleRanking(const JobPtr &job);
-    void applyRanking(const JobPtr &job,const RankResult &result);
-    void applyAccept(const JobPtr &job);
-    bool rankingCurrent(const JobPtr &job) const;
-    bool cacheRankingCurrent(const JobPtr &job) const;
-    bool earlyStopReady(const JobPtr &job) const;
-    void appendCollected(const JobPtr &job,const QJsonObject &record);
-    QString trackContext(const Track &track) const;
-    void finishOnline(const JobPtr &job);void finishJob(const JobPtr &job,const QString &status);
-    bool live(const JobPtr &job) const;void cancelJob(qint64 id);
-    void clearTransientCooldowns();
+    void start();void stop();
     void manualSearch();void selectTrack();void rebuildCandidates();bool applySelected();
     void setRowStatus(int row,const QString &text);void updateFilter();void controls();
     bool store(const Track &track,const QByteArray &data,bool force=false,bool preserveText=false);
-    bool productionHost() const;
     bool translationPending() const;
     bool confirmStopTranslations();
     void translateSelected();
-    void remember(qint64 id);QString reuseKey(const Track &track) const;
+    void remember(qint64 id);
     bool saveManual(const QByteArray &data,const QString &status,bool preserveText=false);void pasteLyrics();void importLyrics();void markInstrumental();
     void selectNextIncomplete(int after);
     QVector<int> batchRows() const;void setMultiSelect(bool on);void saveOffsets();
