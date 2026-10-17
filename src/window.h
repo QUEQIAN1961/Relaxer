@@ -10,7 +10,7 @@
 #include <QTimer>
 #include "chrome.h"
 #include "import-coordinator.h"
-#include "playback.h"
+#include "playback-facade.h"
 #include "shortcuts.h"
 #include "widgets.h"
 #include "playlist-ui.h"
@@ -28,7 +28,8 @@ class Window : public QMainWindow {
   public:
     explicit Window(Library *library, QWidget *p = nullptr);
     ~Window() override;
-    Playback *playback() { return m_player; }
+    Playback *playback() { return m_player->backend(); }
+    PlaybackFacade *playbackFacade() { return m_player; }
     void showNowPlaying();
     void showLibrary();
     void showPlaylists();
@@ -73,7 +74,7 @@ class Window : public QMainWindow {
     void lookupMissingLyrics();
     void saveWindowSize();
     Library *m_library;
-    Playback *m_player;
+    PlaybackFacade *m_player;
     QListWidget *m_nav, *m_lists;
     QStackedWidget *m_pages;
     SongTable *m_songs, *m_recent;

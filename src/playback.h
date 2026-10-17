@@ -25,12 +25,15 @@ class Playback : public QObject {
     void setMode(Mode mode);
     void setVolume(int value);
     void restore();
-    void save();
+    bool save();
+    bool shutdown();
+    bool isShutdown() const { return m_shutdown; }
     void forget(const QVector<qint64> &ids);
     Track current() const { return m_library->track(m_queue.current()); }
     qint64 position() const;
     qint64 duration() const;
     bool playing() const;
+    QMediaPlayer::PlaybackState transportState() const;
     bool seekable() const;
     Mode mode() const { return m_queue.mode; }
     const Queue &queue() const { return m_queue; }
@@ -42,8 +45,10 @@ class Playback : public QObject {
     void stateChanged();
     void positionChanged(qint64, qint64);
     void error(const QString &message);
+    void saveFailed(const QString &message);
 
   private:
+    friend class PlaybackDiagnostics; // Controlled clock samples in contract tests.
     Library *m_library;
     QAudioOutput m_output;
     QMediaPlayer m_player;
@@ -60,9 +65,11 @@ class Playback : public QObject {
     int m_playGeneration = 0;
     QPointer<QProcess> m_transcode;
     void load(qint64 id, bool autoplay, bool resume = false);
-    void sample(bool finishing = false, bool flush = false);
+    bool m_shutdown = false, m_shutdownInProgress = false, m_shutdownSaved = true;
+    bool sample(bool finishing = false, bool flush = false);
+    bool sampleAt(qint64 now, qint64 position, bool isPlaying, bool finishing, bool flush);
     void finish();
-    void saveQueue();
+    bool saveQueue();
     void onError(const QString &);
     void haltTransport();
     void stopMidi();

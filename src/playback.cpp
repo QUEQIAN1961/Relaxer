@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QMediaDevices>
 #include <QSaveFile>
 #include <QUrl>
@@ -97,33 +98,45 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     });
     connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](auto, const QString &e) { onError(e); });
 }
-Playback::~Playback() {
+Playback::~Playback() { shutdown(); }
+bool Playback::shutdown() {
+    if (m_shutdown || m_shutdownInProgress) return m_shutdownSaved;
+    m_shutdownInProgress = true;
     m_timer.stop();
-    save();
-    haltTransport();
+    m_shutdownSaved = save();
+    m_shutdown = true;
+    ++m_playGeneration;
+    m_autoStart = false; m_loading = false; m_restorePosition = -1;
     m_player.disconnect(this);
+    haltTransport();
+    m_player.setSource({});
+    m_player.setAudioOutput(nullptr);
+    return m_shutdownSaved;
 }
-void Playback::sample(bool finishing, bool flush) {
-    if (!m_session.id)
-        return;
-    auto now = m_elapsed.elapsed();
-    auto position = this->position();
+bool Playback::sample(bool finishing, bool flush) {
+    if (m_shutdown) return true;
+    return sampleAt(m_elapsed.elapsed(), position(), playing(), finishing, flush);
+}
+bool Playback::sampleAt(qint64 now, qint64 position, bool isPlaying, bool finishing, bool flush) {
+    if (!m_session.id) return true;
+    bool ok = true;
     auto elapsed = qMax<qint64>(0, now - m_lastWall);
     qint64 delta = position - m_lastPosition;
     // Account for advanced media samples only, bounded by elapsed wall time.
     // Explicit seeks reset the baseline and disqualify the complete round.
-    if ((playing() || finishing || flush) && !m_loading && delta > 0)
+    if ((isPlaying || finishing || flush) && !m_loading && delta > 0)
         delta = qMin(delta, elapsed + 80);
     else
         delta = 0;
     if (delta > 0 || finishing)
-        m_library->saveSession(m_session, delta, m_threshold, finishing);
+        ok = m_library->saveSession(m_session, delta, m_threshold, finishing);
     // Some backends publish position only every 500 ms. Keep the wall baseline
     // until media position advances, or real listening time would be lost.
     if (position != m_lastPosition) {
         m_lastPosition = position;
         m_lastWall = now;
     }
+    return ok;
 }
 void Playback::finish() {
     sample(true);
@@ -163,6 +176,7 @@ void Playback::load(qint64 id, bool autoplay, bool resume) {
     saveQueue();
 }
 void Playback::play(const QVector<qint64> &ids, qint64 id) {
+    if (m_shutdown) return;
     if (!m_decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS") && QMediaDevices::defaultAudioOutput().isNull()) {
         emit error("未检测到音频输出设备，请连接耳机或音箱后再播放。");
         return;
@@ -178,6 +192,7 @@ void Playback::play(const QVector<qint64> &ids, qint64 id) {
         load(m_queue.current(), true);
 }
 void Playback::toggle() {
+    if (m_shutdown) return;
     if (!m_queue.current()) {
         auto tracks = m_library->tracks();
         QVector<qint64> ids;
@@ -220,6 +235,7 @@ void Playback::toggle() {
     }
 }
 void Playback::next() {
+    if (m_shutdown) return;
     sample();
     finish();
     haltTransport();
@@ -231,12 +247,14 @@ void Playback::next() {
         saveQueue();
 }
 void Playback::playUpcoming(int index){
+    if (m_shutdown) return;
     const auto future=m_queue.upcoming();if(index<0||index>=future.size())return;
     sample();finish();haltTransport();m_failed.clear();qint64 id=0;
     for(int i=0;i<=index;++i)id=m_queue.next(true);
     if(id)load(id,true);else saveQueue();
 }
 void Playback::previous() {
+    if (m_shutdown) return;
     sample();
     finish();
     haltTransport();
@@ -246,6 +264,7 @@ void Playback::previous() {
         load(id, true);
 }
 void Playback::seek(qint64 pos) {
+    if (m_shutdown) return;
     if (m_midi) {
         if (!m_session.id)
             return;
@@ -286,29 +305,37 @@ void Playback::seek(qint64 pos) {
     saveQueue();
 }
 void Playback::setMode(Mode m) {
+    if (m_shutdown) return;
     m_queue.setMode(m);
     m_library->setSetting("mode", int(m));
     emit stateChanged();
     saveQueue();
 }
 void Playback::setVolume(int v) {
+    if (m_shutdown) return;
     m_output.setVolume(float(qBound(0, v, 100)) / 100);
     m_library->setSetting("volume", qBound(0, v, 100));
 }
-void Playback::saveQueue() {
+bool Playback::saveQueue() {
+    if (m_shutdown) return m_shutdownSaved;
     QJsonArray ids;
-    for (auto t : m_queue.items)
-        ids.append(double(t));
-    m_library->setSetting("queue", ids);
-    m_library->setSetting("current", double(m_queue.current()));
-    m_library->setSetting("position", double(position()));
-    m_library->setSetting("activeSession", double(m_session.id));
+    for (auto t : m_queue.items) ids.append(double(t));
+    // Same keys and representation; one existing storage transaction prevents
+    // a failed periodic/final snapshot from leaving a partially updated queue.
+    const bool ok = m_library->setSettings({{"queue", ids}, {"current", double(m_queue.current())},
+        {"position", double(position())}, {"activeSession", double(m_session.id)}});
+    if (!ok) emit saveFailed(m_library->lastError());
+    return ok;
 }
-void Playback::save() {
-    sample();
-    saveQueue();
+bool Playback::save() {
+    if (m_shutdown) return m_shutdownSaved;
+    const bool sampled = sample();
+    if (!sampled) emit saveFailed(m_library->lastError());
+    const bool saved = saveQueue();
+    return sampled && saved;
 }
 void Playback::restore() {
+    if (m_shutdown) return;
     QVector<qint64> ids;
     for (const auto &v : m_library->setting("queue").toArray())
         if (m_library->track(qint64(v.toDouble())).id)
@@ -328,6 +355,7 @@ void Playback::restore() {
     load(m_queue.current(), false, true);
 }
 void Playback::forget(const QVector<qint64> &ids) {
+    if (m_shutdown) return;
     if (ids.contains(m_queue.current())) {
         finish();
         haltTransport();
@@ -353,6 +381,7 @@ QString Playback::roundStatus() const {
     return QString("正常播放达到 %1% 后计入一次").arg(m_threshold);
 }
 void Playback::onError(const QString &text) {
+    if (m_shutdown) return;
     if (!m_queue.current())
         return;
     auto id = m_queue.current();
@@ -368,7 +397,7 @@ void Playback::onError(const QString &text) {
         return;
     }
     QTimer::singleShot(150, this, [this, id] {
-        if (m_queue.current() != id)
+        if (m_shutdown || m_queue.current() != id)
             return;
         for (int i = 0; i < m_queue.items.size(); ++i) {
             auto next = m_queue.next(true);
@@ -394,9 +423,14 @@ qint64 Playback::position() const {
 }
 qint64 Playback::duration() const { return m_midi ? m_midiDuration : m_player.duration(); }
 bool Playback::playing() const {
+    if (m_shutdown) return false;
     if (m_midi)
         return m_midiPlaying;
     return m_player.playbackState() == QMediaPlayer::PlayingState;
+}
+QMediaPlayer::PlaybackState Playback::transportState() const {
+    if (m_shutdown) return QMediaPlayer::StoppedState;
+    return m_midi ? (m_midiPlaying ? QMediaPlayer::PlayingState : QMediaPlayer::PausedState) : m_player.playbackState();
 }
 bool Playback::seekable() const {
     if (m_midi)

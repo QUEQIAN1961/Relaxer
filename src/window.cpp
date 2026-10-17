@@ -72,7 +72,7 @@ static QPushButton *checkableSetting(const QString &caption,const QString &name,
     auto *button=new QPushButton(parent);button->setObjectName(name);button->setProperty("checkableSetting",true);button->setCheckable(true);button->setCursor(Qt::PointingHandCursor);
     const auto label=[button,caption](bool on){button->setText((on?QString("✓ "):QString())+caption);};QObject::connect(button,&QPushButton::toggled,button,label);button->setChecked(checked);label(checked);return button;
 }
-Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(new Playback(l, this)) {
+Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(new PlaybackFacade(l, this)) {
     initializeResources();
     m_importCoordinator=new ImportCoordinator(m_library,this);
     m_importCoordinator->setObjectName("importCoordinator");
@@ -217,13 +217,13 @@ Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(
             });
         }
     });
-    connect(m_player, &Playback::trackChanged, this, [this] {
+    connect(m_player, &PlaybackFacade::trackChanged, this, [this] {
         refreshTrack();
         const auto tracks=visibleTracks();
         m_songs->setSongs(tracks, m_library->root(), m_player->current().id);
         updateLibrarySummary(tracks);
     });
-    connect(m_player, &Playback::stateChanged, this, [this] {
+    connect(m_player, &PlaybackFacade::stateChanged, this, [this] {
         m_play->setSymbol(m_player->playing() ? "pause" : "play", autoInk(m_accent));
         QStringList modes = {"顺序播放", "列表循环", "单曲循环", "随机循环"};
         QStringList symbols = {"playlist", "repeat", "single", "shuffle"};
@@ -231,7 +231,7 @@ Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(
         m_mode->setAccessibleName(modes[int(m_player->mode())]);
         if(m_lastQueueMode!=m_player->mode()){m_lastQueueMode=m_player->mode();refreshQueue();}
     });
-    connect(m_player, &Playback::positionChanged, this, [this](qint64 pos, qint64 d) {
+    connect(m_player, &PlaybackFacade::positionChanged, this, [this](qint64 pos, qint64 d) {
         m_time->setText(durationText(pos));
         m_duration->setText(durationText(d));
         if (!m_seek->isSliderDown()) {
@@ -242,8 +242,9 @@ Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(
         m_seek->setEnabled(m_player->current().id && m_player->seekable());
         m_lyrics->setPosition(pos);
     });
-    connect(m_player, &Playback::error, this, [this](const QString &t) { toast(t); });
-    connect(m_player->media(), &QMediaPlayer::seekableChanged, this,
+    connect(m_player, &PlaybackFacade::error, this, [this](const QString &t) { toast(t); });
+    connect(m_player, &PlaybackFacade::saveFailed, this, [this](const QString &t) { toast("播放状态未保存：" + t); });
+    connect(m_player, &PlaybackFacade::seekableChanged, this,
             [this](bool) { m_seek->setEnabled(m_player->current().id && m_player->seekable()); });
     auto shortcut = [this](const QKeySequence &key, auto fn) {
         auto *a = new QAction(this);
@@ -274,8 +275,8 @@ Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(
             raise();
             activateWindow();
         });
-        connect(menu->addAction("播放 / 暂停"), &QAction::triggered, m_player, &Playback::toggle);
-        connect(menu->addAction("下一首"), &QAction::triggered, m_player, &Playback::next);
+        connect(menu->addAction("播放 / 暂停"), &QAction::triggered, m_player, &PlaybackFacade::toggle);
+        connect(menu->addAction("下一首"), &QAction::triggered, m_player, &PlaybackFacade::next);
         menu->addSeparator();
         connect(menu->addAction("退出"), &QAction::triggered, this, [this] {
             m_quitting = true;
@@ -303,15 +304,11 @@ Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(
     m_player->restore();
     refreshTrack();
     m_player->setMode(m_player->mode());
-    auto *saveTimer = new QTimer(this);
-    saveTimer->setInterval(4000);
-    connect(saveTimer, &QTimer::timeout, m_player, &Playback::save);
-    saveTimer->start();
     QTimer::singleShot(0, this, &Window::repairLegacyArtwork);
     QTimer::singleShot(0,this,[this]{m_restoringWindow=false;if(m_library->setting("windowMaximized",false).toBool())showMaximized();});
 }
 Window::~Window() {
-    saveWindowSize();m_importCoordinator->shutdown();m_player->save();
+    saveWindowSize();m_importCoordinator->shutdown();m_player->shutdown();
 }
 void Window::buildSidebar(QWidget *side) {
     auto *v = new QVBoxLayout(side);
@@ -831,7 +828,7 @@ QWidget *Window::buildNowPlaying() {
     m_lyricTools=new LyricTools(m_lyrics,m_delayControls,m_nowPage);main->addWidget(m_lyricTools,1);
     const bool showTranslation=m_library->setting("showLyricTranslation",true).toBool();m_lyricTools->setShowTranslation(showTranslation);
     connect(m_lyricTools,&LyricTools::translationDisplayChanged,this,[this](bool on){m_library->setSetting("showLyricTranslation",on);});
-    connect(m_lyrics, &LyricView::seekRequested, m_player, &Playback::seek);
+    connect(m_lyrics, &LyricView::seekRequested, m_player, &PlaybackFacade::seek);
     connect(m_lyricTools,&LyricTools::timedLyricsRequested,this,[this]{
         const auto track=m_player->current();if(!track.id||m_library->isInstrumental(track.id))return;
         m_lyricTools->closeTools();
@@ -907,7 +904,7 @@ QWidget *Window::buildPlayerBar() {
     m_play->setObjectName("playButton");
     m_play->setFixedSize(42, 42);
     m_play->setSymbol("play", Qt::white);
-    connect(m_play, &QAbstractButton::clicked, m_player, &Playback::toggle);
+    connect(m_play, &QAbstractButton::clicked, m_player, &PlaybackFacade::toggle);
     control->addWidget(m_play);
     auto *next = new IconButton("next", "下一首");
     connect(next, &QPushButton::clicked, this, [this]{switchTrack(1);});
@@ -950,7 +947,7 @@ QWidget *Window::buildPlayerBar() {
     m_volume->setRange(0, 100);
     m_volume->setValue(m_player->volume());
     m_volume->setFixedWidth(80);
-    connect(m_volume, &QSlider::valueChanged, m_player, &Playback::setVolume);
+    connect(m_volume, &QSlider::valueChanged, m_player, &PlaybackFacade::setVolume);
     vol->setSymbol(volumeSymbol(m_volume->value()),m_ink);
     connect(m_volume,&QSlider::valueChanged,vol,[this,vol](int value){vol->setSymbol(volumeSymbol(value),m_ink);});
     volume->addWidget(m_volume);
@@ -1480,7 +1477,7 @@ void Window::closeEvent(QCloseEvent *e) {
         e->ignore();m_closePending=true;m_cancel->setEnabled(false);m_importLabel->setText("正在结束当前文件并安全关闭…");
         m_importCoordinator->shutdown();return;
     }
-    m_importCoordinator->shutdown();m_player->save();e->accept();
+    m_importCoordinator->shutdown();m_player->shutdown();e->accept();
 }
 void Window::dragEnterEvent(QDragEnterEvent *e) {
     if (e->mimeData()->hasUrls())

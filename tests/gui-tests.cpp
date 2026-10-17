@@ -40,6 +40,19 @@ class GuiTests : public QObject {
         return ff.waitForFinished(20000) && ff.exitCode() == 0;
     }
   private slots:
+    void productionPlaybackFacadeOwnsPersistenceAndShutdown() {
+        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+        for(int n=0;n<3;++n){
+            auto window=std::make_unique<Window>(&library); window->show();
+            QPointer<PlaybackFacade> facade=window->playbackFacade();QPointer<Playback> core=window->playback();
+            QVERIFY(facade);QCOMPARE(core.data(),facade->backend());QCOMPARE(core->parent(),facade.data());
+            const auto timers=window->findChildren<QTimer *>("playbackPersistenceTimer");QCOMPARE(timers.size(),1);
+            QCOMPARE(timers[0]->parent(),facade.data());QCOMPARE(timers[0]->interval(),4000);
+            QSignalSpy saved(facade,&PlaybackFacade::saved);facade->setVolume(35+n);QCOMPARE(window->playback()->volume(),35+n);
+            QVERIFY(window->close());QVERIFY(facade->isShutdown());QCOMPARE(saved.size(),1);QVERIFY(!timers[0]->isActive());
+            window.reset();QVERIFY(!facade);QVERIFY(!core);QCoreApplication::processEvents();
+        }
+    }
     void initTestCase(){const auto font=qEnvironmentVariable("RELAXER_QA_FONT");if(!font.isEmpty())QVERIFY(QFontDatabase::addApplicationFont(font)>=0);}
     void oldCoversRepairedAtStartup() {
         QTemporaryDir dir;
