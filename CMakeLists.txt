@@ -130,6 +130,11 @@ if(MSVC)
 else()
   target_compile_options(relaxer_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+# Freeze the actual importer, file and Library behavior before B6 extraction.
+add_executable(relaxer_importer_contract_tests tests/importer-contract-tests.cpp)
+target_link_libraries(relaxer_importer_contract_tests PRIVATE relaxer_core Qt6::Test)
+relaxer_add_qt_test(relaxer_importer_contract relaxer_importer_contract_tests)
+
 add_executable(relaxer_lyrics_document_compat_tests tests/lyrics-document-compat-tests.cpp)
 target_include_directories(relaxer_lyrics_document_compat_tests PRIVATE src)
 target_link_libraries(relaxer_lyrics_document_compat_tests PRIVATE relaxer_core Qt6::Test)
