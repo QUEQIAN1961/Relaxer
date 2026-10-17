@@ -400,7 +400,12 @@ private slots:
         QVERIFY(statusAt(dialog,0).startsWith("需选择"));QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),3);QVERIFY(!library.lookupCache(track.id).noResult);QVERIFY(!library.lookupCache(track.id).records.isEmpty());
         rows->setCurrentRow(0);QCOMPARE(dialog.findChild<QListWidget *>("lyricsVersions")->count(),1);
         server.reply=[&](const QUrl &url){return qMakePair(url.path().endsWith("/get")?404:200,url.path().endsWith("/get")?QByteArray("{}"):QJsonDocument(QJsonArray{record(track.title,track.artist)}).toJson());};
+        auto *service=dialog.findChild<LyricsSearchCoordinator *>();QVERIFY(service);
+        QSignalSpy delivered(service,&LyricsSearchCoordinator::eventOccurred);
         const auto before=server.requests;dialog.findChild<QPushButton *>("lyricsStart")->click();QTRY_VERIFY_WITH_TIMEOUT(server.requests>before,3000);QTRY_VERIFY_WITH_TIMEOUT(!library.track(track.id).lyrics.isEmpty(),8000);
+        // SQLite commit precedes the queued UI event. Wait for that exact saved
+        // notification, then keep the original immediate row-state assertion.
+        QTRY_VERIFY_WITH_TIMEOUT(std::any_of(delivered.begin(),delivered.end(),[&](const auto &args){const auto event=qvariant_cast<LyricsSearchEvent>(args.first());return event.trackId==track.id&&event.state==LyricsSearchState::Saved&&event.generation==service->summary().generation;}),8000);
         QCOMPARE(rows->item(0)->data(Qt::UserRole+1).toInt(),2);
     }
     void unavailableAITranslationRetainsCompletedLyricsState() {
