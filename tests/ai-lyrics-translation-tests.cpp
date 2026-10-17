@@ -1694,7 +1694,7 @@ void AiLyricsTranslationTests::completedPreviewTrackSwitch() {
 }
 void AiLyricsTranslationTests::completedPreviewPassiveRefresh_data(){
     QTest::addColumn<int>("action");QTest::newRow("filters")<<0;QTest::newRow("empty-selection")<<1;
-    QTest::newRow("passive-current-refresh")<<2;QTest::newRow("deleted-owner")<<3;
+    QTest::newRow("passive-current-refresh")<<2;QTest::newRow("deleted-owner")<<3;QTest::newRow("close-prompt-reentrant-selection")<<4;
 }
 void AiLyricsTranslationTests::completedPreviewPassiveRefresh(){
     QFETCH(int,action);QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
@@ -1709,6 +1709,11 @@ void AiLyricsTranslationTests::completedPreviewPassiveRefresh(){
     if(action==0){dialog.findChild<QCheckBox *>("lyricsMissingTranslationOnly")->setChecked(true);dialog.findChild<QPushButton *>("lyricsRefreshTranslationFilter")->click();}
     if(action==1)rows->clearSelection();
     if(action==2){{QSignalBlocker block(rows);rows->setCurrentRow(1);}LyricsLookupDiagnostics::refresh(dialog);}
+    if(action==4){
+        QTimer::singleShot(0,&dialog,[&]{auto *box=dialog.findChild<QMessageBox *>("lyricsUnsavedTranslationCloseConfirm");QVERIFY(box);
+            rows->setCurrentRow(1);QCOMPARE(dialog.findChildren<QMessageBox *>().size(),1);box->findChild<QPushButton *>("lyricsKeepTranslationPreview")->click();});
+        QVERIFY(!dialog.close());
+    }
     if(action==3){QVERIFY(library.remove({a.id}));save->click();QVERIFY(!save->isEnabled());QVERIFY(!LyricsLookupDiagnostics::preview(dialog).hasPreview());}
     else{
         QCOMPARE(rows->currentItem()->data(Qt::UserRole).toLongLong(),a.id);

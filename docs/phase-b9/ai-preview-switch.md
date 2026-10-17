@@ -10,3 +10,4 @@ R7 OBS-1 — 用户授权改进：主动切歌前确认未保存的完整 AI 译
 验证：B8 基线 Release 234/234、CTest 49/49；AI 歌词翻译专项 112 passed / 0 failed / 0 skipped（含 init/cleanup），CTest 1/1。
 
 R6 L-1 — 用户授权改进：未保存 AI 译文关闭确认，继承 B8 已验收行为。
+`n后续重入保护同时覆盖“关闭确认期间切换歌曲”，新增一行；最终专项为 113 passed / 0 failed / 0 skipped，新增数据行合计 13。

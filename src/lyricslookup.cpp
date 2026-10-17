@@ -439,7 +439,7 @@ void LyricsLookup::restoreTranslationSelection() {
     m_tracks->setCurrentRow(row,QItemSelectionModel::ClearAndSelect);
 }
 void LyricsLookup::trackSelectionChanged() {
-    if(m_translationSwitchConfirmOpen){restoreTranslationSelection();return;}
+    if(m_translationSwitchConfirmOpen||m_translationCloseConfirmOpen){restoreTranslationSelection();return;}
     const auto selected=trackIdAt(m_tracks->currentRow());
     if(hasAiPreview()&&(selected!=aiTrackId()||!m_tracks->currentItem()||!m_tracks->currentItem()->isSelected())){
         // Filtering/empty selections are refreshes, not consent to discard a paid result.
