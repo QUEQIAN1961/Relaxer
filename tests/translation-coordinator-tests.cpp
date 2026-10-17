@@ -35,6 +35,7 @@ struct Fixture {
         a=seed(library,"Alpha","b7-alpha");b=seed(library,"Beta","b7-beta");
         if(!a.id||!b.id||!library.saveLyrics(a.id,source)||!library.saveLyrics(b.id,source))return;
         a=library.track(a.id);b=library.track(b.id);
+        if(!library.setTranslationJudgment(a.id,TranslationJudgment::NeedsTranslation)||!library.setTranslationJudgment(b.id,TranslationJudgment::NeedsTranslation))return;
         runtime=std::make_unique<AiRuntime>(&library,DeepSeekProvider::MockEndpoint{http.baseUrl()},std::make_unique<FakeCredentialStore>());
         if(!configureRuntime(*runtime))return;
         auto backend=std::make_unique<BrowserMock>();browser=backend.get();

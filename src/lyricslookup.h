@@ -66,6 +66,7 @@ private:
     QWidget *m_lyricsSourcePanel=nullptr;
     void changeTranslationJudgment(TranslationJudgment requested);
     void updateTranslationWorkflow();
+    bool aiTranslationAllowed(QString *reason=nullptr,bool duringConsent=false);
     QLabel *m_emptyHint=nullptr;
     QPushButton *m_refreshTranslationFilter=nullptr;
     friend class LyricsLookupDiagnostics;
@@ -77,7 +78,7 @@ private:
     struct AssessmentCache {
         QString path,hash,title,artist;
         qint64 size=0,modified=0;
-        bool instrumental=false,fileExists=false,readable=false,tooLarge=false;
+        bool instrumental=false,fileExists=false,readable=false,tooLarge=false,sourceValid=false;
         quint64 revision=0;
         QByteArray contentDigest;
         ai::lyrics::TranslationAssessment value;

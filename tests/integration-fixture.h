@@ -234,6 +234,9 @@ inline QVector<qint64> seed(Library &lib, int count = 3, int duration = 10000) {
     return ids;
 }
 inline void consent(LyricsLookup &dialog) {
+    auto *classification=dialog.findChild<QPushButton *>("lyricsNeedsTranslation");
+    if(!classification->isChecked())classification->click();
+    QVERIFY(classification->isChecked());
     QTimer::singleShot(0, &dialog, [&dialog] {
         if (auto *box = dialog.findChild<QDialog *>("lyricsAiCloudConsent"))
             box->findChild<QPushButton *>("lyricsAiConsentSend")->click();

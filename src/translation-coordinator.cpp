@@ -63,7 +63,14 @@ QByteArray TranslationCoordinator::configurationDigest() const {
         {"systemPrompt",ai::lyrics::systemPrompt()}};
     return QCryptographicHash::hash(QJsonDocument(snapshot).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256);
 }
-quint64 TranslationCoordinator::prepareAi(qint64 id,QString *error){return prepare(id,TranslationMethod::DeepSeek,{}, {},error);}
+quint64 TranslationCoordinator::prepareAi(qint64 id,QString *error){
+    if(!ownerThread()||m_stopping||!m_library)return prepare(id,TranslationMethod::DeepSeek,{}, {},error);
+    if(m_library->translationJudgment(id)!=TranslationJudgment::NeedsTranslation){fail(error,QStringLiteral("请先将歌曲人工标记为需要翻译"));return 0;}
+    for(const auto &task:m_tasks)if(task->value.trackId==id&&!task->value.terminal()){
+        fail(error,QStringLiteral("当前歌曲已有翻译任务或未保存预览，请先处理现有结果"));return 0;
+    }
+    return prepare(id,TranslationMethod::DeepSeek,{}, {},error);
+}
 quint64 TranslationCoordinator::prepareBrowser(qint64 id,const QString &provider,const QString &language,QString *error){
     return prepare(id,TranslationMethod::Browser,provider,language,error);
 }
@@ -159,6 +166,9 @@ bool TranslationCoordinator::start(quint64 id,QString *error){
     if(!ownerThread())return fail(error,QStringLiteral("翻译服务线程错误"));
     const auto task=m_tasks.value(id);
     if(m_stopping||!task||task->value.state!=TranslationState::WaitingForConsent)return false;
+    if(task->value.method==TranslationMethod::DeepSeek&&m_library->translationJudgment(task->value.trackId)!=TranslationJudgment::NeedsTranslation){
+        finish(task,TranslationState::Invalidated,QStringLiteral("未发送"),QStringLiteral("人工翻译分类已变化，本次未发送请求"),"classification");return fail(error,QStringLiteral("人工翻译分类已变化"));
+    }
     QString message;
     if(!current(task,&message)){finish(task,TranslationState::Invalidated,QStringLiteral("未发送"),message,"snapshot");return fail(error,message);}
     task->value.state=TranslationState::Queued;task->value.status=QStringLiteral("等待翻译");
@@ -175,6 +185,7 @@ void TranslationCoordinator::pump(){
         const auto task=m_tasks.value(m_queue.dequeue());if(!task||task->value.state!=TranslationState::Queued)continue;
         QString error;if(!current(task,&error)){finish(task,TranslationState::Invalidated,QStringLiteral("未发送"),error,"snapshot");continue;}
         if(task->value.method==TranslationMethod::DeepSeek){
+            if(m_library->translationJudgment(task->value.trackId)!=TranslationJudgment::NeedsTranslation){finish(task,TranslationState::Invalidated,QStringLiteral("未发送"),QStringLiteral("人工翻译分类已变化，本次未发送请求"),"classification");continue;}
             error=m_runtime->validateConfiguration(task->configuration);
             if(!error.isEmpty()){finish(task,TranslationState::Failed,QStringLiteral("翻译失败"),error,"configuration");continue;}
         }

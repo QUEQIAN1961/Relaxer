@@ -252,13 +252,20 @@ bool readFile(const QString &path, QByteArray *bytes) {
     return file.error() == QFileDevice::NoError;
 }
 
+void classifyForTranslation(LyricsLookup &dialog) {
+    auto *classification=dialog.findChild<QPushButton *>("lyricsNeedsTranslation");
+    if(!classification->isChecked())classification->click();
+    QVERIFY(classification->isChecked());
+}
 void clickConsentAndStart(LyricsLookup &dialog) {
+    classifyForTranslation(dialog);
     QTimer::singleShot(0, &dialog, [&dialog] {
         for (auto *widget : QApplication::topLevelWidgets()) {
             if (widget->objectName() != QStringLiteral("lyricsAiCloudConsent")) continue;
             if (auto *send = widget->findChild<QPushButton *>(QStringLiteral("lyricsAiConsentSend"))) send->click();
         }
     });
+    classifyForTranslation(dialog);
     dialog.findChild<QPushButton *>(QStringLiteral("lyricsTranslate"))->click();
 }
 } // namespace
@@ -465,8 +472,10 @@ void AiLyricsTranslationTests::wholeSongRequestPreviewsWithoutSavingThenSavesOnC
                                                        "[00:02.50]Third line\n[00:02.50]第三句"));
     QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lyricsTranslationProgressLabel"))->text().contains(QStringLiteral("已保存")));
     QVERIFY(!dialog.findChild<QPushButton *>(QStringLiteral("lyricsSaveTranslation"))->isEnabled());
+    classifyForTranslation(dialog);
     dialog.findChild<QPushButton *>("lyricsTranslate")->click();
-    QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("已有双语")));
+    QVERIFY(!dialog.findChild<QPushButton *>("lyricsTranslate")->isEnabled());
+    QVERIFY(dialog.findChild<QPushButton *>("lyricsTranslate")->toolTip().contains(QStringLiteral("双语")));
     QCOMPARE(server.requestCount(), 1);
     QByteArray afterSecondAttempt;
     QVERIFY(readFile(library.absolute(library.track(track.id).lyrics), &afterSecondAttempt));
@@ -745,6 +754,7 @@ void AiLyricsTranslationTests::refusesModelsWhoseWholeSongContextIsInsufficient(
     dialog.show();
     dialog.findChild<QCheckBox *>(QStringLiteral("lyricsMissingOnly"))->setChecked(false);
     dialog.findChild<QListWidget *>(QStringLiteral("lyricsTracks"))->setCurrentRow(0);
+    classifyForTranslation(dialog);
     dialog.findChild<QPushButton *>(QStringLiteral("lyricsTranslate"))->click();
     QVERIFY(dialog.findChild<QLabel *>(QStringLiteral("lyricsStatus"))->text().contains(QStringLiteral("上下文窗口")));
     QCOMPARE(server.requestCount(), 0);
@@ -906,6 +916,7 @@ void AiLyricsTranslationTests::consentReentrancyStillSendsOneRequest() {
     dialog.show();
     dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
     dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    classifyForTranslation(dialog);
     auto *translate = dialog.findChild<QPushButton *>("lyricsTranslate");
     QTimer::singleShot(0, &dialog, [&] {
         auto *firstConsent = QApplication::activeModalWidget();
@@ -969,6 +980,7 @@ void AiLyricsTranslationTests::consentRechecksSnapshotBeforeDispatch() {
         }
         modal->findChild<QPushButton *>("lyricsAiConsentSend")->click();
     });
+    classifyForTranslation(dialog);
     dialog.findChild<QPushButton *>("lyricsTranslate")->click();
     QTest::qWait(80);
     QCOMPARE(server.requestCount(), 0);
@@ -1040,6 +1052,7 @@ void AiLyricsTranslationTests::unsupportedLanguageDoesNotSendRequest() {
     dialog.show();
     dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
     dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    classifyForTranslation(dialog);
     dialog.findChild<QPushButton *>("lyricsTranslate")->click();
     QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("只支持简体中文")));
     QCOMPARE(server.requestCount(), 0);
@@ -1352,8 +1365,8 @@ void AiLyricsTranslationTests::missingTranslationFilterIncludesUncertainAndRefre
     QVERIFY(!missing->isChecked());QVERIFY(!incomplete->isChecked());QVERIFY(refresh->isEnabled());
     for(auto id:{english.id,mixed.id,unknown.id})QVERIFY(!item(id)->isHidden());
     for(auto id:{chinese.id,translated.id,empty.id,pure.id})QVERIFY(item(id)->isHidden());
-    QCOMPARE(item(english.id)->data(Qt::UserRole+4).toString(),QStringLiteral("待翻译"));
-    QCOMPARE(item(mixed.id)->data(Qt::UserRole+4).toString(),QStringLiteral("待确认"));
+    QCOMPARE(item(english.id)->data(Qt::UserRole+4).toString(),QStringLiteral("待判断"));
+    QCOMPARE(item(mixed.id)->data(Qt::UserRole+4).toString(),QStringLiteral("待判断"));
     QVERIFY(item(mixed.id)->toolTip().contains(QStringLiteral("待确认")));
     const auto digestBefore=LyricsLookupDiagnostics::digest(dialog,english.id);QCOMPARE(digestBefore.size(),32);
     item(english.id)->setSelected(false);QVERIFY(!item(english.id)->isSelected());
@@ -1428,7 +1441,7 @@ void AiLyricsTranslationTests::translationCacheAuditHandlesFileStateAndMetadataC
     QVERIFY(QFile::remove(path));audit();QVERIFY(row->isHidden());QVERIFY(row->toolTip().contains(QStringLiteral("本地歌词文件不存在")));
 
     QFile recreated(path);QVERIFY(recreated.open(QIODevice::WriteOnly));QCOMPARE(recreated.write(original),qint64(original.size()));recreated.close();
-    audit();QVERIFY(!row->isHidden());QCOMPARE(row->data(Qt::UserRole+4).toString(),QStringLiteral("待翻译"));
+    audit();QVERIFY(!row->isHidden());QCOMPARE(row->data(Qt::UserRole+4).toString(),QStringLiteral("待判断"));
 
 #ifdef Q_OS_WIN
     HANDLE denyRead=CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
@@ -1482,7 +1495,7 @@ void AiLyricsTranslationTests::translationCacheAuditRejectsStaleTrackIdentity() 
     QTRY_VERIFY_WITH_TIMEOUT(quint64(LyricsLookupDiagnostics::metrics(dialog)["audit_passes"].toDouble())>previousAudits,5000);
     QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(dialog),5000);
     QVERIFY(rows->item(0)->isHidden());QVERIFY(!rows->item(1)->isHidden());
-    QCOMPARE(rows->item(1)->data(Qt::UserRole+4).toString(),QStringLiteral("待翻译"));
+    QCOMPARE(rows->item(1)->data(Qt::UserRole+4).toString(),QStringLiteral("待判断"));
     QVERIFY(!LyricsLookupDiagnostics::hasCache(dialog,replacementId));
     QCOMPARE(LyricsLookupDiagnostics::digest(dialog,second.id),secondDigest);
     QCOMPARE(server.requestCount(),0);
@@ -1629,7 +1642,10 @@ void AiLyricsTranslationTests::missingTranslationFilterCancelReleasesOwner() {
     dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
     auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");rows->setCurrentRow(0);clickConsentAndStart(dialog);QTRY_COMPARE(server.heldCount(),1);
     dialog.findChild<QCheckBox *>("lyricsMissingTranslationOnly")->setChecked(true);QVERIFY(!rows->item(0)->isHidden());
-    dialog.findChild<QPushButton *>("lyricsCancelTranslation")->click();QVERIFY(rows->item(0)->isHidden());
+    dialog.findChild<QPushButton *>("lyricsCancelTranslation")->click();QVERIFY(!rows->item(0)->isHidden());
+    QCOMPARE(library.translationJudgment(track.id),TranslationJudgment::NeedsTranslation);
+    QCOMPARE(rows->item(0)->data(Qt::UserRole+4).toString(),QStringLiteral("需要翻译"));
+    QVERIFY(!rows->item(0)->data(Qt::UserRole+6).toBool());
     server.releaseHeld();QTest::qWait(60);
     QVERIFY(!dialog.findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
     QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,original);
@@ -1740,7 +1756,12 @@ void AiLyricsTranslationTests::productionCoordinatorOwnsPreviewAndCloseLifecycle
     QTRY_VERIFY(!changed.isEmpty());TranslationSummary preview;
     for(const auto &event:changed){const auto value=qvariant_cast<TranslationSummary>(event.first());if(value.hasPreview())preview=value;}
     QVERIFY(preview.taskId);QCOMPARE(preview.trackId,track.id);QVERIFY(!coordinator->cancel(preview.taskId));
-    dialog->findChild<QPushButton *>("lyricsCancelTranslation")->click(); // Disabled after completion.
+    // RC2 exposes an explicit discard action, with a default-cancel dialog.
+    QTimer::singleShot(0,dialog.get(),[&]{
+        auto *box=dialog->findChild<QMessageBox *>("lyricsDiscardPreviewConfirm");QVERIFY(box);
+        auto *keep=box->findChild<QPushButton *>("lyricsKeepPreview");QVERIFY(keep);QCOMPARE(box->defaultButton(),keep);keep->click();
+    });
+    dialog->findChild<QPushButton *>("lyricsCancelTranslation")->click();
     QVERIFY(coordinator->summary(preview.taskId).hasPreview());
     int confirmations=0;
     QTimer::singleShot(0,dialog.get(),[&]{
@@ -1854,6 +1875,7 @@ void AiLyricsTranslationTests::declinedConsentDoesNotDispatchBusinessTask() {
     dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
     auto *coordinator=dialog.findChild<TranslationCoordinator *>();QVERIFY(coordinator);QSignalSpy done(coordinator,&TranslationCoordinator::finished);
     QTimer::singleShot(0,&dialog,[]{for(auto *widget:QApplication::topLevelWidgets())if(widget->objectName()=="lyricsAiCloudConsent")widget->findChild<QPushButton *>("lyricsAiConsentCancel")->click();});
+    classifyForTranslation(dialog);
     dialog.findChild<QPushButton *>("lyricsTranslate")->click();QTRY_COMPARE(done.size(),1);
     QCOMPARE(qvariant_cast<TranslationSummary>(done.first().first()).state,TranslationState::Cancelled);QCOMPARE(server.requestCount(),0);
 }

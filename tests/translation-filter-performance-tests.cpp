@@ -59,7 +59,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(*dialog),5000);heartbeat.stop();
         auto auditWork=LyricsLookupDiagnostics::work(*dialog);auditWork["elapsed_ms"]=double(auditClock.nsecsElapsed())/1e6;auditWork["gui_heartbeat_events"]=guiHeartbeats;result["activation_audit"]=auditWork;
         auto *rows=dialog->findChild<QListWidget *>("lyricsTracks");QVERIFY(rows);QCOMPARE(rows->count(),songs);
-        for(int i=0;i<rows->count();++i){QVERIFY(!rows->item(i)->isHidden());QCOMPARE(rows->item(i)->data(Qt::UserRole+4).toString(),QStringLiteral("待翻译"));}
+        for(int i=0;i<rows->count();++i){QVERIFY(!rows->item(i)->isHidden());QCOMPARE(rows->item(i)->data(Qt::UserRole+4).toString(),QStringLiteral("待判断"));}
         const QByteArray translated=QStringLiteral("你好世界").toUtf8();
         for(const auto id:ids){
             const auto path=library.absolute(library.track(id).lyrics);const auto stamp=QFileInfo(path).lastModified();

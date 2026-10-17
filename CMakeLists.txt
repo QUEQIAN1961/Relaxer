@@ -303,6 +303,8 @@ target_link_libraries(relaxer_ui PUBLIC relaxer_playback_facade relaxer_lyrics_s
 add_executable(relaxer_translation_workflow_tests tests/translation-workflow-tests.cpp)
 target_link_libraries(relaxer_translation_workflow_tests PRIVATE relaxer_ui Qt6::Test)
 relaxer_add_qt_test(relaxer_translation_workflow relaxer_translation_workflow_tests)
+add_executable(relaxer_lyrics_workflow_preview tests/lyrics-workflow-preview.cpp)
+target_link_libraries(relaxer_lyrics_workflow_preview PRIVATE relaxer_ui Qt6::Test)
 # Phase B integration exercises production services together; service-only
 # configurations above retain their independent dependency boundaries/counts.
 add_executable(relaxer_phase_b_integration_tests tests/phase-b-integration-tests.cpp)
