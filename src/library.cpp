@@ -4,6 +4,7 @@
 #include "lyrics.h"
 #include "lyrics-document-reader.h"
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -455,50 +456,93 @@ bool Library::removeManaged(const QVector<qint64> &ids){
     for(const auto &pair:staged)if(!QFile::remove(pair.second))m_error="歌曲已从资料库删除，但部分副本暂时未能清理";
     notifyChanged();return true;
 }
-bool Library::saveLyrics(qint64 id,const QByteArray &data){
-    const auto normalized=simplifyTraditionalLyrics(data);
-    if(!track(id).id||normalized.isEmpty()||normalized.size()>4*1024*1024||Lyrics::parse(normalized).lines.isEmpty()){m_error="歌词内容无效或歌曲已不存在";return false;}
-    const auto relative=QString("Lyrics/track-%1.lrc").arg(id);QSaveFile out(absolute(relative));
-    if(!out.open(QIODevice::WriteOnly)||out.write(normalized)!=normalized.size()||!out.commit()){m_error="无法保存歌词文件";return false;}
-    const bool ok=exec("UPDATE tracks SET lyrics=? WHERE id=?",{relative,id})&&exec("INSERT INTO lyrics_playback(track,instrumental) VALUES(?,?) ON CONFLICT(track) DO UPDATE SET instrumental=excluded.instrumental",{id,Lyrics::parse(normalized).instrumental?1:0});if(ok)notifyChanged();return ok;
+namespace {
+bool snapshotFile(const QString &path,LyricFileSnapshot &snapshot,QString &error) {
+    snapshot.path=path;
+    if(path.isEmpty())return true;
+    const QFileInfo info(path);snapshot.exists=info.exists();
+    if(!snapshot.exists)return true;
+    QFile file(path);
+    if(!info.isFile()||!file.open(QIODevice::ReadOnly)){
+        error=QStringLiteral("歌词无法读取，请刷新判断后重新选择。");return false;
+    }
+    const auto bytes=file.read(LyricsDocumentReader::MaximumBytes+1);
+    if(file.error()!=QFileDevice::NoError||!file.atEnd()||bytes.size()>LyricsDocumentReader::MaximumBytes){
+        error=QStringLiteral("歌词无法完整读取，请刷新判断后重新选择。");return false;
+    }
+    snapshot.digest=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);return true;
 }
-bool Library::saveLyricsPreservingText(qint64 id,const QByteArray &data){
+}
+LyricsSaveSnapshot Library::lyricsSaveSnapshot(qint64 id) const {
+    LyricsSaveSnapshot result;const auto current=track(id);result.id=id;result.hash=current.hash;result.lyrics=current.lyrics;
+    if(!current.id){result.error=QStringLiteral("歌曲已不存在，请刷新判断。");return result;}
+    const auto destination=absolute(QString("Lyrics/track-%1.lrc").arg(id));
+    result.valid=snapshotFile(absolute(current.lyrics),result.source,result.error);
+    if(result.valid){
+        if(result.source.path==destination)result.target=result.source;
+        else result.valid=snapshotFile(destination,result.target,result.error);
+    }
+    return result;
+}
+bool Library::lyricsSnapshotMatches(const LyricsSaveSnapshot &snapshot,QString *error) const {
+    const auto current=lyricsSaveSnapshot(snapshot.id);
+    const bool same=snapshot.valid&&current.valid&&snapshot.id==current.id&&snapshot.hash==current.hash&&
+        snapshot.lyrics==current.lyrics&&snapshot.source==current.source&&snapshot.target==current.target;
+    if(error)*error=same?QString():QStringLiteral("歌词已由外部修改、移除或无法读取，请点击刷新判断后重新选择；本次未保存。");
+    return same;
+}
+bool Library::saveLyrics(qint64 id,const QByteArray &data){return writeLyrics(id,simplifyTraditionalLyrics(data));}
+bool Library::saveLyricsPreservingText(qint64 id,const QByteArray &data){return writeLyrics(id,data);}
+bool Library::saveLyricsChecked(qint64 id,const QByteArray &data,const LyricsSaveSnapshot &snapshot,bool preserveText){
+    if(id!=snapshot.id){m_error=QStringLiteral("歌曲身份已变化，请刷新判断。");return false;}
+    return writeLyrics(id,preserveText?data:simplifyTraditionalLyrics(data),&snapshot);
+}
+bool Library::writeLyrics(qint64 id,const QByteArray &data,const LyricsSaveSnapshot *snapshot){
+    m_error.clear();
     if(!track(id).id||data.isEmpty()||data.size()>4*1024*1024||Lyrics::parse(data).lines.isEmpty()){
-        m_error="歌词内容无效或歌曲已不存在";return false;
+        m_error=QStringLiteral("歌词内容无效或歌曲已不存在");return false;
     }
-    const auto relative=QString("Lyrics/track-%1.lrc").arg(id);
-    const auto path=absolute(relative);
-    QByteArray previous;
-    bool hadPrevious=false;
-    QFile existing(path);
-    if(QFileInfo::exists(path)){
-        if(!existing.open(QIODevice::ReadOnly)){m_error="无法读取待替换的歌词文件";return false;}
-        previous=existing.readAll();
-        if(existing.error()!=QFileDevice::NoError){m_error="无法备份待替换的歌词文件";return false;}
-        hadPrevious=true;
+    if(snapshot&&!lyricsSnapshotMatches(*snapshot,&m_error))return false;
+    const auto relative=QString("Lyrics/track-%1.lrc").arg(id),path=absolute(relative);
+    QByteArray previous;const bool hadPrevious=QFileInfo::exists(path);
+    if(hadPrevious){
+        QFile file(path);
+        if(!QFileInfo(path).isFile()||!file.open(QIODevice::ReadOnly)){m_error=QStringLiteral("无法读取待替换的歌词文件");return false;}
+        previous=file.read(LyricsDocumentReader::MaximumBytes+1);
+        if(file.error()!=QFileDevice::NoError||!file.atEnd()||previous.size()>LyricsDocumentReader::MaximumBytes){m_error=QStringLiteral("无法备份待替换的歌词文件");return false;}
     }
-    existing.close();
     if(!m_db.transaction()){m_error=m_db.lastError().text();return false;}
-    auto restoreFile=[&]{
-        if(hadPrevious){QSaveFile restore(path);if(!restore.open(QIODevice::WriteOnly)||restore.write(previous)!=previous.size()||!restore.commit())return false;}
-        else if(QFileInfo::exists(path)&&!QFile::remove(path))return false;
-        return true;
+    auto rollback=[&]{
+        if(m_db.rollback())return QString();
+        const auto error=m_db.lastError().text();
+        // SQLite can already have rolled back a rejected COMMIT itself.
+        return error.contains("no transaction is active",Qt::CaseInsensitive)?QString():error;
     };
     QSaveFile out(path);
-    if(!out.open(QIODevice::WriteOnly)||out.write(data)!=data.size()||!out.commit()){
-        m_db.rollback();m_error="无法保存歌词文件";return false;
+    if(!out.open(QIODevice::WriteOnly)||out.write(data)!=data.size()){
+        const auto rollbackError=rollback();m_error=QStringLiteral("无法保存歌词文件");
+        if(!rollbackError.isEmpty())m_error+=QStringLiteral("；数据库回滚失败：")+rollbackError;return false;
+    }
+    // Recheck after writing the temporary file, immediately before the atomic rename.
+    if(snapshot&&!lyricsSnapshotMatches(*snapshot,&m_error)){const auto reason=m_error;rollback();m_error=reason;return false;}
+    if(!out.commit()){
+        const auto rollbackError=rollback();m_error=QStringLiteral("无法保存歌词文件");
+        if(!rollbackError.isEmpty())m_error+=QStringLiteral("；数据库回滚失败：")+rollbackError;return false;
     }
     const bool updated=exec("UPDATE tracks SET lyrics=? WHERE id=?",{relative,id})&&
         exec("INSERT INTO lyrics_playback(track,instrumental) VALUES(?,?) ON CONFLICT(track) DO UPDATE SET instrumental=excluded.instrumental",{id,Lyrics::parse(data).instrumental?1:0});
-    if(!updated||!m_db.commit()){
-        if(m_db.isOpen())m_db.rollback();
-        const auto databaseError=m_error.isEmpty()?m_db.lastError().text():m_error;
-        if(!restoreFile())m_error="歌词保存失败，且无法恢复原歌词文件";
-        else m_error=databaseError.isEmpty()?QStringLiteral("无法提交歌词保存"):databaseError;
+    const bool committed=updated&&m_db.commit();
+    if(!committed){
+        const auto databaseError=updated?m_db.lastError().text():m_error;
+        const auto rollbackError=rollback();bool restored=true;
+        if(hadPrevious){QSaveFile restore(path);restored=restore.open(QIODevice::WriteOnly)&&restore.write(previous)==previous.size()&&restore.commit();}
+        else if(QFileInfo::exists(path))restored=QFile::remove(path);
+        m_error=databaseError.isEmpty()?QStringLiteral("无法提交歌词保存"):databaseError;
+        if(!restored)m_error+=QStringLiteral("；无法恢复原歌词文件，请检查本地文件");
+        if(!rollbackError.isEmpty())m_error+=QStringLiteral("；数据库回滚失败：")+rollbackError;
         return false;
     }
-    notifyChanged();
-    return true;
+    notifyChanged();return true;
 }
 bool Library::updateArtwork(qint64 id, const QString &source) {
     auto r = QString("Artwork/track-%1.png").arg(id);

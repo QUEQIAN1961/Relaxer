@@ -7,6 +7,21 @@
 #include <QSqlQuery>
 namespace relaxer {
 struct LookupCache { bool fresh=false, noResult=false; QJsonArray records; };
+// Snapshot only the lyric files about to be replaced, never the music library.
+struct LyricFileSnapshot {
+    QString path;
+    bool exists=false;
+    QByteArray digest;
+    bool operator==(const LyricFileSnapshot &other) const {
+        return path==other.path&&exists==other.exists&&digest==other.digest;
+    }
+};
+struct LyricsSaveSnapshot {
+    qint64 id=0;
+    QString hash,lyrics,error;
+    LyricFileSnapshot source,target;
+    bool valid=false;
+};
 class Library : public QObject {
     Q_OBJECT
   public:
@@ -35,6 +50,9 @@ class Library : public QObject {
     bool favorites(const QVector<qint64> &ids,bool value);
     bool saveLyrics(qint64 id,const QByteArray &data);
     bool saveLyricsPreservingText(qint64 id,const QByteArray &data);
+    LyricsSaveSnapshot lyricsSaveSnapshot(qint64 id) const;
+    bool lyricsSnapshotMatches(const LyricsSaveSnapshot &snapshot,QString *error=nullptr) const;
+    bool saveLyricsChecked(qint64 id,const QByteArray &data,const LyricsSaveSnapshot &snapshot,bool preserveText=false);
     bool updateArtwork(qint64 id, const QString &source);
     bool applyArtworkRepair(const ArtworkResult &result);
     bool updateLyrics(qint64 id, const QString &source);
@@ -61,6 +79,7 @@ class Library : public QObject {
 
   private:
     QString m_root, m_connection;
+    bool writeLyrics(qint64 id,const QByteArray &data,const LyricsSaveSnapshot *snapshot=nullptr);
     mutable QString m_error;
     int m_deferChanges = 0;
     bool m_changePending = false;
