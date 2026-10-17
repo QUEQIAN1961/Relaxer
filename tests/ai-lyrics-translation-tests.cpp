@@ -63,6 +63,8 @@ class LyricsLookupDiagnostics final {
     static bool auditing(const LyricsLookup &dialog) {
         return dialog.m_translationAuditInFlight||(dialog.m_translationAuditDebounce&&dialog.m_translationAuditDebounce->isActive());
     }
+    static TranslationSummary preview(const LyricsLookup &dialog) { return dialog.aiSummary(); }
+    static void refresh(LyricsLookup &dialog) { dialog.selectTrack(); }
     static void startAudit(LyricsLookup &dialog) { dialog.startTranslationCacheAudit(); }
     static void reactivate(LyricsLookup &dialog) {
         dialog.activateWindow();
@@ -264,6 +266,10 @@ void clickConsentAndStart(LyricsLookup &dialog) {
 class AiLyricsTranslationTests final : public QObject {
     Q_OBJECT
   private slots:
+    void completedPreviewTrackSwitch_data();
+    void completedPreviewTrackSwitch();
+    void completedPreviewPassiveRefresh_data();
+    void completedPreviewPassiveRefresh();
     void productionCoordinatorOwnsPreviewAndCloseLifecycle();
     void completedPreviewCancelThenSave_data();
     void completedPreviewCancelThenSave();
@@ -1631,6 +1637,88 @@ void AiLyricsTranslationTests::missingTranslationFilterCancelReleasesOwner() {
 }
 
 
+void AiLyricsTranslationTests::completedPreviewTrackSwitch_data() {
+    QTest::addColumn<int>("action");QTest::addColumn<bool>("discard");
+    for(int action=0;action<4;++action)for(bool discard:{false,true})
+        QTest::newRow(qPrintable(QString("%1-%2").arg(QStringList{"mouse","keyboard","sorted","reentrant"}[action],discard?"discard":"cancel-save")))<<action<<discard;
+}
+void AiLyricsTranslationTests::completedPreviewTrackSwitch() {
+    QFETCH(int,action);QFETCH(bool,discard);
+    QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+    const auto a=seed(library,"A owner","b9-switch-a"),b=seed(library,"B target","b9-switch-b"),c=seed(library,"C repeat","b9-switch-c");
+    const QByteArray original="[00:01.00]Hello world",other="[00:01.00]Another song";
+    QVERIFY(library.saveLyrics(a.id,original));QVERIFY(library.saveLyrics(b.id,other));QVERIFY(library.saveLyrics(c.id,other));
+    const auto path=library.absolute(library.track(a.id).lyrics);
+    TranslationHttpMock server;QVERIFY(server.listen());server.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("你好世界")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());QVERIFY(configureRuntime(runtime));
+    auto dialog=std::make_unique<LyricsLookup>(&library,QVector<qint64>{a.id,b.id,c.id},nullptr,QUrl("http://127.0.0.1:1"),QUrl(),true,&runtime);
+    dialog->show();dialog->findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    auto *rows=dialog->findChild<QListWidget *>("lyricsTracks");
+    auto rowOf=[&](qint64 id){for(int n=0;n<rows->count();++n)if(rows->item(n)->data(Qt::UserRole).toLongLong()==id)return n;return -1;};
+    rows->setCurrentRow(rowOf(a.id));clickConsentAndStart(*dialog);
+    auto *save=dialog->findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
+    QPointer<TranslationCoordinator> coordinator=dialog->findChild<TranslationCoordinator *>();QVERIFY(coordinator);
+    const auto before=LyricsLookupDiagnostics::preview(*dialog);const auto text=dialog->findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText();
+    QVERIFY(before.hasPreview());QCOMPARE(before.trackId,a.id);QVERIFY(!text.isEmpty());
+    if(action==2)rows->sortItems(Qt::DescendingOrder);
+    int prompts=0;
+    QTimer::singleShot(0,dialog.get(),[&]{
+        auto *box=dialog->findChild<QMessageBox *>("lyricsUnsavedTranslationSwitchConfirm");QVERIFY(box);++prompts;
+        QCOMPARE(box->windowTitle(),QStringLiteral("未保存的翻译"));
+        auto *keep=box->findChild<QPushButton *>("lyricsKeepTranslationTrack");QVERIFY(keep);QCOMPARE(box->defaultButton(),keep);QCOMPARE(box->escapeButton(),keep);
+        if(action==3){rows->setCurrentRow(rowOf(c.id));rows->setCurrentRow(rowOf(a.id));rows->setCurrentRow(rowOf(b.id));
+            dialog->close();QCOMPARE(dialog->findChildren<QMessageBox *>().size(),1);}
+        box->findChild<QPushButton *>(discard?"lyricsDiscardTranslationSwitch":"lyricsKeepTranslationTrack")->click();
+    });
+    if(action==0){QTest::mouseClick(rows->viewport(),Qt::LeftButton,Qt::NoModifier,rows->visualItemRect(rows->item(rowOf(b.id))).center());}
+    else if(action==1){rows->setFocus();QTest::keyClick(rows,Qt::Key_Down);}
+    else rows->setCurrentRow(rowOf(b.id));
+    QCOMPARE(prompts,1);QVERIFY(dialog->isVisible());QCOMPARE(server.requestCount(),1);
+    QByteArray bytes;QVERIFY(readFile(path,&bytes));QCOMPARE(bytes,original);
+    QCOMPARE(rows->currentItem()->data(Qt::UserRole).toLongLong(),discard?b.id:a.id);
+    if(discard){
+        QVERIFY(!save->isEnabled());QVERIFY(!coordinator->summary(before.taskId).taskId);
+        rows->setCurrentRow(rowOf(c.id));QCOMPARE(prompts,1);
+    }else{
+        const auto after=LyricsLookupDiagnostics::preview(*dialog);
+        QCOMPARE(after.taskId,before.taskId);QCOMPARE(after.trackId,before.trackId);QCOMPARE(after.translations,before.translations);
+        QCOMPARE(dialog->findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText(),text);QVERIFY(save->isEnabled());
+        // Close protection remains independent after a cancelled navigation.
+        QTimer::singleShot(0,dialog.get(),[&]{auto *box=dialog->findChild<QMessageBox *>("lyricsUnsavedTranslationCloseConfirm");QVERIFY(box);box->findChild<QPushButton *>("lyricsKeepTranslationPreview")->click();});
+        QVERIFY(!dialog->close());QVERIFY(save->isEnabled());save->click();QVERIFY(!save->isEnabled());
+        QVERIFY(readFile(path,&bytes));QVERIFY(bytes.contains("relaxer-bilingual"));QVERIFY(bytes.contains(QStringLiteral("你好世界").toUtf8()));
+        rows->setCurrentRow(rowOf(b.id));QCOMPARE(rows->currentItem()->data(Qt::UserRole).toLongLong(),b.id);QCOMPARE(prompts,1);
+    }
+    for(const auto &t:{b,c}){QVERIFY(readFile(library.absolute(library.track(t.id).lyrics),&bytes));QCOMPARE(bytes,other);}
+    QVERIFY(dialog->close());dialog.reset();QVERIFY(!coordinator);QCOMPARE(server.requestCount(),1);
+}
+void AiLyricsTranslationTests::completedPreviewPassiveRefresh_data(){
+    QTest::addColumn<int>("action");QTest::newRow("filters")<<0;QTest::newRow("empty-selection")<<1;
+    QTest::newRow("passive-current-refresh")<<2;QTest::newRow("deleted-owner")<<3;
+}
+void AiLyricsTranslationTests::completedPreviewPassiveRefresh(){
+    QFETCH(int,action);QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+    const auto a=seed(library,"A owner","b9-passive-a"),b=seed(library,"B","b9-passive-b");const QByteArray original="[00:01.00]Hello world";
+    QVERIFY(library.saveLyrics(a.id,original));QVERIFY(library.saveLyrics(b.id,original));const auto path=library.absolute(library.track(a.id).lyrics);
+    TranslationHttpMock server;QVERIFY(server.listen());server.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("你好世界")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library,{a.id,b.id},nullptr,QUrl("http://127.0.0.1:1"),{},true,&runtime);dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");rows->setCurrentRow(0);clickConsentAndStart(dialog);
+    auto *save=dialog.findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
+    const auto before=LyricsLookupDiagnostics::preview(dialog);const auto text=dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText();
+    if(action==0){dialog.findChild<QCheckBox *>("lyricsMissingTranslationOnly")->setChecked(true);dialog.findChild<QPushButton *>("lyricsRefreshTranslationFilter")->click();}
+    if(action==1)rows->clearSelection();
+    if(action==2){{QSignalBlocker block(rows);rows->setCurrentRow(1);}LyricsLookupDiagnostics::refresh(dialog);}
+    if(action==3){QVERIFY(library.remove({a.id}));save->click();QVERIFY(!save->isEnabled());QVERIFY(!LyricsLookupDiagnostics::preview(dialog).hasPreview());}
+    else{
+        QCOMPARE(rows->currentItem()->data(Qt::UserRole).toLongLong(),a.id);
+        QCOMPARE(LyricsLookupDiagnostics::preview(dialog).taskId,before.taskId);QVERIFY(save->isEnabled());
+        QCOMPARE(dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText(),text);save->click();QVERIFY(!save->isEnabled());
+    }
+    QVERIFY(dialog.findChildren<QMessageBox *>().isEmpty());QCOMPARE(server.requestCount(),1);QByteArray bytes;
+    QVERIFY(readFile(path,&bytes));if(action==3)QCOMPARE(bytes,original);else QVERIFY(bytes.contains("relaxer-bilingual"));
+    QVERIFY(readFile(library.absolute(library.track(b.id).lyrics),&bytes));QCOMPARE(bytes,original);QVERIFY(dialog.close());
+}
 void AiLyricsTranslationTests::productionCoordinatorOwnsPreviewAndCloseLifecycle() {
     QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
     const auto track=seed(library,"B7 production","b7-widgets");const QByteArray original="[00:01.00]Hello world";

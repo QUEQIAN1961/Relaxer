@@ -122,6 +122,10 @@ private:
     quint64 m_translationTaskId=0; // Frontend identity only; service owns all state.
     bool m_aiConsentPending=false;
     bool m_translationCloseConfirmOpen=false;
+    bool m_translationSwitchConfirmOpen=false;
+    qint64 trackIdAt(int row) const;
+    void restoreTranslationSelection();
+    void trackSelectionChanged();
     TranslationSummary aiSummary() const;
     quint64 aiTaskId() const;
     qint64 aiTrackId() const;
