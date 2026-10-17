@@ -6,6 +6,8 @@
 
 #include <QApplication>
 #include <QFile>
+#include <QFileDialog>
+#include <qscopeguard.h>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -252,8 +254,12 @@ class AiLyricsTranslationTests final : public QObject {
     void translationNeedClassification_data();
     void translationNeedClassification();
     void savedLyricsCanBeReselectedRepeatedly();
+    void replacementFailureKeepsPaidPreviewAndCanRetry();
+    void candidateHashChangePreventsReplacement();
+    void filterUpdatesAfterPasteImportAndInstrumental();
     void missingTranslationFilterIncludesUncertainAndRefreshesLocalFiles();
     void missingTranslationFilterPreservesPaidPreview();
+    void missingTranslationFilterCancelReleasesOwner();
 };
 
 void AiLyricsTranslationTests::preparePreservesRepeatedTimestampRowsAndRejectsExistingBilingualLyrics() {
@@ -1124,6 +1130,15 @@ void AiLyricsTranslationTests::translationNeedClassification_data() {
     row("marked-partial",QStringLiteral("[re:relaxer-bilingual]\n[00:01.00]Hello friend\n[00:01.00]朋友你好\n[00:02.00]Goodbye friend"),Need::Review);
     row("many-originals-one-translation",QStringLiteral("[00:01.00]Hello my friend\n[00:01.00]Goodbye my friend\n[00:01.00]朋友你好"),Need::Review);
     row("mixed",QStringLiteral("[00:01.00]让我说 hello\n[00:02.00]一起往前走"),Need::Review);
+    row("mixed-pairs",QStringLiteral("让我说 hello\n朋友你好\n一起说 goodbye\n朋友再见"),Need::Review);
+    row("marked-mixed-pair",QStringLiteral("[re:relaxer-bilingual]\n[00:01.00]让我说 hello\n[00:01.00]朋友你好"),Need::Review);
+    row("extra-han-plain",QStringLiteral("Hello friend\n朋友你好\nGoodbye friend\n朋友再见\n尚有一段中文"),Need::Review);
+    row("extra-han-timed",QStringLiteral("[00:01.00]Hello friend\n[00:01.00]朋友你好\n[00:02.00]Goodbye friend\n[00:02.00]朋友再见\n[00:03.00]尚有一段中文"),Need::Review);
+    row("untranslated-symbol-row",QStringLiteral("[re:relaxer-bilingual]\n[00:01.00]Hello friend\n[00:01.00]朋友你好\n[00:02.00]123 !!!"),Need::Review);
+    row("japanese-complete",QStringLiteral("[00:01.00]君の笑顔\n[00:01.00]你的笑容\n[00:02.00]君を待つ\n[00:02.00]等待着你"),Need::Translated);
+    row("multi-timestamp-complete",QStringLiteral("[re:relaxer-bilingual]\n[00:01.00][00:02.00]Hello friend\n[00:01.00][00:02.00]朋友你好"),Need::Translated);
+    row("marker-in-body",QStringLiteral("I sing relaxer-bilingual\n朋友你好"),Need::Review);
+    row("short-han",QStringLiteral("愛"),Need::Review);
     row("symbols","[00:01.00]123 !!!",Need::Review);
     row("vocalization","la la la la la la",Need::Review);
     row("short","Oh",Need::Review);
@@ -1153,6 +1168,11 @@ void AiLyricsTranslationTests::savedLyricsCanBeReselectedRepeatedly() {
     dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
     auto *versions=dialog.findChild<QListWidget *>("lyricsVersions");auto *apply=dialog.findChild<QPushButton *>("lyricsApply");
     QCOMPARE(versions->count(),2);versions->setCurrentRow(1);QVERIFY(apply->isEnabled());
+    const auto screenshotDir=qEnvironmentVariable("RELAXER_LYRICS_SELECTION_SCREENSHOT_DIR");
+    if(!screenshotDir.isEmpty()){
+        QDir().mkpath(screenshotDir);dialog.resize(1240,780);QCoreApplication::processEvents();
+        QVERIFY(dialog.grab().save(QDir(screenshotDir).filePath("reselection-candidates.png")));
+    }
     QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,a);
     auto answer=[&dialog](QMessageBox::StandardButton answer){QTimer::singleShot(0,&dialog,[answer]{
         for(auto *widget:QApplication::topLevelWidgets())if(auto *box=qobject_cast<QMessageBox *>(widget))
@@ -1204,12 +1224,24 @@ void AiLyricsTranslationTests::missingTranslationFilterIncludesUncertainAndRefre
     const auto output=qEnvironmentVariable("RELAXER_LYRICS_SELECTION_SCREENSHOT_DIR");
     if(!output.isEmpty()){
         QDir().mkpath(output);dialog.resize(1240,780);QCoreApplication::processEvents();
+        QCOMPARE(dialog.size(),QSize(1240,780));
         QVERIFY(dialog.grab().save(QDir(output).filePath("missing-translation-default.png")));
         dialog.resize(860,560);QCoreApplication::processEvents();
+        QCOMPARE(dialog.size(),QSize(860,560));
         for(const auto *control:QList<QWidget *>{filter,refresh,dialog.findChild<QPushButton *>("lyricsApply"),dialog.findChild<QPushButton *>("lyricsTranslate")}){
             const QRect bounds(control->mapTo(&dialog,QPoint()),control->size());QVERIFY(dialog.rect().contains(bounds));
         }
         QVERIFY(dialog.grab().save(QDir(output).filePath("missing-translation-compact.png")));
+        dialog.findChild<QPushButton *>("lyricsMore")->setChecked(true);QCoreApplication::processEvents();
+        QCOMPARE(dialog.size(),QSize(860,560));
+        for(auto *control:dialog.findChildren<QAbstractButton *>())if(control->isVisible()){
+            const QRect bounds(control->mapTo(&dialog,QPoint()),control->size());
+            QVERIFY2(dialog.rect().contains(bounds),qPrintable(control->objectName()));
+        }
+        QVERIFY(dialog.grab().save(QDir(output).filePath("missing-translation-compact-more.png")));
+        dialog.findChild<QPushButton *>("lyricsMultiSelect")->setChecked(true);QCoreApplication::processEvents();
+        QCOMPARE(dialog.size(),QSize(860,560));
+        QVERIFY(dialog.grab().save(QDir(output).filePath("missing-translation-compact-multi.png")));
     }
 }
 
@@ -1228,6 +1260,131 @@ void AiLyricsTranslationTests::missingTranslationFilterPreservesPaidPreview() {
     dialog.findChild<QPushButton *>("lyricsRefreshTranslationFilter")->click();QVERIFY(!rows->item(0)->isHidden());QVERIFY(save->isEnabled());
     QByteArray before;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&before));QCOMPARE(before,original);
     save->click();QVERIFY(!save->isEnabled());QVERIFY(rows->item(0)->isHidden());QCOMPARE(server.requestCount(),1);
+}
+
+
+void AiLyricsTranslationTests::replacementFailureKeepsPaidPreviewAndCanRetry() {
+#ifndef Q_OS_WIN
+    QSKIP("The deterministic replacement lock uses Windows sharing semantics");
+#else
+    QTemporaryDir directory;
+    Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Replace Preview","replace-preview");
+    const QByteArray original="[00:01.00]Hello my friend\n[00:02.00]Wonderful world";
+    const QByteArray replacement="[00:01.00]Another version\n[00:02.00]A different ending";
+    QVERIFY(library.saveLyrics(track.id,original));
+    QVERIFY(library.saveLookupCache(track.id,QJsonArray{QJsonObject{{"trackName",track.title},{"artistName",track.artist},
+        {"syncedLyrics",QString::fromUtf8(replacement)}}},false));
+    TranslationHttpMock server;QVERIFY(server.listen());
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("你好朋友")},{1,QStringLiteral("美好世界")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());
+    QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"),{},false,&runtime);dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    clickConsentAndStart(dialog);
+    auto *save=dialog.findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
+    auto *apply=dialog.findChild<QPushButton *>("lyricsApply");QVERIFY(apply->isEnabled());
+    const auto path=library.absolute(library.track(track.id).lyrics);
+    std::unique_ptr<void,decltype(&CloseHandle)> blocker(CreateFileW(path.toStdWString().c_str(),GENERIC_READ,
+        FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr),&CloseHandle);
+    QVERIFY(blocker.get()!=INVALID_HANDLE_VALUE);
+    bool sawWarning=false;
+    auto answer=[&]{QTimer::singleShot(0,&dialog,[&]{
+        for(auto *widget:QApplication::topLevelWidgets())if(auto *box=qobject_cast<QMessageBox *>(widget))
+            if(box->objectName()=="lyricsReplaceConfirm"){
+                sawWarning=box->informativeText().contains(QStringLiteral("未保存"));box->button(QMessageBox::Yes)->click();
+            }
+    });};
+    answer();apply->click();QVERIFY(sawWarning);
+    QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().startsWith(QStringLiteral("未保存：")));
+    QVERIFY(save->isEnabled());QVERIFY(apply->isEnabled());
+    QByteArray bytes;QVERIFY(readFile(path,&bytes));QCOMPARE(bytes,original);
+    blocker.reset();
+    answer();apply->click();
+    QVERIFY(!save->isEnabled());QVERIFY(readFile(path,&bytes));QCOMPARE(bytes,replacement);
+    QCOMPARE(server.requestCount(),1);
+#endif
+}
+
+void AiLyricsTranslationTests::candidateHashChangePreventsReplacement() {
+    QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Hash Check","candidate-hash");
+    const QByteArray original="Existing original",replacement="Different candidate";
+    QVERIFY(library.saveLyrics(track.id,original));
+    QVERIFY(library.saveLookupCache(track.id,QJsonArray{QJsonObject{{"trackName",track.title},{"artistName",track.artist},
+        {"plainLyrics",QString::fromUtf8(replacement)}}},false));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"));dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    dialog.findChild<QListWidget *>("lyricsTracks")->setCurrentRow(0);
+    auto *apply=dialog.findChild<QPushButton *>("lyricsApply");QVERIFY(apply->isEnabled());
+    bool changed=false;
+    for(const auto &name:QSqlDatabase::connectionNames()){
+        const auto db=QSqlDatabase::database(name);
+        if(db.databaseName()!=library.absolute("relaxer.sqlite"))continue;
+        QSqlQuery query(db);query.prepare("UPDATE tracks SET hash=? WHERE id=?");
+        query.addBindValue("changed-candidate-hash");query.addBindValue(track.id);QVERIFY(query.exec());changed=true;
+    }
+    QVERIFY(changed);
+    // The click guard must also catch a change after the last button refresh.
+    apply->click();QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().contains(QStringLiteral("文件已变化")));
+    QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,original);
+    auto *versions=dialog.findChild<QListWidget *>("lyricsVersions");versions->setCurrentRow(-1);versions->setCurrentRow(0);
+    QVERIFY(!apply->isEnabled());
+}
+
+void AiLyricsTranslationTests::filterUpdatesAfterPasteImportAndInstrumental() {
+    QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto a=seed(library,"Paste","paste-filter"),b=seed(library,"Import","import-filter"),c=seed(library,"Pure","pure-filter");
+    for(const auto &track:{a,b,c})QVERIFY(library.saveLyrics(track.id,"Hello my friend\nWonderful music in the world"));
+    const auto imported=directory.filePath("synthetic.lrc");QFile file(imported);QVERIFY(file.open(QIODevice::WriteOnly));
+    QVERIFY(file.write(QStringLiteral("[00:01.00]这是导入的中文歌词").toUtf8())>0);file.close();
+    const bool previous=QCoreApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs,true);
+    const auto restore=qScopeGuard([previous]{QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs,previous);});
+    TranslationHttpMock source;QVERIFY(source.listen());
+    LyricsLookup dialog(&library,{a.id,b.id,c.id},nullptr,source.baseUrl());dialog.show();
+    auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");
+    dialog.findChild<QCheckBox *>("lyricsMissingTranslationOnly")->setChecked(true);rows->setCurrentRow(0);
+    dialog.findChild<QPushButton *>("lyricsMore")->setChecked(true);
+    QTimer driver;
+    connect(&driver,&QTimer::timeout,&dialog,[&]{
+        for(auto *widget:QApplication::topLevelWidgets()){
+            if(auto *box=qobject_cast<QMessageBox *>(widget)){
+                if(box->objectName()=="lyricsReplaceConfirm")box->button(QMessageBox::Yes)->click();
+            }else if(auto *chooser=qobject_cast<QFileDialog *>(widget)){
+                chooser->selectFile(imported);static_cast<QDialog *>(chooser)->accept();
+            }else if(auto *paste=qobject_cast<QDialog *>(widget)){
+                if(paste->objectName()=="lyricsPasteDialog"){
+                    paste->findChild<QPlainTextEdit *>("lyricsPasteText")->setPlainText(QStringLiteral("这是粘贴的中文歌词"));paste->accept();
+                }
+            }
+        }
+    });driver.start(10);
+    dialog.findChild<QPushButton *>("lyricsPaste")->click();QVERIFY(rows->item(0)->isHidden());QCOMPARE(rows->currentRow(),1);
+    dialog.findChild<QPushButton *>("lyricsImport")->click();QVERIFY(rows->item(1)->isHidden());QCOMPARE(rows->currentRow(),2);
+    dialog.findChild<QPushButton *>("lyricsMarkInstrumental")->click();QVERIFY(rows->item(2)->isHidden());
+    QVERIFY(library.isInstrumental(c.id));QVERIFY(dialog.findChild<QLabel *>("lyricsMissingEmpty")->isVisible());
+    driver.stop();QCOMPARE(source.requestCount(),0);
+}
+
+
+void AiLyricsTranslationTests::missingTranslationFilterCancelReleasesOwner() {
+    QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+    const auto track=seed(library,"Cancel Owner","cancel-filter-owner");
+    const auto original=QStringLiteral("[00:01.00]你好朋友\n[00:02.00]一起出发").toUtf8();QVERIFY(library.saveLyrics(track.id,original));
+    TranslationHttpMock server;QVERIFY(server.listen());server.setHold(true);
+    server.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("朋友你好")},{1,QStringLiteral("一同出发")}}))));
+    AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{server.baseUrl()},std::make_unique<FakeCredentialStore>());QVERIFY(configureRuntime(runtime));
+    LyricsLookup dialog(&library,{track.id},nullptr,QUrl("http://127.0.0.1:9/api"),{},false,&runtime);dialog.show();
+    dialog.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);
+    auto *rows=dialog.findChild<QListWidget *>("lyricsTracks");rows->setCurrentRow(0);clickConsentAndStart(dialog);QTRY_COMPARE(server.heldCount(),1);
+    dialog.findChild<QCheckBox *>("lyricsMissingTranslationOnly")->setChecked(true);QVERIFY(!rows->item(0)->isHidden());
+    dialog.findChild<QPushButton *>("lyricsCancelTranslation")->click();QVERIFY(rows->item(0)->isHidden());
+    server.releaseHeld();QTest::qWait(60);
+    QVERIFY(!dialog.findChild<QPushButton *>("lyricsSaveTranslation")->isEnabled());
+    QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,original);
+    QCOMPARE(server.requestCount(),1);
 }
 
 QTEST_MAIN(AiLyricsTranslationTests)

@@ -212,7 +212,8 @@ TranslationAssessment assessTranslation(const QByteArray &source, const QString 
     struct Counts { int han = 0; int foreign = 0; };
     QVector<Counts> counts;
     QHash<qint64, QPair<int, int>> groups;
-    int han = 0, foreign = 0, foreignLines = 0;
+    int han = 0, foreign = 0, foreignLines = 0, hanLines = 0;
+    bool mixedSource = false, unknownLine = false;
     QString body;
     for (const auto &line : prepared.lines) {
         Counts c;
@@ -221,13 +222,25 @@ TranslationAssessment assessTranslation(const QByteArray &source, const QString 
             if (QChar::script(cp) == QChar::Script_Han) ++c.han;
             else ++c.foreign;
         }
-        counts.append(c); han += c.han; foreign += c.foreign;
-        if (c.foreign) { ++foreignLines; ++groups[line.timestampMs].first; }
-        else if (c.han) ++groups[line.timestampMs].second;
+        counts.append(c);
+        han += c.han;
+        foreign += c.foreign;
+        if (c.foreign) {
+            ++foreignLines;
+            ++groups[line.timestampMs].first;
+            // Han plus kana is a normal Japanese source line. Other mixed
+            // scripts may be untranslated code-switching, even beside Han rows.
+            mixedSource |= c.han > 0 && !hasKana(line.text);
+        } else if (c.han) {
+            ++hanLines;
+            ++groups[line.timestampMs].second;
+        } else {
+            unknownLine = true;
+        }
         body += line.text + QChar(' ');
     }
     if (!foreignLines) {
-        if (han) return {TranslationNeed::Chinese, QStringLiteral("正文以汉字为主，未发现需翻译的外文")};
+        if (han >= 4) return {TranslationNeed::Chinese, QStringLiteral("正文以汉字为主，未发现需翻译的外文；纯汉字语种仍可能误判")};
         return {TranslationNeed::Review, QStringLiteral("正文过短或语言无法判断，请人工确认")};
     }
     int covered = 0;
@@ -237,10 +250,16 @@ TranslationAssessment assessTranslation(const QByteArray &source, const QString 
         for (int i = 0; i + 1 < counts.size(); ++i)
             if (counts[i].foreign && counts[i + 1].han && !counts[i + 1].foreign) ++covered;
     }
-    const bool marked = decode(source).contains(QStringLiteral("relaxer-bilingual"), Qt::CaseInsensitive);
-    if (covered == foreignLines && (marked || foreignLines >= 2))
+    // A lyric that happens to mention the marker is not document metadata.
+    static const QRegularExpression bilingualMarker(QStringLiteral("^\\s*\\[re:relaxer-bilingual\\]\\s*$"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption);
+    const bool marked = bilingualMarker.match(decode(source)).hasMatch();
+    // Every original needs a Han counterpart; spare Han/symbol rows and mixed
+    // originals remain reviewable rather than disappearing from this filter.
+    if (!mixedSource && !unknownLine && covered == foreignLines && hanLines == foreignLines &&
+        (marked || foreignLines >= 2))
         return {TranslationNeed::Translated, QStringLiteral("已识别完整的原文与中文对应行")};
-    if (marked) return {TranslationNeed::Review, QStringLiteral("双语标记与正文对应不完整，请确认译文")};
+    if (marked) return {TranslationNeed::Review, QStringLiteral("双语标记与正文对应不完整或存在混合文本，请确认译文")};
     if (covered) return {TranslationNeed::Review, QStringLiteral("仅识别到部分或疑似中文译文，请确认")};
     if (han) return {TranslationNeed::Review, QStringLiteral("疑似外文或中外文混合，译文状态待确认")};
     static const QRegularExpression nonAscii(QStringLiteral("[^a-z]+"));
