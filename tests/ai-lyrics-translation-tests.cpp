@@ -1720,7 +1720,9 @@ void AiLyricsTranslationTests::searchEventsNeverDispatchOrDiscardPaidTranslation
     TranslationHttpMock paid,source;QVERIFY(paid.listen());QVERIFY(source.listen());
     const auto candidate=QJsonObject{{"id",1},{"trackName",track.title},{"artistName",track.artist},{"duration",10},
         {"syncedLyrics","[00:01.00]Candidate first\n[00:02.00]Candidate second"}};
-    for(int n=0;n<80;++n)source.enqueue(QJsonDocument(QJsonArray{candidate}).toJson());
+    for(int n=0;n<80;++n){auto variant=candidate;variant["id"]=n+1;
+        variant["syncedLyrics"]=QString("[00:01.00]Candidate %1 first\n[00:02.00]Candidate %1 second").arg(n);
+        source.enqueue(QJsonDocument(QJsonArray{variant}).toJson());}
     paid.enqueue(completion(QString::fromUtf8(translationJson({{0,QStringLiteral("你好世界")},{1,QStringLiteral("第二行")}}))));
     AiRuntime runtime(&library,DeepSeekProvider::MockEndpoint{paid.baseUrl()},std::make_unique<FakeCredentialStore>());QVERIFY(configureRuntime(runtime));
     LyricsLookup dialog(&library,{track.id},nullptr,source.baseUrl(),{},true,&runtime);dialog.show();
@@ -1732,12 +1734,18 @@ void AiLyricsTranslationTests::searchEventsNeverDispatchOrDiscardPaidTranslation
     source.setHold(true);dialog.findChild<QPushButton *>("lyricsStart")->click();QTRY_VERIFY(source.heldCount()>0);QCOMPARE(paid.requestCount(),0);
     clickConsentAndStart(dialog);auto *save=dialog.findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
     const auto preview=dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText();QVERIFY(!preview.isEmpty());
+    const auto revision=search->candidates(track.id).revision;
+    QVERIFY(source.releaseHeld());QTRY_VERIFY(search->candidates(track.id).revision>revision);
+    QCOMPARE(paid.requestCount(),1);QVERIFY(save->isEnabled());QVERIFY(search->summary().running);
+    dialog.findChild<QPushButton *>("lyricsStop")->click();QTRY_COMPARE(finished.size(),3);
+    QVERIFY(!search->summary().running);const auto stoppedRevision=search->candidates(track.id).revision;
     source.setHold(false);while(source.releaseHeld()){}
-    QTRY_COMPARE(finished.size(),3);QCOMPARE(paid.requestCount(),1);QVERIFY(save->isEnabled());
+    QCoreApplication::processEvents();QCOMPARE(search->candidates(track.id).revision,stoppedRevision);
+    QCOMPARE(paid.requestCount(),1);QVERIFY(save->isEnabled());
     QCOMPARE(dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText(),preview);
     dialog.findChild<QCheckBox *>("lyricsSyncedOnly")->setChecked(true);
     dialog.findChild<QPushButton *>("lyricsRefreshTranslationFilter")->click();
-    dialog.findChild<QPushButton *>("lyricsStop")->click();QCoreApplication::processEvents();
+    QCoreApplication::processEvents();
     QCOMPARE(paid.requestCount(),1);QVERIFY(save->isEnabled());
     QByteArray bytes;QVERIFY(readFile(library.absolute(library.track(track.id).lyrics),&bytes));QCOMPARE(bytes,original);
     save->click();QTRY_VERIFY(!save->isEnabled());QCOMPARE(paid.requestCount(),1);
