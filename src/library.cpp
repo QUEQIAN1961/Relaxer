@@ -17,6 +17,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUuid>
+#include <QThread>
 namespace relaxer {
 Library::Library(QString root, QObject *p)
     : QObject(p), m_root(QDir(root).absolutePath()), m_connection(QUuid::createUuid().toString()) {}
@@ -413,7 +414,8 @@ bool Library::remove(const QVector<qint64> &ids) {
     if (!m_db.transaction())
         return false;
     for (auto id : ids)
-        if (!exec("DELETE FROM tracks WHERE id=?", {id})) {
+        if (!exec("DELETE FROM tracks WHERE id=?", {id}) ||
+            !exec("DELETE FROM settings WHERE key=?", {QString("lyrics.translationJudgment.v1.%1").arg(id)})) {
             m_db.rollback();
             return false;
         }
@@ -454,7 +456,7 @@ bool Library::removeManaged(const QVector<qint64> &ids){
     for(const auto &file:files){const QString staging=QFileInfo(file).absolutePath()+"/.relaxer-delete-"+QUuid::createUuid().toString(QUuid::WithoutBraces)+"-"+QFileInfo(file).fileName();
         if(!QFile::rename(file,staging)){m_error="无法删除音乐副本，文件可能正在被其他程序使用";undo();return false;}staged<<qMakePair(file,staging);
     }
-    for(auto id:selected)if(!exec("DELETE FROM tracks WHERE id=?",{id})){undo();return false;}
+    for(auto id:selected)if(!exec("DELETE FROM tracks WHERE id=?",{id})||!exec("DELETE FROM settings WHERE key=?",{QString("lyrics.translationJudgment.v1.%1").arg(id)})){undo();return false;}
     if(!m_db.commit()){m_error=m_db.lastError().text();undo();return false;}
     for(const auto &pair:staged)if(!QFile::remove(pair.second))m_error="歌曲已从资料库删除，但部分副本暂时未能清理";
     notifyChanged();return true;
@@ -611,6 +613,26 @@ QJsonValue Library::setting(const QString &k, const QJsonValue &def) const {
         return def;
     auto doc = QJsonDocument::fromJson(q.value(0).toByteArray());
     return doc.isArray() && !doc.array().isEmpty() ? doc.array()[0] : def;
+}
+TranslationJudgment Library::translationJudgment(qint64 id) const {
+    if(QThread::currentThread()!=thread() || id<=0)return TranslationJudgment::Unknown;
+    const auto current=track(id);if(!current.id)return TranslationJudgment::Unknown;
+    const auto record=setting(QString("lyrics.translationJudgment.v1.%1").arg(id)).toObject();
+    if(record.value("trackHash").toString()!=current.hash)return TranslationJudgment::Unknown;
+    const auto state=record.value("state").toString();
+    if(state=="needs")return TranslationJudgment::NeedsTranslation;
+    if(state=="not-needed")return TranslationJudgment::NoTranslationNeeded;
+    return TranslationJudgment::Unknown;
+}
+bool Library::setTranslationJudgment(qint64 id,TranslationJudgment judgment) {
+    if(QThread::currentThread()!=thread() || id<=0){m_error="翻译分类所属歌曲无效或存储线程错误";return false;}
+    const auto current=track(id);
+    if(!current.id || current.hash.isEmpty()){m_error="翻译分类所属歌曲不存在";return false;}
+    if(judgment!=TranslationJudgment::Unknown && judgment!=TranslationJudgment::NeedsTranslation && judgment!=TranslationJudgment::NoTranslationNeeded){m_error="未知的翻译分类";return false;}
+    const auto key=QString("lyrics.translationJudgment.v1.%1").arg(id);
+    const bool ok=judgment==TranslationJudgment::Unknown?exec("DELETE FROM settings WHERE key=?",{key}):
+        setSetting(key,QJsonObject{{"trackHash",current.hash},{"state",judgment==TranslationJudgment::NeedsTranslation?"needs":"not-needed"}});
+    if(ok)notifyChanged();return ok;
 }
 bool Library::setSetting(const QString &k, const QJsonValue &v) {
     return exec(

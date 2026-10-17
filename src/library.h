@@ -6,6 +6,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 namespace relaxer {
+enum class TranslationJudgment { Unknown, NeedsTranslation, NoTranslationNeeded };
 struct LookupCache { bool fresh=false, noResult=false; QJsonArray records; };
 // Snapshot only the lyric files about to be replaced, never the music library.
 struct LyricFileSnapshot {
@@ -64,6 +65,8 @@ class Library : public QObject {
     bool setLyricOffset(qint64 id,int milliseconds);
     bool isInstrumental(qint64 id) const;
     bool markInstrumental(qint64 id);
+    TranslationJudgment translationJudgment(qint64 id) const;
+    bool setTranslationJudgment(qint64 id, TranslationJudgment judgment);
     QJsonValue setting(const QString &key, const QJsonValue &fallback = {}) const;
     bool setSetting(const QString &key, const QJsonValue &value);
     bool setSettings(const QJsonObject &values);
