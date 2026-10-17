@@ -22,6 +22,7 @@
 namespace relaxer {
 Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     : QObject(p), m_library(l), m_output(this), m_player(this), m_decodeOnly(decodeOnly) {
+    m_midiBackend = std::make_unique<MidiTransport>(l->root());
     // Headless self-tests must not initialize an arbitrary physical audio driver.
     // Real application launches do not set this variable and keep normal audio.
     if (!qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS") &&
@@ -204,9 +205,7 @@ void Playback::toggle() {
     if (playing()) {
         sample();
         if (m_midi) {
-#ifdef Q_OS_WIN
-            mciSendStringW(L"pause relaxer_midi", nullptr, 0, nullptr);
-#endif
+            if (!m_midiBackend->pause()) { onError(m_midiBackend->error()); return; }
             m_midiPlaying = false;
             emit stateChanged();
         } else
@@ -220,9 +219,7 @@ void Playback::toggle() {
         if (!m_decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))
             m_player.setAudioOutput(&m_output);
         if (m_midi) {
-#ifdef Q_OS_WIN
-            mciSendStringW(L"play relaxer_midi", nullptr, 0, nullptr);
-#endif
+            if (!m_midiBackend->play()) { onError(m_midiBackend->error()); return; }
             m_midiPlaying = true;
             m_lastPosition = position();
             m_lastWall = m_elapsed.elapsed();
@@ -273,14 +270,9 @@ void Playback::seek(qint64 pos) {
         m_session.sought = true;
         m_library->saveSession(m_session, 0, m_threshold);
         pos = qBound<qint64>(0, pos, qMax<qint64>(0, m_midiDuration - 1));
-#ifdef Q_OS_WIN
-        const auto command = QString("seek relaxer_midi to %1").arg(pos).toStdWString();
-        mciSendStringW(command.c_str(), nullptr, 0, nullptr);
-        if (resume)
-            mciSendStringW(L"play relaxer_midi", nullptr, 0, nullptr);
-#else
-        Q_UNUSED(resume);
-#endif
+        if (!m_midiBackend->seek(pos) || (resume && !m_midiBackend->play())) {
+            onError(m_midiBackend->error()); return;
+        }
         m_lastPosition = pos;
         m_lastWall = m_elapsed.elapsed();
         emit positionChanged(pos, m_midiDuration);
@@ -414,12 +406,7 @@ void Playback::onError(const QString &text) {
 qint64 Playback::position() const {
     if (!m_midi)
         return m_player.position();
-#ifdef Q_OS_WIN
-    wchar_t buffer[64] = {};
-    if (mciSendStringW(L"status relaxer_midi position", buffer, 64, nullptr) == 0)
-        return QString::fromWCharArray(buffer).toLongLong();
-#endif
-    return m_lastPosition;
+    return m_midiBackend->position();
 }
 qint64 Playback::duration() const { return m_midi ? m_midiDuration : m_player.duration(); }
 bool Playback::playing() const {
@@ -448,12 +435,7 @@ void Playback::haltTransport() {
     m_player.stop();
 }
 void Playback::stopMidi() {
-#ifdef Q_OS_WIN
-    if (m_midi) {
-        mciSendStringW(L"stop relaxer_midi", nullptr, 0, nullptr);
-        mciSendStringW(L"close relaxer_midi", nullptr, 0, nullptr);
-    }
-#endif
+    m_midiBackend->close();
     m_midi = false;
     m_midiPlaying = false;
 }
@@ -468,30 +450,26 @@ bool Playback::startMidi(const QString &path, bool autoplay) {
     onError("MIDI 需要在 Windows 上使用系统合成器播放。");
     return false;
 #else
-    const auto open =
-        QString("open \"%1\" type sequencer alias relaxer_midi").arg(QDir::toNativeSeparators(path)).toStdWString();
-    if (mciSendStringW(open.c_str(), nullptr, 0, nullptr) != 0) {
+    if (!m_midiBackend->open(path)) {
         m_loading = false;
-        onError("无法打开 MIDI：" + QFileInfo(path).fileName());
+        onError(m_midiBackend->error());
         return false;
     }
-    mciSendStringW(L"set relaxer_midi time format milliseconds", nullptr, 0, nullptr);
-    wchar_t buffer[64] = {};
-    mciSendStringW(L"status relaxer_midi length", buffer, 64, nullptr);
-    m_midiDuration = QString::fromWCharArray(buffer).toLongLong();
+    m_midiDuration = m_midiBackend->duration();
+    m_session.duration = m_midiDuration;
+    m_library->saveSession(m_session, 0, m_threshold);
     m_midi = true;
     m_loading = false;
     qint64 start = 0;
     if (m_restorePosition >= 0) {
         start = qBound<qint64>(0, m_restorePosition, qMax<qint64>(0, m_midiDuration - 1));
         m_restorePosition = -1;
-        const auto seek = QString("seek relaxer_midi to %1").arg(start).toStdWString();
-        mciSendStringW(seek.c_str(), nullptr, 0, nullptr);
+        if (!m_midiBackend->seek(start)) { onError(m_midiBackend->error()); return false; }
     }
     m_lastPosition = start;
     m_lastWall = m_elapsed.elapsed();
     if (autoplay) {
-        mciSendStringW(L"play relaxer_midi", nullptr, 0, nullptr);
+        if (!m_midiBackend->play()) { onError(m_midiBackend->error()); return false; }
         m_midiPlaying = true;
     }
     emit positionChanged(start, m_midiDuration);

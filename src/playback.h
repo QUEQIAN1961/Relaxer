@@ -1,6 +1,7 @@
 #pragma once
 #include "domain/queue.h"
 #include "library.h"
+#include "midi-transport.h"
 #include <QAudioOutput>
 #include <QElapsedTimer>
 #include <QMediaPlayer>
@@ -61,6 +62,7 @@ class Playback : public QObject {
     bool m_loading = false, m_autoStart = false, m_wasPlaying = false, m_decodeOnly = false;
     QSet<qint64> m_failed;
     bool m_midi = false, m_midiPlaying = false;
+    std::unique_ptr<MidiTransport> m_midiBackend;
     qint64 m_midiDuration = 0;
     int m_playGeneration = 0;
     QPointer<QProcess> m_transcode;

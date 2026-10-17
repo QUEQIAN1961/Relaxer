@@ -1,4 +1,5 @@
 #include "importer.h"
+#include "midi-transport.h"
 #include "lyric-text.h"
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -347,6 +348,9 @@ ImportResult Importer::importOne(const QString &root, const QString &source, std
         }
     }
     // Artwork is optional; decoding is bounded and never blocks the UI thread.
+    if (midi) MidiTransport::diagnostic(root, {{"operation","import"},{"originalPath",fi.absoluteFilePath()},
+        {"managedPath",dest},{"exists",QFileInfo::exists(dest)},{"bytes",double(QFileInfo(dest).size())},
+        {"sha256",r.track.hash}});
     if (!stop()) {
         const auto artwork = readArtwork(root, fi.absoluteFilePath(), r.track.hash, json, true,cancel);
         r.track.cover = artwork.cover;

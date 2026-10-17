@@ -127,7 +127,7 @@ if(RELAXER_LYRICS_DOCUMENT_ONLY)
 endif()
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Sql Multimedia Test)
-add_library(relaxer_core src/library.cpp src/storage/settings-store.cpp src/storage/appearance-store.cpp src/appearance-image.cpp src/importer.cpp src/import-coordinator.cpp src/lyrics.cpp src/lyrics-document-reader.cpp src/lyric-text.cpp src/playback.cpp)
+add_library(relaxer_core src/library.cpp src/storage/settings-store.cpp src/storage/appearance-store.cpp src/appearance-image.cpp src/importer.cpp src/import-coordinator.cpp src/lyrics.cpp src/lyrics-document-reader.cpp src/lyric-text.cpp src/playback.cpp src/midi-transport.cpp)
 target_include_directories(relaxer_core PUBLIC src)
 target_link_libraries(relaxer_core PUBLIC relaxer_domain Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia)
 if(WIN32)
@@ -284,6 +284,13 @@ if(RELAXER_LYRICS_SEARCH_ONLY)
 endif()
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Svg Network)
+if(WIN32)
+  add_executable(relaxer_midi_tests tests/midi-tests.cpp)
+  target_link_libraries(relaxer_midi_tests PRIVATE relaxer_core Qt6::Test)
+  relaxer_add_qt_test(relaxer_midi relaxer_midi_tests)
+  add_executable(relaxer_midi_runtime_probe tests/midi-runtime-probe.cpp)
+  target_link_libraries(relaxer_midi_runtime_probe PRIVATE relaxer_playback_facade)
+endif()
 set(RELAXER_UI src/ai/ai-settings-page.cpp src/ai/ai-settings-page.h src/chrome.cpp src/playlist-ui.cpp src/motion.cpp src/nextqueue.cpp src/v14widgets.cpp src/lyricslookup.cpp src/lyric-tools.cpp src/smooth-scroll.cpp src/window.cpp src/widgets.cpp src/appearance.cpp src/shortcuts.cpp src/changelog.cpp resources/resources.qrc)
 # The application and GUI tests share one compiled UI library. Resources are
 # explicitly initialized from window.cpp so static linking retains the RCC unit.
