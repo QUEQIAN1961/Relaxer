@@ -48,6 +48,24 @@ class Phase03Tests:public QObject {
         return {{"trackName",title},{"artistName",artist},{"albumName","测试专辑"},{"duration",seconds},{"syncedLyrics",synced},{"plainLyrics",plain}};
     }
 private slots:
+    void selectedCandidateIdentitySurvivesLateReordering(){
+        QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());const auto t=seed(l,"Selection stable","stable-id","Original artist");
+        Phase03Server server;QVERIFY(server.listen(QHostAddress::LocalHost));server.hold=true;
+        LyricsLookup dialog(&l,{t.id},nullptr,server.endpoint());dialog.show();auto *tracks=dialog.findChild<QListWidget *>("lyricsTracks");
+        tracks->setCurrentRow(0);relaxerClickSearch(&dialog);QTRY_VERIFY(server.held.size()>=3);
+        QPointer<QTcpSocket> firstSearch;for(const auto &socket:server.held)if(socket&&socket->property("buffer").toByteArray().contains("/search")){firstSearch=socket;break;}
+        QVERIFY(firstSearch);auto a=record(t.title,"Other A",30,"A1","A2"),b=record(t.title,"Other B",40,"B1","B2");a["id"]=1;b["id"]=2;
+        Phase03Server::send(firstSearch,200,QJsonDocument(QJsonArray{a,b}).toJson());server.held.removeAll(firstSearch);
+        auto *versions=dialog.findChild<QListWidget *>("lyricsVersions");QTRY_COMPARE(versions->count(),2);versions->setCurrentRow(1);
+        const auto selected=versions->currentItem()->data(Qt::UserRole+5).toString();QVERIFY(!selected.isEmpty());
+        auto better=record(t.title,t.artist,10,"New1","New2");better["id"]=3;better["manualOnly"]=true;
+        const auto held=server.held;server.held.clear();server.hold=false;
+        server.reply=[](const QUrl &u){return qMakePair(u.path().endsWith("/get")?404:200,u.path().endsWith("/get")?QByteArray("{}"):QByteArray("[]"));};
+        for(const auto &socket:held)if(socket){const bool search=socket->property("buffer").toByteArray().contains("/search");Phase03Server::send(socket,search?200:404,search?QJsonDocument(QJsonArray{better}).toJson():QByteArray("{}"));}
+        QTRY_COMPARE(versions->count(),3);QCOMPARE(versions->currentItem()->data(Qt::UserRole+5).toString(),selected);
+        QTRY_VERIFY(dialog.findChild<QPushButton *>("lyricsStart")->isEnabled());QCOMPARE(versions->currentItem()->data(Qt::UserRole+5).toString(),selected);
+        QVERIFY(l.track(t.id).lyrics.isEmpty());dialog.close();
+    }
     void initTestCase(){qApp->setStyle("Fusion");}
     void rankMatchesComparatorAndCountsEachCandidateOnce(){
         Track query;query.title="夜曲";query.artist="周杰伦";query.album="十一月的萧邦";query.duration=220000;
