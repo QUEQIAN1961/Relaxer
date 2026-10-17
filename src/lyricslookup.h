@@ -61,6 +61,11 @@ private:
     QLabel *m_status,*m_candidateTitle,*m_instrumentHint;
     QPushButton *m_start,*m_stop,*m_apply,*m_incomplete=nullptr,*m_manualSearch,*m_mark,*m_continue,*m_translate=nullptr,*m_aiSaveTranslation=nullptr,*m_aiCancelTranslation=nullptr;
     QLineEdit *m_searchTitle,*m_searchArtist,*m_fragment;QCheckBox *m_replace,*m_syncedOnly,*m_missingOnly=nullptr,*m_missingTranslationOnly=nullptr;
+    QLabel *m_classificationSummary=nullptr;
+    QPushButton *m_noTranslation=nullptr,*m_needsTranslation=nullptr,*m_findLyrics=nullptr;
+    QWidget *m_lyricsSourcePanel=nullptr;
+    void changeTranslationJudgment(TranslationJudgment requested);
+    void updateTranslationWorkflow();
     QLabel *m_emptyHint=nullptr;
     QPushButton *m_refreshTranslationFilter=nullptr;
     friend class LyricsLookupDiagnostics;

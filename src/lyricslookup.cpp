@@ -69,6 +69,7 @@ enum RowState { Waiting, Searching, Complete, NeedsChoice, Failed };
 constexpr int StateRole = Qt::UserRole + 1;
 constexpr int StatusRole = Qt::UserRole + 2;
 constexpr int TranslationFilterRole = Qt::UserRole + 4;
+constexpr int TranslationCompletionRole = Qt::UserRole + 6;
 class LookupRowDelegate : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
@@ -82,7 +83,7 @@ public:
         if(selected){auto fill=accent;fill.setAlpha(24);p->setPen(Qt::NoPen);p->setBrush(fill);p->drawRoundedRect(QRectF(option.rect).adjusted(2,2,-2,-2),8,8);}
         else if(option.state & QStyle::State_MouseOver){auto fill=ink;fill.setAlpha(9);p->fillRect(option.rect,fill);}
         const auto translationStatus=index.data(TranslationFilterRole).toString();
-        const int state=translationStatus.isEmpty()?index.data(StateRole).toInt():NeedsChoice;
+        const int state=translationStatus.isEmpty()?index.data(StateRole).toInt():(index.data(TranslationCompletionRole).toBool()?Complete:Waiting);
         const bool multi=parent()->property("lookupMultiSelect").toBool();const int extra=multi?24:0;
         if(multi){const QRectF box(option.rect.left()+8,option.rect.center().y()-7,14,14);p->setPen(QPen(selected?accent:ink,1));p->setBrush(selected?accent:Qt::transparent);p->drawRoundedRect(box,3,3);if(selected){p->setPen(QPen(option.palette.color(QPalette::HighlightedText),1.5));QPainterPath tick;tick.moveTo(box.topLeft()+QPointF(3,7));tick.lineTo(box.topLeft()+QPointF(6,10));tick.lineTo(box.topLeft()+QPointF(11,4));p->drawPath(tick);}}
         const QPointF center(option.rect.left()+17+extra,option.rect.center().y());
@@ -210,16 +211,28 @@ LyricsLookup::LyricsLookup(Library *library,QVector<qint64> ids,QWidget *parent,
     m_translationAuditDebounce=new QTimer(this);m_translationAuditDebounce->setSingleShot(true);m_translationAuditDebounce->setInterval(180);
     connect(m_translationAuditDebounce,&QTimer::timeout,this,&LyricsLookup::startTranslationCacheAudit);
     auto *right=new QWidget(splitter);auto *rightLayout=new QVBoxLayout(right);rightLayout->setContentsMargins(8,0,0,0);rightLayout->setSpacing(10);
-    auto *search=new QHBoxLayout;m_searchTitle=new QLineEdit(right);m_searchTitle->setObjectName("lyricsSearchTitle");m_searchTitle->setPlaceholderText("搜索歌名");m_searchArtist=new QLineEdit(right);m_searchArtist->setObjectName("lyricsSearchArtist");m_searchArtist->setPlaceholderText("歌手（可留空）");m_manualSearch=new QPushButton("手动搜索",right);m_manualSearch->setObjectName("lyricsManualSearch");m_moreButton=new QPushButton("更多操作 ⌄",right);m_moreButton->setObjectName("lyricsMore");m_moreButton->setCheckable(true);search->addWidget(m_searchTitle,3);search->addWidget(m_searchArtist,2);search->addWidget(m_manualSearch);search->addWidget(m_moreButton);rightLayout->addLayout(search);
+    auto *classification=new QFrame(right);classification->setObjectName("lyricsClassificationPanel");
+    auto *classificationLayout=new QVBoxLayout(classification);classificationLayout->setContentsMargins(10,8,10,8);
+    m_classificationSummary=new QLabel(classification);m_classificationSummary->setObjectName("lyricsClassificationSummary");m_classificationSummary->setWordWrap(true);classificationLayout->addWidget(m_classificationSummary);
+    auto *judgments=new QHBoxLayout;
+    m_noTranslation=new QPushButton("无需翻译",classification);m_noTranslation->setObjectName("lyricsNoTranslationNeeded");m_noTranslation->setCheckable(true);
+    m_needsTranslation=new QPushButton("需要翻译",classification);m_needsTranslation->setObjectName("lyricsNeedsTranslation");m_needsTranslation->setCheckable(true);
+    m_findLyrics=new QPushButton("查找 / 更换歌词",classification);m_findLyrics->setObjectName("lyricsFindOrReplace");m_findLyrics->setCheckable(true);
+    judgments->addWidget(m_noTranslation);judgments->addWidget(m_needsTranslation);judgments->addStretch();judgments->addWidget(m_findLyrics);classificationLayout->addLayout(judgments);rightLayout->addWidget(classification);
+    connect(m_noTranslation,&QPushButton::clicked,this,[this]{changeTranslationJudgment(TranslationJudgment::NoTranslationNeeded);});
+    connect(m_needsTranslation,&QPushButton::clicked,this,[this]{changeTranslationJudgment(TranslationJudgment::NeedsTranslation);});
+    connect(m_findLyrics,&QPushButton::toggled,this,[this]{updateTranslationWorkflow();updatePreview();});
+    m_lyricsSourcePanel=new QWidget(right);m_lyricsSourcePanel->setObjectName("lyricsSourcePanel");auto *sourceLayout=new QVBoxLayout(m_lyricsSourcePanel);sourceLayout->setContentsMargins(0,0,0,0);sourceLayout->setSpacing(8);rightLayout->addWidget(m_lyricsSourcePanel);
+    auto *search=new QHBoxLayout;m_searchTitle=new QLineEdit(right);m_searchTitle->setObjectName("lyricsSearchTitle");m_searchTitle->setPlaceholderText("搜索歌名");m_searchArtist=new QLineEdit(right);m_searchArtist->setObjectName("lyricsSearchArtist");m_searchArtist->setPlaceholderText("歌手（可留空）");m_manualSearch=new QPushButton("手动搜索",right);m_manualSearch->setObjectName("lyricsManualSearch");m_moreButton=new QPushButton("更多操作 ⌄",right);m_moreButton->setObjectName("lyricsMore");m_moreButton->setCheckable(true);search->addWidget(m_searchTitle,3);search->addWidget(m_searchArtist,2);search->addWidget(m_manualSearch);search->addWidget(m_moreButton);sourceLayout->addLayout(search);
     m_morePanel=new QWidget(right);m_morePanel->setObjectName("lyricsMorePanel");m_morePanel->hide();auto *options=new QVBoxLayout(m_morePanel);options->setContentsMargins(0,0,0,0);options->setSpacing(8);
     auto *fragmentRow=new QHBoxLayout;m_fragment=new QLineEdit(m_morePanel);m_fragment->setObjectName("lyricsSearchFragment");m_fragment->setPlaceholderText("记得的歌词片段（用于手动搜索）");m_pasteButton=new QPushButton("粘贴歌词",m_morePanel);m_pasteButton->setObjectName("lyricsPaste");m_pasteButton->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);fragmentRow->addWidget(m_fragment,1);fragmentRow->addWidget(m_pasteButton);options->addLayout(fragmentRow);
     auto *offsetRow=new QHBoxLayout;offsetRow->setSpacing(8);m_offset=new QSpinBox(m_morePanel);m_offset->setObjectName("lyricsOffset");m_offset->setRange(-5000,5000);m_offset->setSingleStep(100);m_offset->setSuffix(" ms");m_offset->setFixedWidth(110);m_offset->setToolTip("设置歌词文件的绝对偏移；0 保留原文件偏移，正数整体延后。批量操作仅处理已经保存的滚动歌词。");
-    offsetRow->addWidget(new QLabel("保存时间偏移",m_morePanel));offsetRow->addWidget(m_offset);m_saveOffset=new QPushButton("保存",m_morePanel);m_saveOffset->setObjectName("lyricsSaveOffset");m_importButton=new QPushButton("导入 .lrc",m_morePanel);m_importButton->setObjectName("lyricsImport");m_mark=new QPushButton("标记为纯音乐",m_morePanel);m_mark->setObjectName("lyricsMarkInstrumental");for(auto *button:{m_saveOffset,m_importButton,m_mark}){button->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);offsetRow->addWidget(button);}offsetRow->addStretch();options->addLayout(offsetRow);rightLayout->addWidget(m_morePanel);
+    offsetRow->addWidget(new QLabel("保存时间偏移",m_morePanel));offsetRow->addWidget(m_offset);m_saveOffset=new QPushButton("保存",m_morePanel);m_saveOffset->setObjectName("lyricsSaveOffset");m_importButton=new QPushButton("导入 .lrc",m_morePanel);m_importButton->setObjectName("lyricsImport");m_mark=new QPushButton("标记为纯音乐",m_morePanel);m_mark->setObjectName("lyricsMarkInstrumental");for(auto *button:{m_saveOffset,m_importButton,m_mark}){button->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);offsetRow->addWidget(button);}offsetRow->addStretch();options->addLayout(offsetRow);sourceLayout->addWidget(m_morePanel);
     connect(m_moreButton,&QPushButton::toggled,this,[this](bool on){m_morePanel->setVisible(m_multi||on);m_moreButton->setText(on?"更多操作 ⌃":"更多操作 ⌄");});connect(m_pasteButton,&QPushButton::clicked,this,&LyricsLookup::pasteLyrics);connect(m_importButton,&QPushButton::clicked,this,&LyricsLookup::importLyrics);connect(m_mark,&QPushButton::clicked,this,&LyricsLookup::markInstrumental);connect(m_saveOffset,&QPushButton::clicked,this,&LyricsLookup::saveOffsets);
     connect(m_multiButton,&QPushButton::toggled,this,&LyricsLookup::setMultiSelect);connect(m_allButton,&QPushButton::clicked,this,[this]{int visible=0,selected=0;for(int r=0;r<m_tracks->count();++r)if(!m_tracks->item(r)->isHidden()){++visible;if(m_tracks->item(r)->isSelected())++selected;}const bool on=visible!=selected;for(int r=0;r<m_tracks->count();++r)if(!m_tracks->item(r)->isHidden())m_tracks->item(r)->setSelected(on);controls();});
-    auto *filters=new QHBoxLayout;m_sourceFilter=new RoundedComboBox(right);m_sourceFilter->setObjectName("lyricsSourceFilter");m_sourceFilter->addItem("全部来源");for(const auto &s:m_search->sources())m_sourceFilter->addItem(s.label);m_syncedOnly=new QCheckBox("只看滚动歌词",right);m_syncedOnly->setObjectName("lyricsSyncedOnly");filters->addWidget(m_sourceFilter);filters->addWidget(m_syncedOnly);filters->addStretch();rightLayout->addLayout(filters);
+    auto *filters=new QHBoxLayout;m_sourceFilter=new RoundedComboBox(right);m_sourceFilter->setObjectName("lyricsSourceFilter");m_sourceFilter->addItem("全部来源");for(const auto &s:m_search->sources())m_sourceFilter->addItem(s.label);m_syncedOnly=new QCheckBox("只看滚动歌词",right);m_syncedOnly->setObjectName("lyricsSyncedOnly");filters->addWidget(m_sourceFilter);filters->addWidget(m_syncedOnly);filters->addStretch();sourceLayout->addLayout(filters);
     connect(m_sourceFilter,&QComboBox::currentIndexChanged,this,[this](int index){if(index>0&&m_search->sources()[index-1].kind==1)m_syncedOnly->setChecked(false);rebuildCandidates();});connect(m_syncedOnly,&QCheckBox::toggled,this,&LyricsLookup::rebuildCandidates);
-    auto *instrumentRow=new QHBoxLayout;m_instrumentHint=new QLabel(right);m_instrumentHint->setWordWrap(true);m_continue=new QPushButton("继续查找歌词",right);m_continue->setObjectName("lyricsContinueSearch");auto *confirm=new QPushButton("确认为纯音乐",right);confirm->setObjectName("lyricsConfirmInstrumental");m_instrumentHint->hide();m_continue->hide();confirm->hide();instrumentRow->addWidget(m_instrumentHint,1);instrumentRow->addWidget(confirm);instrumentRow->addWidget(m_continue);rightLayout->addLayout(instrumentRow);connect(confirm,&QPushButton::clicked,this,&LyricsLookup::markInstrumental);connect(m_continue,&QPushButton::clicked,this,&LyricsLookup::manualSearch);
+    auto *instrumentRow=new QHBoxLayout;m_instrumentHint=new QLabel(right);m_instrumentHint->setWordWrap(true);m_continue=new QPushButton("继续查找歌词",right);m_continue->setObjectName("lyricsContinueSearch");auto *confirm=new QPushButton("确认为纯音乐",right);confirm->setObjectName("lyricsConfirmInstrumental");m_instrumentHint->hide();m_continue->hide();confirm->hide();instrumentRow->addWidget(m_instrumentHint,1);instrumentRow->addWidget(confirm);instrumentRow->addWidget(m_continue);sourceLayout->addLayout(instrumentRow);connect(confirm,&QPushButton::clicked,this,&LyricsLookup::markInstrumental);connect(m_continue,&QPushButton::clicked,this,&LyricsLookup::manualSearch);
     auto *panels=new QSplitter(Qt::Vertical,right);panels->setObjectName("lyricsPanels");panels->setChildrenCollapsible(false);
     m_candidatePanel=new QFrame(panels);m_candidatePanel->setObjectName("lyricsCandidatePanel");auto *candidate=new QVBoxLayout(m_candidatePanel);candidate->setContentsMargins(14,14,14,14);candidate->setSpacing(10);
     m_candidateTitle=new QLabel(m_candidatePanel);m_candidateTitle->setObjectName("lyricsCandidateTitle");m_candidateTitle->setWordWrap(true);candidate->addWidget(m_candidateTitle);
@@ -238,7 +251,7 @@ LyricsLookup::LyricsLookup(Library *library,QVector<qint64> ids,QWidget *parent,
     connect(m_preview->verticalScrollBar(),&QScrollBar::valueChanged,m_translationPreview->verticalScrollBar(),&QScrollBar::setValue);
     connect(m_translationPreview->verticalScrollBar(),&QScrollBar::valueChanged,m_preview->verticalScrollBar(),&QScrollBar::setValue);
     panels->setStretchFactor(0,1);panels->setStretchFactor(1,0);panels->setSizes({280,195});rightLayout->addWidget(panels,1);
-    auto *actions=new QHBoxLayout;m_incomplete=new QPushButton("只显示未完成",right);m_incomplete->setObjectName("lyricsIncomplete");m_incomplete->setCheckable(true);actions->addWidget(m_incomplete);actions->addStretch();m_aiSaveTranslation=new QPushButton("保存双语歌词",right);m_aiSaveTranslation->setObjectName("lyricsSaveTranslation");m_aiSaveTranslation->setEnabled(false);actions->addWidget(m_aiSaveTranslation);m_apply=new QPushButton("使用选中版本",right);m_apply->setObjectName("lyricsApply");m_apply->setEnabled(false);actions->addWidget(m_apply);auto *close=new QPushButton("保存并关闭",right);close->setObjectName("lyricsSaveClose");actions->addWidget(close);rightLayout->addLayout(actions);
+    auto *actions=new QHBoxLayout;m_incomplete=new QPushButton("只显示未完成",right);m_incomplete->setObjectName("lyricsIncomplete");m_incomplete->setCheckable(true);actions->addWidget(m_incomplete);actions->addStretch();m_aiSaveTranslation=new QPushButton("保存 AI 翻译",right);m_aiSaveTranslation->setObjectName("lyricsSaveTranslation");m_aiSaveTranslation->setEnabled(false);actions->addWidget(m_aiSaveTranslation);m_apply=new QPushButton("使用选中版本",right);m_apply->setObjectName("lyricsApply");m_apply->setEnabled(false);actions->addWidget(m_apply);auto *close=new QPushButton("关闭",right);close->setObjectName("lyricsSaveClose");actions->addWidget(close);rightLayout->addLayout(actions);
     m_translationProgressPanel=new QWidget(right);m_translationProgressPanel->setObjectName("lyricsTranslationProgressPanel");m_translationProgressPanel->setSizePolicy(QSizePolicy::Maximum,QSizePolicy::Fixed);
     auto *translationLayout=new QHBoxLayout(m_translationProgressPanel);translationLayout->setContentsMargins(0,2,0,0);translationLayout->setSpacing(6);
     m_translationProgressLabel=new QLabel("翻译尚未开始",m_translationProgressPanel);m_translationProgressLabel->setObjectName("lyricsTranslationProgressLabel");m_translationProgressLabel->setAlignment(Qt::AlignLeft|Qt::AlignVCenter);
@@ -252,6 +265,7 @@ LyricsLookup::LyricsLookup(Library *library,QVector<qint64> ids,QWidget *parent,
     connect(m_missingOnly,&QCheckBox::toggled,this,[this](bool on){if(on){QSignalBlocker block(m_missingTranslationOnly);m_missingTranslationOnly->setChecked(false);}updateFilter();});
     connect(m_missingTranslationOnly,&QCheckBox::toggled,this,[this](bool on){
         if(on){QSignalBlocker a(m_missingOnly),b(m_incomplete);m_missingOnly->setChecked(false);m_incomplete->setChecked(false);m_incomplete->setText("只显示未完成");}
+        m_findLyrics->setChecked(false);
         if(on&&!m_translationAssessments.isEmpty())requestTranslationCacheAudit();
         updateFilter();
     });
@@ -377,7 +391,7 @@ void LyricsLookup::updatePreview(){
     if(m_multi||row<0||!m_tracks->currentItem()||!m_tracks->currentItem()->isSelected()||m_tracks->currentItem()->isHidden()){setPreviewLyrics({});return;}
     const auto track=m_library->track(trackIdAt(row));ensureLyricsSnapshot(track.id);const auto records=m_search->candidates(track.id).records;
     const int index=m_visibleRecords.value(m_versions->currentRow(),-1);QByteArray data;
-    if(index>=0&&index<records.size())data=replacementContent(track,records[index].toObject()).bytes;
+    if(index>=0&&index<records.size()&&(!m_missingTranslationOnly->isChecked()||m_findLyrics->isChecked()))data=replacementContent(track,records[index].toObject()).bytes;
     else if(!track.lyrics.isEmpty()){
         const auto saved=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));
         if(saved.opened&&saved.complete&&!saved.tooLarge)data=saved.bytes;
@@ -499,6 +513,7 @@ void LyricsLookup::renderAiTranslation(){
         setRowStatus(rowForTrack(value.trackId),value.details);
     }
     setTranslationProgress(value.status,value.details,value.pending()?-1:(value.hasPreview()?1:0));
+    updateFilterRow(rowForTrack(value.trackId));controls();
 }
 void LyricsLookup::saveAiTranslation(){
     const auto value=aiSummary();if(!value.hasPreview())return;
@@ -533,6 +548,42 @@ void LyricsLookup::setMultiSelect(bool on){
     if(on){m_moreWasOpen=m_moreButton->isChecked();m_tracks->setSelectionMode(QAbstractItemView::MultiSelection);m_moreButton->setChecked(true);}else{const auto rows=batchRows();const int current=rows.isEmpty()?m_tracks->currentRow():rows.first();QSignalBlocker block(m_tracks);m_tracks->setSelectionMode(QAbstractItemView::SingleSelection);m_tracks->clearSelection();if(current>=0&&!m_tracks->item(current)->isHidden())m_tracks->setCurrentRow(current);m_moreButton->setChecked(m_moreWasOpen);}
     m_moreButton->setEnabled(!on);m_morePanel->setVisible(on||m_moreButton->isChecked());m_tracks->viewport()->update();selectTrack();controls();
 }
+void LyricsLookup::updateTranslationWorkflow(){
+    if(!m_classificationSummary||!m_lyricsSourcePanel)return;
+    const auto id=trackIdAt(m_tracks->currentRow());const auto track=m_library->track(id);
+    const bool single=!m_multi&&track.id&&m_tracks->currentItem()&&m_tracks->currentItem()->isSelected()&&!m_tracks->currentItem()->isHidden()&&batchRows().size()==1;
+    const auto judgment=m_library->translationJudgment(id);const auto task=aiSummary();
+    const auto assessment=single?translationAssessment(track):ai::lyrics::TranslationAssessment{};
+    {QSignalBlocker a(m_noTranslation),b(m_needsTranslation);m_noTranslation->setChecked(single&&judgment==TranslationJudgment::NoTranslationNeeded);m_needsTranslation->setChecked(single&&judgment==TranslationJudgment::NeedsTranslation);}
+    m_noTranslation->setEnabled(single&&!translationPending()&&!m_aiConsentPending);m_needsTranslation->setEnabled(m_noTranslation->isEnabled());
+    const auto human=judgment==TranslationJudgment::NoTranslationNeeded?QStringLiteral("无需翻译"):judgment==TranslationJudgment::NeedsTranslation?QStringLiteral("需要翻译"):QStringLiteral("待判断");
+    const auto saved=assessment.need==ai::lyrics::TranslationNeed::Translated?QStringLiteral("✓ 翻译完成（已保存双语歌词）"):assessment.reason;
+    QString current=task.trackId==id&&task.hasPreview()?QStringLiteral("翻译未保存，请点击保存 AI 翻译"):task.trackId==id&&task.pending()?QStringLiteral("正在翻译"):judgment==TranslationJudgment::NoTranslationNeeded?QStringLiteral("✓ 无需翻译（人工确认）"):human;
+    m_classificationSummary->setText(single?track.title+" · "+track.artist+"\n人工判断："+human+" · "+current+"\n本地歌词："+saved:QStringLiteral("请选择一首歌曲进行翻译分类；多选仅用于歌词搜索。"));
+    const bool mode=m_missingTranslationOnly&&m_missingTranslationOnly->isChecked();
+    m_findLyrics->setVisible(mode);m_findLyrics->setEnabled(single);
+    const bool sources=!mode||m_findLyrics->isChecked();m_lyricsSourcePanel->setVisible(sources);m_candidatePanel->setVisible(sources);m_apply->setVisible(sources);m_start->setVisible(sources);m_stop->setVisible(sources);
+    if(m_previewPanel)m_previewPanel->setMaximumHeight(mode?QWIDGETSIZE_MAX:240);
+}
+void LyricsLookup::changeTranslationJudgment(TranslationJudgment requested){
+    if(m_translationSwitchConfirmOpen||m_translationCloseConfirmOpen||translationPending()||m_aiConsentPending){updateTranslationWorkflow();return;}
+    const auto id=trackIdAt(m_tracks->currentRow());const auto track=m_library->track(id);
+    if(m_multi||!track.id||batchRows().size()!=1||!m_tracks->currentItem()||!m_tracks->currentItem()->isSelected()){updateTranslationWorkflow();return;}
+    const auto previous=m_library->translationJudgment(id);const auto target=previous==requested?TranslationJudgment::Unknown:requested;
+    const auto task=m_translationTaskId;const bool preview=hasAiPreview();
+    QScopedValueRollback<bool> changing(m_translationSwitchConfirmOpen,true);
+    if(preview){
+        QMessageBox box(this);box.setObjectName("lyricsUnsavedTranslationClassificationConfirm");box.setWindowTitle("未保存的翻译");box.setIcon(QMessageBox::Warning);
+        box.setText("当前 AI 译文尚未保存。改变人工分类将丢弃本次翻译结果，是否继续？");
+        auto *keep=box.addButton("取消",QMessageBox::RejectRole);keep->setObjectName("lyricsKeepClassificationPreview");
+        auto *discard=box.addButton("丢弃译文并更改分类",QMessageBox::AcceptRole);discard->setObjectName("lyricsDiscardClassificationPreview");box.setDefaultButton(keep);box.setEscapeButton(keep);box.exec();
+        if(box.clickedButton()!=discard){updateTranslationWorkflow();return;}
+    }
+    if(trackIdAt(m_tracks->currentRow())!=id||m_library->track(id).hash!=track.hash||(preview&&(!hasAiPreview()||m_translationTaskId!=task))){updateTranslationWorkflow();return;}
+    if(!m_library->setTranslationJudgment(id,target)){m_status->setText("分类未保存："+m_library->lastError());updateTranslationWorkflow();return;}
+    if(preview)clearAiTranslationPreview();
+    updateFilter();controls();m_status->setText(target==TranslationJudgment::Unknown?QStringLiteral("已撤销人工判断；已保存歌词保持不变。"):target==TranslationJudgment::NoTranslationNeeded?QStringLiteral("已保存人工判断：无需翻译。"):QStringLiteral("已保存人工判断：需要翻译。"));
+}
 void LyricsLookup::updateApplyButton(){
     const int row=m_tracks->currentRow(),index=m_visibleRecords.value(m_versions->currentRow(),-1);
     const auto id=trackIdAt(row);const auto track=m_library->track(id);const auto records=m_search->candidates(id).records;
@@ -547,6 +598,7 @@ void LyricsLookup::controls(){
     for(auto *widget:QList<QWidget *>{m_searchTitle,m_searchArtist,m_fragment,m_manualSearch,m_pasteButton,m_importButton,m_sourceFilter,m_syncedOnly})widget->setEnabled(single);
     m_candidatePanel->setEnabled(!m_multi);updateApplyButton();m_continue->setEnabled(single);if(auto *confirm=findChild<QPushButton *>("lyricsConfirmInstrumental"))confirm->setEnabled(single);
     m_mark->setEnabled(chosen);m_offset->setEnabled(chosen);m_saveOffset->setEnabled(chosen);m_allButton->setEnabled(m_multi);
+    updateTranslationWorkflow();
     setProperty("parallelTracks",m_search->summary().trackLimit);setProperty("parallelQueries",m_search->summary().requestLimit);setProperty("selectedLyricsTracks",rows.size());
 }
 
@@ -591,7 +643,7 @@ void LyricsLookup::setRowStatus(int row,const QString &text){
         else if(m_search->candidates(track.id).trackHash==track.hash&&!m_search->candidates(track.id).records.isEmpty())state=NeedsChoice;
     }
     if(state==Waiting&&!m_search->candidates(trackIdAt(row)).records.isEmpty()&&text.startsWith("已停止"))state=NeedsChoice;
-    auto *item=m_tracks->item(row);item->setData(StateRole,state);item->setData(StatusRole,text);item->setToolTip(item->text()+"\n"+text);item->setData(Qt::AccessibleTextRole,item->text()+" · "+text);if((m_incomplete&&m_incomplete->isChecked())||(m_missingTranslationOnly&&m_missingTranslationOnly->isChecked()))updateFilterRow(row);
+    auto *item=m_tracks->item(row);item->setData(StateRole,state);item->setData(StatusRole,text);item->setToolTip(item->text()+"\n"+text);item->setData(Qt::AccessibleTextRole,item->text()+" · "+text);updateFilterRow(row);
 }
 ai::lyrics::TranslationAssessment LyricsLookup::translationAssessment(const Track &track){
     ++m_filterMetrics.assessments;
@@ -713,18 +765,30 @@ bool LyricsLookup::filterRow(int row){
     const bool translationOnly=m_missingTranslationOnly&&m_missingTranslationOnly->isChecked();
     const bool hideMissing=m_missingOnly&&m_missingOnly->isChecked()&&!m_missingAtOpen.contains(id)&&!m_pinnedIds.contains(id);
     const bool hideDone=m_incomplete&&m_incomplete->isChecked()&&rowComplete(item);
-    const auto assessment=translationOnly?translationAssessment(m_library->track(id)):ai::lyrics::TranslationAssessment{};
-    const bool hideTranslation=translationOnly&&!assessment.missing();
-    const auto badge=translationOnly&&assessment.missing()?(assessment.need==ai::lyrics::TranslationNeed::Review?QStringLiteral("待确认"):QStringLiteral("待翻译")):QString();
-    item->setData(TranslationFilterRole,badge);
-    const auto details=item->data(StatusRole).toString()+(translationOnly?QStringLiteral("\n")+(badge.isEmpty()?assessment.reason:badge+QStringLiteral("：")+assessment.reason):QString());
+    const auto track=m_library->track(id);const auto judgment=m_library->translationJudgment(id);
+    const auto assessment=translationAssessment(track);
+    const auto task=aiSummary();const bool owns=id==task.trackId;
+    const bool paidResultPending=owns&&(task.pending()||task.hasPreview());
+    const bool translated=assessment.need==ai::lyrics::TranslationNeed::Translated;
+    const bool completed=!paidResultPending&&(judgment==TranslationJudgment::NoTranslationNeeded||translated);
+    const bool hideTranslation=translationOnly&&(completed||!(judgment==TranslationJudgment::NeedsTranslation||assessment.missing()));
+    QString badge;
+    if(paidResultPending)badge=task.hasPreview()?(task.errorCode=="save"?QStringLiteral("保存失败 · 翻译未保存"):QStringLiteral("翻译未保存")):QStringLiteral("正在翻译");
+    else if(judgment==TranslationJudgment::NoTranslationNeeded)badge=QStringLiteral("无需翻译");
+    else if(translated)badge=QStringLiteral("翻译完成");
+    else if(judgment==TranslationJudgment::NeedsTranslation)badge=QStringLiteral("需要翻译");
+    else if(translationOnly)badge=QStringLiteral("待判断");
+    else if(item->data(StateRole).toInt()==Complete&&!track.lyrics.isEmpty())badge=QStringLiteral("已有原文 · 待判断");
+    item->setData(TranslationFilterRole,badge);item->setData(TranslationCompletionRole,completed);
+    const auto details=item->data(StatusRole).toString()+QStringLiteral("\n")+badge+QStringLiteral("：")+assessment.reason;
     item->setToolTip(item->text()+QStringLiteral("\n")+details);item->setData(Qt::AccessibleTextRole,item->text()+QStringLiteral(" · ")+details);
     const bool ownsTranslation=id==aiTrackId()&&(aiTaskId()||hasAiPreview());
-    item->setHidden(!ownsTranslation&&(hideMissing||hideDone||hideTranslation));
+    item->setHidden(!track.id||(!ownsTranslation&&(hideMissing||hideDone||hideTranslation)));
     if(item->isHidden()&&item->isSelected())item->setSelected(false);
     return !item->isHidden();
 }
 void LyricsLookup::finishFilterUpdate(){
+    updateTranslationWorkflow();
     const bool translationOnly=m_missingTranslationOnly&&m_missingTranslationOnly->isChecked();
     if(m_refreshTranslationFilter)m_refreshTranslationFilter->setEnabled(translationOnly||m_snapshotConflict);
     if(m_emptyHint){m_emptyHint->setText(translationOnly?QStringLiteral("当前没有检测到缺失翻译的歌曲。判断仅基于本地歌词；可点击刷新判断或取消筛选。"):(m_missingOnly&&m_missingOnly->isChecked()?QStringLiteral("当前没有缺失歌词的歌曲，可取消勾选以查看全部歌曲。"):QStringLiteral("当前筛选没有匹配歌曲，可取消筛选查看全部歌曲。")));m_emptyHint->setVisible(!m_filterVisibleCount&&m_tracks->count()>0);}

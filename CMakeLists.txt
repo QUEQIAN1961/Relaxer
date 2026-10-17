@@ -300,6 +300,9 @@ set(RELAXER_UI src/ai/ai-settings-page.cpp src/ai/ai-settings-page.h src/chrome.
 add_library(relaxer_ui STATIC ${RELAXER_UI})
 target_include_directories(relaxer_ui PUBLIC src)
 target_link_libraries(relaxer_ui PUBLIC relaxer_playback_facade relaxer_lyrics_search relaxer_translation relaxer_ai relaxer_core relaxer_services Qt6::Widgets Qt6::Svg Qt6::Network)
+add_executable(relaxer_translation_workflow_tests tests/translation-workflow-tests.cpp)
+target_link_libraries(relaxer_translation_workflow_tests PRIVATE relaxer_ui Qt6::Test)
+relaxer_add_qt_test(relaxer_translation_workflow relaxer_translation_workflow_tests)
 # Phase B integration exercises production services together; service-only
 # configurations above retain their independent dependency boundaries/counts.
 add_executable(relaxer_phase_b_integration_tests tests/phase-b-integration-tests.cpp)
