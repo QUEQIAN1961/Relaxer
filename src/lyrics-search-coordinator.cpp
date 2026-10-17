@@ -83,6 +83,14 @@ bool credibleLyrics(const QByteArray &bytes, const Track &t, QString *reason = n
     return LyricMatchPolicy::rawLyricsAllowed(bytes, reason) &&
            LyricMatchPolicy::credibleLyrics(Lyrics::parse(bytes), t.duration, reason);
 }
+QString collectionKey(const QJsonObject &record) {
+    QJsonObject identity;
+    for (const auto *field : {"source", "id", "sourceRecordId", "trackName", "artistName", "albumName",
+                              "duration", "syncedLyrics", "plainLyrics", "instrumental"})
+        if (record.contains(field))
+            identity.insert(field, record[field]);
+    return LyricsSearchCoordinator::candidateIdentity(identity);
+}
 } // namespace
 QThreadPool *LyricsSearchCoordinator::computePool() {
     return lyricPool();
@@ -246,12 +254,12 @@ void LyricsSearchCoordinator::publishSummary(bool terminal) {
     });
 }
 void LyricsSearchCoordinator::setCandidates(const JobPtr &j, const QJsonArray &records) {
+    if (!records.isEmpty())
+        m_found.insert(j->original.id);
     auto &snapshot = m_candidates[j->original.id];
     if (snapshot.trackHash == j->original.hash && snapshot.records == records)
         return;
     snapshot = {j->original.id, j->original.hash, ++m_candidateRevision, records};
-    if (!records.isEmpty())
-        m_found.insert(j->original.id);
     const auto value = snapshot;
     const quint64 generation = j->generation;
     QTimer::singleShot(0, this, [this, value, generation] { emit candidatesChanged(value, generation); });
@@ -401,8 +409,18 @@ void LyricsSearchCoordinator::cancelTrack(qint64 id) {
     if (j)
         finishJob(j, {}, LyricsSearchState::Cancelled);
     for (int n = m_next; n < m_queue.size(); ++n)
-        if (m_queue[n].original.id == id)
+        if (m_queue[n].original.id == id) {
             m_queue[n].original.id = 0;
+            ++m_summary.finished;
+            ++m_summary.cancelled;
+            LyricsSearchEvent event;
+            event.taskId = ++taskSerial;
+            event.trackId = id;
+            event.generation = m_generation;
+            event.state = LyricsSearchState::Cancelled;
+            event.phase = "cancelled";
+            publishEvent(event, true);
+        }
 }
 QVector<LyricsSearchEvent> LyricsSearchCoordinator::stop() {
     if (QThread::currentThread() != thread())
@@ -815,7 +833,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
     if (m_hostRequests.value(source.endpoint.host()) >= 6) {
         ++j->active;
         QTimer::singleShot(50, this, [this, j, stage, retry] {
-            if (live(j)) {
+            if (live(j) && !j->onlineFinished) {
                 --j->active;
                 request(j, stage, retry);
             }
@@ -826,7 +844,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
         j->clock.start();
         const int budget = m_options.budgetMs;
         QTimer::singleShot(qMax(1, budget), this, [this, j] {
-            if (live(j)) {
+            if (live(j) && !j->onlineFinished) {
                 j->completeResponses = false;
                 j->failures << "搜索预算已用完";
                 finishOnline(j);
@@ -928,7 +946,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
             if (code >= 500 && code <= 599 && retry == 0 && !large && !timeout) {
                 ++j->active;
                 QTimer::singleShot(300, this, [this, j, stage] {
-                    if (live(j)) {
+                    if (live(j) && !j->onlineFinished) {
                         --j->active;
                         const int budget = m_options.budgetMs;
                         if (j->clock.elapsed() < budget)
@@ -978,9 +996,12 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
             auto absorb = [&, this](QJsonArray records) {
                 for (auto v : records) {
                     auto r = v.toObject();
-                    if (a.detailRequest)
+                    if (a.detailRequest) {
                         for (auto field = a.detail.matched.begin(); field != a.detail.matched.end(); ++field)
                             r[field.key()] = field.value();
+                        const QUrlQuery detailQuery(a.detail.step.url);
+                        r["sourceRecordId"] = detailQuery.queryItemValue(source.kind == 3 ? "songmid" : "id");
+                    }
                     if (a.cover) {
                         r["coverMatch"] = true;
                         r["coverTitle"] = a.title;
@@ -989,13 +1010,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
                     if (recordLyrics(r).trimmed().isEmpty() && !r["instrumental"].toBool())
                         continue;
                     r["source"] = source.label;
-                    const auto digest =
-                        QCryptographicHash::hash(recordLyrics(r).toUtf8(), QCryptographicHash::Sha256)
-                            .toHex();
-                    const auto key =
-                        source.label + ":" + QString::number(r["id"].toVariant().toLongLong()) + ":" +
-                        normalized(r["trackName"].toString()) + ":" + normalized(r["artistName"].toString()) +
-                        ":" + QString::number(r["duration"].toDouble()) + ":" + QString::fromLatin1(digest);
+                    const auto key = collectionKey(r);
                     if (j->keys.contains(key))
                         continue;
                     j->keys.insert(key);
@@ -1073,12 +1088,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
                 if (recordLyrics(r).trimmed().isEmpty() && !r["instrumental"].toBool())
                     continue;
                 r["source"] = source.label;
-                const auto digest =
-                    QCryptographicHash::hash(recordLyrics(r).toUtf8(), QCryptographicHash::Sha256).toHex();
-                const auto key =
-                    source.label + ":" + QString::number(r["id"].toVariant().toLongLong()) + ":" +
-                    normalized(r["trackName"].toString()) + ":" + normalized(r["artistName"].toString()) +
-                    ":" + QString::number(r["duration"].toDouble()) + ":" + QString::fromLatin1(digest);
+                const auto key = collectionKey(r);
                 if (j->keys.contains(key))
                     continue;
                 j->keys.insert(key);
@@ -1358,9 +1368,9 @@ void LyricsSearchCoordinator::applyAccept(const JobPtr &j) {
                              : r["syncedLyrics"].toString().isEmpty() ? QString("已保存普通歌词")
                                                                       : QString("已保存滚动歌词")) +
                             suffix + (r["coverMatch"].toBool() ? QString(" · 已匹配原唱") : QString());
+        ++m_summary.automaticAccepted;
         if (store(j->original, data)) {
             ++m_saved;
-            ++m_summary.automaticAccepted;
             j->wantAccept = false;
             finishJob(j, status, LyricsSearchState::Saved);
             return true;

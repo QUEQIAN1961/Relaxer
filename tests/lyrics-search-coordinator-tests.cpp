@@ -132,6 +132,160 @@ void emptyResponse(ControlledReply *reply) {
 class LyricsSearchTests final : public QObject {
     Q_OBJECT
   private slots:
+    void headlessEventTraceAndCompletedNetworkBudget(){
+        QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());const auto t=seed(l);
+        ControlledNetwork net;net.responder=[&](ControlledReply *r){r->respond(200,json({record(t)}));};
+        LyricsSearchCoordinator c(&l,nullptr,QUrl("http://mock.test/api"),{},&net);QSignalSpy events(&c,&LyricsSearchCoordinator::eventOccurred);
+        QSignalSpy done(&c,&LyricsSearchCoordinator::finished);QSignalSpy tasks(&c,&LyricsSearchCoordinator::taskFinished);
+        auto options=shortOptions();options.budgetMs=50;options.scoreDelayMs=100;
+        c.start({input(t,true)},options);QTRY_COMPARE(done.size(),1);QCOMPARE(tasks.size(),1);
+        const auto terminal=qvariant_cast<LyricsSearchEvent>(tasks.first().first());QVERIFY(!terminal.status.contains("预算"));
+        int requests=0;for(const auto &args:events){const auto event=qvariant_cast<LyricsSearchEvent>(args.first());
+            QCOMPARE(event.taskId,terminal.taskId);QCOMPARE(event.generation,terminal.generation);QCOMPARE(event.trackId,t.id);
+            if(event.phase=="request"){++requests;qInfo().noquote()<<QString("TRACE task=%1 generation=%2 track=%3 source=%4 attempt=%5 url=%6").arg(event.taskId).arg(event.generation).arg(event.trackId).arg(event.source).arg(event.attempt).arg(event.url.toString());}
+        }
+        QCOMPARE(requests,net.urls.size());QCOMPARE(c.summary().automaticAccepted,0);QCOMPARE(c.summary().saved,0);
+    }
+    void domesticDetailsRunThroughProductionCoordinator_data() {
+        QTest::addColumn<int>("kind");
+        QTest::newRow("netease") << 2;
+        QTest::newRow("qq") << 3;
+        QTest::newRow("kugou") << 4;
+    }
+    void domesticDetailsRunThroughProductionCoordinator() {
+        QFETCH(int, kind);
+        QTemporaryDir d;
+        Library l(d.filePath("data"));
+        QVERIFY(l.open());
+        const auto t = seed(l);
+        QJsonArray songs;
+        for (int n = 1; n <= 3; ++n) {
+            QJsonObject song;
+            if (kind == 2)
+                song = {{"id", n},
+                        {"name", t.title},
+                        {"duration", 10000},
+                        {"artists", QJsonArray{QJsonObject{{"name", t.artist}}}}};
+            if (kind == 3)
+                song = {{"mid", QString("mid%1").arg(n)},
+                        {"name", t.title},
+                        {"interval", 10},
+                        {"singer", QJsonArray{QJsonObject{{"name", t.artist}}}}};
+            if (kind == 4)
+                song = {{"id", n},
+                        {"accesskey", "mock-key"},
+                        {"song", t.title},
+                        {"singer", t.artist},
+                        {"duration", 10000}};
+            songs.append(song);
+            songs.append(song);
+        }
+        QJsonObject search;
+        if (kind == 2)
+            search = {{"result", QJsonObject{{"songs", songs}}}, {"code", 200}};
+        if (kind == 3)
+            search = {{"data", QJsonObject{{"song", QJsonObject{{"list", songs}}}}}, {"code", 0}};
+        if (kind == 4)
+            search = {{"candidates", songs}, {"status", 200}};
+        const auto text = record(t)["syncedLyrics"].toString();
+        QJsonObject lyric;
+        if (kind == 2)
+            lyric = {{"lrc", QJsonObject{{"lyric", text}}}};
+        if (kind == 3)
+            lyric = {{"lyric", text}};
+        if (kind == 4)
+            lyric = {{"content", QString::fromLatin1(text.toUtf8().toBase64())}};
+        ControlledNetwork net;
+        QSet<QUrl> detailUrls;
+        net.responder = [&](ControlledReply *r) {
+            const bool isDetail = r->url().path().contains("lyric") || r->url().path().endsWith("download");
+            if (isDetail) {
+                detailUrls.insert(r->url());
+                r->respond(200, QJsonDocument(lyric).toJson(), QNetworkReply::NoError, true);
+            } else
+                r->respond(200, QJsonDocument(search).toJson());
+        };
+        const QVector<LyricsSearchSource> sources{{"Domestic", QUrl("http://source.test"), kind, false}};
+        LyricsSearchCoordinator c(&l, nullptr, QUrl("http://mock.test/api"), {}, &net, sources);
+        QSignalSpy done(&c, &LyricsSearchCoordinator::finished);
+        c.start({input(t, true)});
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(detailUrls.size(), 3);
+        QCOMPARE(c.candidates(t.id).records.size(), 3);
+        QSet<QString> nativeIds;
+        for (const auto &value : c.candidates(t.id).records) {
+            const auto r = value.toObject();
+            QCOMPARE(r["trackName"].toString(), t.title);
+            QCOMPARE(r["artistName"].toString(), t.artist);
+            nativeIds.insert(r["sourceRecordId"].toString());
+        }
+        QCOMPARE(nativeIds.size(), 3);
+        QCOMPARE(c.summary().activeRequests, 0);
+        QCOMPARE(c.summary().saved, 0);
+        qInfo() << "domestic details" << kind << "requests" << c.summary().requests << "native IDs"
+                << nativeIds;
+    }
+    void identicalCachedResultsStillCountAsFound() {
+        QTemporaryDir d;
+        Library l(d.filePath("data"));
+        QVERIFY(l.open());
+        const auto t = seed(l);
+        auto row = record(t);
+        row["source"] = "LRCLIB";
+        QVERIFY(l.saveLookupCache(t.id, {row}, false));
+        ControlledNetwork net;
+        net.responder = [&](ControlledReply *r) { r->respond(200, json({row})); };
+        LyricsSearchCoordinator c(&l, nullptr, QUrl("http://mock.test/api"), {}, &net);
+        c.loadCached({t.id});
+        QSignalSpy done(&c, &LyricsSearchCoordinator::finished);
+        c.start({input(t, true)});
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(c.summary().candidateTracks, 1);
+        QVERIFY(c.summary().requests > 0);
+        QCOMPARE(c.summary().saved, 0);
+    }
+    void cancelledQueuedTracksFinishOnce() {
+        QTemporaryDir d;
+        Library l(d.filePath("data"));
+        QVERIFY(l.open());
+        QVector<LyricsSearchRequest> batch;
+        for (int n = 0; n < 12; ++n)
+            batch.append(input(seed(l, QString::number(n), QString::number(n))));
+        ControlledNetwork net;
+        LyricsSearchCoordinator c(&l, nullptr, QUrl("http://mock.test/api"), {}, &net);
+        QSignalSpy tasks(&c, &LyricsSearchCoordinator::taskFinished);
+        c.start(batch);
+        c.cancelTrack(batch.last().original.id);
+        c.stop();
+        QTRY_COMPARE(tasks.size(), 12);
+        QCOMPARE(c.summary().finished, 12);
+        QCOMPARE(c.summary().cancelled, 12);
+        QCOMPARE(c.summary().activeRequests, 0);
+        QSet<quint64> identities;
+        for (const auto &args : tasks) {
+            const auto event = qvariant_cast<LyricsSearchEvent>(args.first());
+            QVERIFY(!identities.contains(event.taskId));
+            identities.insert(event.taskId);
+        }
+    }
+    void distinctProviderRecordsMustNotCollapse() {
+        QTemporaryDir d;
+        Library l(d.filePath("data"));
+        QVERIFY(l.open());
+        const auto t = seed(l);
+        auto first = record(t), second = first;
+        first["id"] = "alpha";
+        second["id"] = "beta";
+        first["albumName"] = "Edition A";
+        second["albumName"] = "Edition B";
+        ControlledNetwork net;
+        net.responder = [&](ControlledReply *r) { r->respond(200, json({first, second})); };
+        LyricsSearchCoordinator c(&l, nullptr, QUrl("http://mock.test/api"), {}, &net);
+        QSignalSpy done(&c, &LyricsSearchCoordinator::finished);
+        c.start({input(t, true)});
+        QTRY_COMPARE(done.size(), 1);
+        QCOMPARE(c.candidates(t.id).records.size(), 2);
+    }
     void metadataPlan_data() {
         QTest::addColumn<QString>("title");
         QTest::addColumn<QString>("artist");
