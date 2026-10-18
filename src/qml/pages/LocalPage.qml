@@ -5,7 +5,7 @@ import "../components"
 import "../theme"
 ColumnLayout {
     objectName: "localPage"
-    spacing: 12
+    spacing: 8
     RowLayout {
         Layout.fillWidth: true
         Text { text: libraryBridge.playlistName; font.pixelSize: Theme.headingSize; font.weight: Font.DemiBold; color: Theme.text; Layout.fillWidth: true; elide: Text.ElideRight }

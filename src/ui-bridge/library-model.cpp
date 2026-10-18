@@ -37,6 +37,12 @@ QVector<qint64> TrackListModel::ids() const {
     for (const auto &track : m_tracks) result.append(track.id);
     return result;
 }
+bool TrackListModel::matches(int row, const QString &text) const {
+    if (row < 0 || row >= m_tracks.size()) return false;
+    const auto &track = m_tracks[row];
+    return track.title.contains(text,Qt::CaseInsensitive) || track.artist.contains(text,Qt::CaseInsensitive) ||
+           track.album.contains(text,Qt::CaseInsensitive);
+}
 void TrackListModel::setPlaylist(qint64 playlist) {
     if (m_playlist == playlist) return;
     m_playlist = playlist; m_refresh.stop(); refresh();
@@ -53,12 +59,16 @@ void TrackListModel::refresh() {
 TrackFilterModel::TrackFilterModel(TrackListModel *source, QObject *parent)
     : QSortFilterProxyModel(parent), m_source(source) {
     setSourceModel(source); setDynamicSortFilter(true); sort(0);
+    m_notifications.setSingleShot(true);
+    connect(&m_notifications,&QTimer::timeout,this,&TrackFilterModel::changed);
     connect(this, &QAbstractItemModel::modelReset, this, &TrackFilterModel::changed);
     connect(this, &QAbstractItemModel::layoutChanged, this, &TrackFilterModel::changed);
-    connect(this, &QAbstractItemModel::rowsInserted, this, &TrackFilterModel::changed);
-    connect(this, &QAbstractItemModel::rowsRemoved, this, &TrackFilterModel::changed);
+    const auto notify = [this] { if (!m_notifications.isActive()) m_notifications.start(0); };
+    connect(this, &QAbstractItemModel::rowsInserted, this, notify);
+    connect(this, &QAbstractItemModel::rowsRemoved, this, notify);
 }
 void TrackFilterModel::changed() {
+    m_notifications.stop();
     if (m_selected && (!m_source || m_source->rowForId(m_selected) < 0)) m_selected = 0;
     emit countChanged(); emit selectionChanged();
 }
@@ -94,11 +104,9 @@ QVector<qint64> TrackFilterModel::ids() const {
 }
 QString TrackFilterModel::idAt(int row) const { return data(index(row, 0), TrackListModel::TrackId).toString(); }
 bool TrackFilterModel::filterAcceptsRow(int row, const QModelIndex &parent) const {
+    Q_UNUSED(parent)
     if (m_filter.isEmpty()) return true;
-    const auto at = m_source->index(row, 0, parent);
-    for (int role : {TrackListModel::Title, TrackListModel::Artist, TrackListModel::Album})
-        if (m_source->data(at, role).toString().contains(m_filter, Qt::CaseInsensitive)) return true;
-    return false;
+    return m_source && m_source->matches(row,m_filter);
 }
 bool TrackFilterModel::lessThan(const QModelIndex &left, const QModelIndex &right) const {
     if (m_sortKey == 0) return left.row() < right.row();
@@ -115,7 +123,8 @@ PlaylistListModel::PlaylistListModel(Library *library, QObject *parent) : QAbstr
     m_refresh.setSingleShot(true);
     const auto schedule = [this] { if (!m_refresh.isActive()) m_refresh.start(0); };
     connect(library, &Library::changed, this, schedule);
-    connect(library, &Library::statsChanged, this, schedule);
+    // Only name/member count roles are exposed. Playback statistics must not
+    // turn progress sampling into repeated full playlist aggregate queries.
     connect(&m_refresh, &QTimer::timeout, this, &PlaylistListModel::refresh);
     connect(library, &QObject::destroyed, this, [this] { m_library = nullptr; m_refresh.stop(); refresh(); });
     refresh();

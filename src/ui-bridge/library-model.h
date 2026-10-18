@@ -19,6 +19,7 @@ class TrackListModel final : public QAbstractListModel {
     qint64 idAt(int row) const;
     int rowForId(qint64 id) const;
     QVector<qint64> ids() const;
+    bool matches(int row, const QString &text) const;
     qint64 playlist() const { return m_playlist; }
     void setPlaylist(qint64 playlist);
     void refresh();
@@ -66,6 +67,7 @@ class TrackFilterModel final : public QSortFilterProxyModel {
     qint64 m_selected = 0;
     int m_sortKey = 0;
     bool m_descending = false;
+    QTimer m_notifications;
     void changed();
 };
 

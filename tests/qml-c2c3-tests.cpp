@@ -78,8 +78,13 @@ class C2C3Tests : public QObject {
         QmlShell shell(&library,nullptr,true); QVERIFY(shell.load());
         auto *queue=shell.queueModel(); QAbstractItemModelTester tester(queue,QAbstractItemModelTester::FailureReportingMode::QtTest);
         shell.libraryBridge()->playAll(); QTRY_COMPARE(queue->ids(),shell.facade()->queue().items); QCOMPARE(queue->count(),4);
+        QTRY_VERIFY(shell.playbackBridge()->playing());
         QSignalSpy resets(queue,&QAbstractItemModel::modelReset);
-        QTest::qWait(600); QCOMPARE(resets.size(),0);
+        QSignalSpy trackResets(shell.libraryModel(),&QAbstractItemModel::modelReset);
+        QSignalSpy playlistResets(shell.playlistModel(),&QAbstractItemModel::modelReset);
+        QSignalSpy progress(shell.playbackBridge(),&PlaybackBridge::progressChanged);
+        QTest::qWait(1100); QVERIFY(progress.size()>0); QCOMPARE(resets.size(),0);
+        QCOMPARE(trackResets.size(),0); QCOMPARE(playlistResets.size(),0);
         const auto id=queue->ids()[1]; shell.playbackBridge()->playQueued(QString::number(id));
         QTRY_COMPARE(shell.facade()->current().id,id); QCoreApplication::processEvents(); QCOMPARE(resets.size(),0);
         // An external existing Library command is reconciled through facade,

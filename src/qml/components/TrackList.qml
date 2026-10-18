@@ -24,7 +24,7 @@ Rectangle {
             Text { text: "歌手"; color: Theme.secondary; Layout.preferredWidth: table.showAlbum ? 140 : 100 }
             Text { visible: table.showAlbum; text: "专辑"; color: Theme.secondary; Layout.preferredWidth: 140 }
             Text { text: "时长"; color: Theme.secondary; Layout.preferredWidth: 58 }
-            Item { Layout.preferredWidth: 36 }
+            Item { Layout.preferredWidth: 64 }
         }
         ListView {
             id: list
@@ -43,7 +43,7 @@ Rectangle {
                 required property string album
                 required property real duration
                 required property bool favorite
-                width: ListView.view.width; height: 56; radius: 8
+                width: ListView.view.width; height: 48; radius: 8
                 color: table.selectedKey === trackKey ? Theme.selected : hover.containsMouse ? Theme.hover : "transparent"
                 border.width: table.currentKey === trackKey ? 1 : 0; border.color: Theme.accent
                 MouseArea {
@@ -66,7 +66,8 @@ Rectangle {
                         color: Theme.secondary; Layout.preferredWidth: 58
                     }
                     ToolButton {
-                        Layout.preferredWidth: 36; text: row.favorite ? "♥" : "♡"
+                        Layout.preferredWidth: 64; text: row.favorite ? "已收藏" : "收藏"; font.pixelSize: 12
+                        palette.buttonText: row.favorite ? Theme.accent : Theme.secondary
                         Accessible.name: row.favorite ? "取消收藏" : "收藏"
                         onClicked: table.favoriteRequested(row.trackKey)
                     }

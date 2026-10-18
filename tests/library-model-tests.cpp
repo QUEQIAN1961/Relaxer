@@ -106,6 +106,15 @@ class LibraryModelTests : public QObject {
         QVERIFY(library.reorder(list, {ids[0],ids[2]})); QTRY_COMPARE(tracks.ids(), (QVector<qint64>{ids[0],ids[2]}));
         QVERIFY(library.deletePlaylist(list)); QTRY_COMPARE(lists.count(), 0); QTRY_COMPARE(tracks.rowCount(), 0);
     }
+    void filteringDoesNotFloodSelectionNotifications() {
+        QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seedRows(library,1000));
+        TrackListModel source(&library); TrackFilterModel view(&source);
+        view.setSelectedId(view.idAt(0)); QSignalSpy selected(&view,&TrackFilterModel::selectionChanged);
+        QSignalSpy counts(&view,&TrackFilterModel::countChanged);
+        view.setFilterText("Artist A"); QCOMPARE(view.count(),500); QCoreApplication::processEvents();
+        QVERIFY(selected.size()<=2); QVERIFY(counts.size()<=2);
+        view.setFilterText({}); QCOMPARE(view.count(),1000);
+    }
 };
 QTEST_GUILESS_MAIN(LibraryModelTests)
 #include "library-model-tests.moc"
