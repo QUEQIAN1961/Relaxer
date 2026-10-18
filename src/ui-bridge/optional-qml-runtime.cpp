@@ -1,6 +1,8 @@
 #include "optional-qml-runtime.h"
 #ifdef Q_OS_WIN
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 
