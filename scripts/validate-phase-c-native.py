@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run legacy, C1/Fix1 and C2+C3 suites on a disposable candidate.
+"""Run legacy, C1/Fix1, C2+C3 and C4+C5 suites on a disposable candidate.
 
 Temporary test EXEs/DLL are removed afterwards. Does not use real user data,
 credentials or paid APIs. The package must be a fresh staging directory.
@@ -64,7 +64,8 @@ def main():
              "relaxer_queue_playback_tests", "relaxer_gui_tests", "relaxer_lyrics_search_coordinator_tests",
              "relaxer_translation_coordinator_tests", "relaxer_ai_lyrics_translation_tests", "relaxer_lyrics_persistence_tests",
              "relaxer_phase03_tests", "relaxer_phase031_tests", "relaxer_qml_tests", "relaxer_qml_loading_tests",
-             "relaxer_library_model_tests", "relaxer_c2c3_tests", "relaxer_qml_widgets_parity_tests"]
+             "relaxer_library_model_tests", "relaxer_c2c3_tests", "relaxer_qml_widgets_parity_tests", "relaxer_queue_projection_tests", "relaxer_qml_lyrics_model_tests",
+             "relaxer_c4c5_bridge_tests", "relaxer_c4c5_ui_tests", "relaxer_qml_search_bridge_tests"]
     copied = []
     suites = []
     try:
@@ -88,7 +89,7 @@ def main():
         (out / "suites.json").write_text(json.dumps(suites, indent=2), encoding="utf-8")
     # The collection becomes launcher-ready only after actual native checks.
     marker = runtime / "relaxer-ready.json"
-    marker.write_text(json.dumps({"version": "1.5.0", "displayVersion": "V0.2.1-dev-c2c3", "windows_only_path": True,
+    marker.write_text(json.dumps({"version": "1.5.0", "displayVersion": "V0.2.1-dev-c4c5", "windows_only_path": True,
         "audio_decode": True, "qml_window": True, "audio_device_required": False, "media_clock": False}), encoding="utf-8")
     assert not (package / "data").exists(), "Do not run this against an existing user installation"
     with (out / "launcher.stdout").open("wb") as stdout, (out / "launcher.stderr").open("wb") as stderr:
@@ -115,8 +116,8 @@ def main():
     proof = json.loads((package / "deployment.json").read_text(encoding="utf-8"))
     # The executed candidate remains dirty and unpackageable. This proof is used
     # only to reassemble a new shipping directory from the same build binaries.
-    proof["verified"] = True; proof["note"] = "Developer native candidate QA; awaiting independent C2+C3 Harness"
-    proof["verification"] = "System-only PATH, native QPA, PCM/Widgets/QML/launcher, legacy 14-suite subset, C1/Fix1, C2+C3 models and actual Widgets/QML parity"
+    proof["verified"] = True; proof["note"] = "Developer native candidate QA; awaiting independent C4+C5 Harness"
+    proof["verification"] = "System-only PATH, native QPA, PCM/Widgets/QML/launcher, legacy 14-suite subset, C1/Fix1, C2+C3 models/parity; C4+C5 lyrics, fullscreen, settings, real import and Mock-only consent/preview workflows"
     (out / "verification-proof.json").write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding="utf-8")
     (out / "result.json").write_text(json.dumps({"results": results, "suites": suites,
         "qtTestTotals": [sum(s[key] for s in suites) for key in ("passed", "failed", "skipped")],

@@ -16,6 +16,12 @@ ApplicationWindow {
     palette.window: Theme.background
     palette.base: Theme.panel
     palette.text: Theme.text
+    palette.windowText: Theme.text
+    palette.placeholderText: Theme.secondary
+    palette.highlightedText: Theme.accentText
+    palette.disabled.text: Theme.disabled
+    palette.disabled.windowText: Theme.disabled
+    palette.disabled.buttonText: Theme.disabled
     palette.buttonText: Theme.text
     palette.button: Theme.panel
     palette.highlight: Theme.accent
@@ -81,9 +87,9 @@ ApplicationWindow {
                 ScrollView {
                   id: navigationScroll; anchors.fill: parent; anchors.margins: 16; contentWidth: availableWidth; clip: true
                   ColumnLayout {
-                    width: navigationScroll.availableWidth; height: Math.max(implicitHeight, navigationScroll.availableHeight); spacing: 10
-                    Text { text: "relaxer"; color: Theme.text; font.pixelSize: 28; font.weight: Font.Bold; Layout.topMargin: 12 }
-                    Text { text: "让音乐慢下来"; color: Theme.secondary; font.pixelSize: 12; Layout.bottomMargin: 28 }
+                    width: navigationScroll.availableWidth; height: Math.max(implicitHeight, navigationScroll.availableHeight); spacing: root.height < 700 ? 6 : 10
+                    Text { text: "relaxer"; color: Theme.text; font.pixelSize: 28; font.weight: Font.Bold; Layout.topMargin: root.height < 700 ? 0 : 12 }
+                    Text { text: "让音乐慢下来"; color: Theme.secondary; font.pixelSize: 12; Layout.bottomMargin: root.height < 700 ? 8 : 28 }
                     Repeater {
                         model: ["本地音乐", "歌单", "播放队列", "设置"]
                         NavigationButton {
@@ -91,17 +97,18 @@ ApplicationWindow {
                             required property int index
                             objectName: "navigation" + index
                             Layout.fillWidth: true
+                            compact: root.height < 700
                             text: modelData
                             marker: ["♫", "≡", "▷", "⚙"][index]
                             selected: !root.lyricsOpen && appBridge.page === index
                             onClicked: { root.lyricsOpen = false; appBridge.navigate(index) }
                         }
                     }
-                    NavigationButton { objectName: "lyricsNavigation"; Layout.fillWidth: true; text: "歌词与封面"; marker: "♫"; selected: root.lyricsOpen; onClicked: root.showLyrics() }
-                    NavigationButton { objectName: "importNavigation"; Layout.fillWidth: true; text: "导入音乐"; marker: "+"; onClicked: { root.lyricsOpen = false; appBridge.navigate(3); settingsPage.section = 1 } }
+                    NavigationButton { objectName: "lyricsNavigation"; Layout.fillWidth: true; compact: root.height < 700; text: "歌词与封面"; marker: "♫"; selected: root.lyricsOpen; onClicked: root.showLyrics() }
+                    NavigationButton { objectName: "importNavigation"; Layout.fillWidth: true; compact: root.height < 700; text: "导入音乐"; marker: "+"; onClicked: { root.lyricsOpen = false; appBridge.navigate(3); settingsPage.section = 1 } }
                     Item { Layout.fillHeight: true }
                     Rectangle {
-                        Layout.fillWidth: true; implicitHeight: 74; radius: 10; color: Theme.background
+                        Layout.fillWidth: true; implicitHeight: root.height < 700 ? 64 : 74; radius: 10; color: Theme.background
                         Text { anchors.fill: parent; anchors.margins: 12; text: appBridge.version + "\nC4+C5 · 开发预览"; color: Theme.secondary; font.pixelSize: 12; lineHeight: 1.5 }
                     }
                   }

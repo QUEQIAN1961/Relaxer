@@ -12,9 +12,9 @@ ColumnLayout {
     Text { text: "设置与工具"; font.pixelSize: 28; font.weight: Font.Bold; color: Theme.text }
     TabBar {
         Layout.fillWidth: true; currentIndex: page.section; onCurrentIndexChanged: page.section = currentIndex
-        TabButton { text: "基础设置" }
-        TabButton { text: "音乐导入" }
-        TabButton { text: "歌词 / 翻译 / AI" }
+        SettingsTabButton { text: "基础设置" }
+        SettingsTabButton { text: "音乐导入" }
+        SettingsTabButton { text: "歌词 / 翻译 / AI" }
     }
     StackLayout {
         Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumWidth: 0; Layout.minimumHeight: 0; currentIndex: page.section

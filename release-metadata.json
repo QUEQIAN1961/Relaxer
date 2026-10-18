@@ -1,12 +1,12 @@
 {
   "numericVersion": "0.2.1",
-  "prerelease": "dev-c2c3",
-  "displayVersion": "V0.2.1-dev-c2c3",
-  "status": "C2+C3 DEVELOPER-VERIFIED — AWAITING HARNESS",
+  "prerelease": "dev-c4c5",
+  "displayVersion": "V0.2.1-dev-c4c5",
+  "status": "C4+C5 DEVELOPER-VERIFIED — AWAITING HARNESS",
   "applicationName": "Relaxer",
   "organizationName": "Relaxer",
-  "baselineCommit": "a4fbda6d5919e5d53771db394d5f94f16f0810b5",
-  "baselineTree": "0a45e11576ded7882abec764ddbd2248465b1eb0",
+  "baselineCommit": "f2242c9523ea0200d43ad6fbcba6ab6978dbe364",
+  "baselineTree": "b8e819783e428876fee012b597c5534a1b1806ef",
   "stableCommit": "43203314012f509a2f83e4558b9206001b2e5f75",
   "stableTag": "v0.2.0",
   "defaultUi": "widgets",
@@ -16,11 +16,11 @@
   "officialReleaseApproved": false,
   "publicPublicationAuthorized": false,
   "classificationStorage": "existing Library settings rows keyed by stable trackId and content hash",
-  "releaseScope": "C2+C3: typed library, navigation, playlists, facade playback controls and read-only queue projection; no C4/C5/C6",
+  "releaseScope": "C4+C5: existing lyric timeline/bilingual previews/fullscreen/artwork and existing settings/import/AI consent UI; no C6/formal release",
   "optionalQmlModule": "RelaxerQmlUi.dll",
   "qmlLoadFailureExit": 11,
   "moduleCodeLifetime": "Pinned until process exit; per-session QML and business objects are destroyed",
-  "independentAcceptance": "C1 Fix1 baseline passed Harness R13; current C2+C3 batch awaits independent Harness",
+  "independentAcceptance": "C2+C3 baseline passed Harness R14; current C4+C5 batch awaits independent Harness",
   "defectLedgerBeforeFix": {
     "P0": 0,
     "P1": 0,
@@ -29,12 +29,17 @@
     "total": 24
   },
   "developerFixedPendingVerification": [
-    "C1-P301"
+    "D-R14-01"
   ],
-  "C1-P301": "Efficient count with existing SQLite connection; 0/1k/10k functional and measured evidence; developer-fixed pending independent verification",
+  "C1-P301": "Independently CLOSED/FIXED by Harness R14; preserved efficient scalar count",
   "inheritedClosedByHarnessR13": [
     "D-R12-01",
     "D-R12-02",
     "D-R12-03"
-  ]
+  ],
+  "D-R14-01": "Selective queue metadata query on original connection, preserving order/duplicates/missing IDs; developer verification pending independent closure",
+  "inheritedClosedByHarnessR14": [
+    "C1-P301"
+  ],
+  "paidRequestsDuringDevelopment": 0
 }

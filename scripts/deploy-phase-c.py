@@ -108,21 +108,21 @@ def main():
         license_root = prefix / "share/licenses"
         if license_root.exists(): shutil.copytree(license_root, dest / "third-party-licenses", dirs_exist_ok=True)
     (dest / "RelaxerQml.cmd").write_text('@echo off\r\nsetlocal\r\n"%~dp0runtime\\Relaxer.exe" --ui=qml %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
-    (dest / "C2C3-READ-ME-FIRST.md").write_text(
-        "# Relaxer V0.2.1-dev-c2c3\n\nC2+C3 开发交付，等待下一轮 Harness 独立复验。\n\n"
-        "默认运行 RelaxerStart.exe 使用完整 Widgets。运行 RelaxerQml.cmd 打开可选 QML Foundation。\n"
+    (dest / "C4C5-READ-ME-FIRST.md").write_text(
+        "# Relaxer V0.2.1-dev-c4c5\n\nC4+C5 开发交付，等待下一轮 Harness 独立复验。\n\n"
+        "默认运行 RelaxerStart.exe 使用完整 Widgets。运行 RelaxerQml.cmd 打开QML 日常播放界面。\n"
         "两种模式使用相同 dataRoot 与资料锁，请先关闭另一种模式。资料路径沿用原算法；"
         "有意使用其他资料库时可直接运行 runtime/Relaxer.exe --data <目录> --ui=qml。\n\n"
         "QML 支持真实本地曲目、筛选排序、收藏、歌单及保留文件的曲目引用移除。"
         "播放栏支持播放暂停、切歌、进度拖动、音量静音和四种既有模式，队列与原核心同步。"
-        "先在 Widgets 导入音乐，再切换到 QML。双击歌曲或点击播放，从当前筛选列表开始播放。"
-        "歌词、完整导入管理、高级设置与 AI 尚未迁移。"
+        "QML 侧栏“导入音乐”可选择文件或文件夹，取消会等待后台安全结束。双击歌曲或点击播放，从当前筛选列表开始播放。"
+        "“歌词与封面”提供原时间轴、双语歌词、±5秒延时和同窗全屏（Esc退出）。设置页支持原配置、配色、导入及翻译预览。AI翻译须先人工标记需要翻译、配置服务，再逐次确认；不会自动发送或保存。字体、图片外观编辑、快捷键与托盘操作仍使用Widgets。"
         "从歌单移除只改关联；从曲库移除会删除引用、歌单关联和统计，但保留音乐文件。\n", encoding="utf-8")
     if verified:
-        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": "1.5.0", "displayVersion": "V0.2.1-dev-c2c3",
+        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": "1.5.0", "displayVersion": "V0.2.1-dev-c4c5",
             "windows_only_path": True, "audio_decode": True, "qml_window": True,
             "audio_device_required": False, "media_clock": False}), encoding="utf-8")
-    proof = {"version": "0.2.1-dev-c2c3", "qmlImports": imports, "copiedDependencies": sorted(copied),
+    proof = {"version": "0.2.1-dev-c4c5", "qmlImports": imports, "copiedDependencies": sorted(copied),
              "binarySHA256": binary_hashes, "stagingPolicy": "fresh-build-inputs-only",
              "verified": verified, "note": "Native proof from separate candidate" if verified else "Candidate collection only; do not package before native QA"}
     (dest / "deployment.json").write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding="utf-8")

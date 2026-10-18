@@ -33,7 +33,8 @@ Item {
             anchors.fill: parent
             clip: true; model: lyricsModel; cacheBuffer: 150
             spacing: 4; boundsBehavior: Flickable.StopAtBounds
-            topMargin: Math.min(100, height * 0.22); bottomMargin: Math.min(100, height * 0.22)
+            header: Item { width: 1; height: list.height / 2 }
+            footer: Item { width: 1; height: list.height / 2 }
             onDraggingChanged: if (dragging) panel.manualScroll = true
             ScrollBar.vertical: ScrollBar { onPressedChanged: if (pressed) panel.manualScroll = true }
             delegate: Item {

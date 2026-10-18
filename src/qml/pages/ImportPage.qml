@@ -7,6 +7,7 @@ import "../theme"
 ScrollView {
     id: page
     objectName: "importPage"
+    function submitFiles(urls) { return importBridge.start(urls, addToPlaylist.checked ? String(target.currentValue) : "0") }
     contentWidth: availableWidth
     ColumnLayout {
         width: page.availableWidth; spacing: 18
@@ -34,7 +35,7 @@ ScrollView {
     FileDialog {
         id: files; title: "选择音乐文件"; fileMode: FileDialog.OpenFiles
         nameFilters: ["音频 (*.mp3 *.flac *.wav *.m4a *.aac *.ogg *.opus *.aiff *.wma *.ape *.mid *.midi)", "所有文件 (*)"]
-        onAccepted: importBridge.start(selectedFiles, addToPlaylist.checked ? String(target.currentValue) : "0")
+        onAccepted: page.submitFiles(selectedFiles)
     }
-    FolderDialog { id: folder; title: "选择音乐文件夹"; onAccepted: importBridge.start([selectedFolder], addToPlaylist.checked ? String(target.currentValue) : "0") }
+    FolderDialog { id: folder; title: "选择音乐文件夹"; onAccepted: page.submitFiles([selectedFolder]) }
 }

@@ -7,6 +7,7 @@
   <file>pages/QueuePage.qml</file>
   <file>components/LyricsList.qml</file><file>pages/LyricsPage.qml</file>
   <file>components/ConfirmDialog.qml</file>
+  <file>components/SettingsTabButton.qml</file>
   <file>pages/SettingsPage.qml</file><file>pages/ImportPage.qml</file>
   <file>pages/AiPage.qml</file><file>pages/TranslationPage.qml</file>
   <file>pages/LocalPage.qml</file><file>pages/TransitionPage.qml</file>

@@ -71,7 +71,14 @@ private slots:
         Fixture f;QVERIFY(f.ok);const auto folder=f.dir.filePath("新 歌曲");QVERIFY(QDir().mkpath(folder));
         for(int i=0;i<80;++i)QVERIFY(import_fixture::midi(folder+QString("/%1.mid").arg(i),i));
         f.shell->appBridge()->navigate(3);auto *window=f.shell->window();auto *settings=visual(window->contentItem(),"settingsPage");QVERIFY(settings);settings->setProperty("section",1);
-        const auto queue=f.shell->facade()->queue().items;QVERIFY(f.shell->importBridge()->start({QUrl::fromLocalFile(folder)}));
+        const auto queue=f.shell->facade()->queue().items;auto *importPage=visual(window->contentItem(),"importPage");QVERIFY(importPage);QVariant started;
+        QTRY_VERIFY(f.shell->facade()->position()>500);const auto beforeImport=f.shell->facade()->position();
+        const auto single=f.dir.filePath("single.mid");QVERIFY(import_fixture::midi(single,9999));const QVariant singleUrl=QVariant::fromValue(QList<QUrl>{QUrl::fromLocalFile(single)});
+        QVERIFY(QMetaObject::invokeMethod(importPage,"submitFiles",Q_RETURN_ARG(QVariant,started),Q_ARG(QVariant,singleUrl)));QVERIFY(started.toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(!f.shell->importBridge()->busy(),30000);QTRY_COMPARE(f.shell->libraryModel()->count(),3);
+        QCOMPARE(f.shell->facade()->current().id,f.a.id);QVERIFY(f.shell->facade()->playing());QVERIFY(f.shell->facade()->position()>=beforeImport);QCOMPARE(f.shell->facade()->queue().items,queue);
+        const QVariant urls=QVariant::fromValue(QList<QUrl>{QUrl::fromLocalFile(folder)});
+        QVERIFY(QMetaObject::invokeMethod(importPage,"submitFiles",Q_RETURN_ARG(QVariant,started),Q_ARG(QVariant,urls)));QVERIFY(started.toBool());
         auto *progress=visual(window->contentItem(),"importProgress");QVERIFY(progress);QVERIFY(progress->isVisible());
         QVERIFY(!window->close());auto *confirm=window->findChild<QObject *>("closeTasksConfirmation");QVERIFY(confirm);QTRY_VERIFY(confirm->property("visible").toBool());
         QVERIFY(QMetaObject::invokeMethod(confirm,"reject"));QVERIFY(window->isVisible());QVERIFY(!f.shell->importBridge()->closing());

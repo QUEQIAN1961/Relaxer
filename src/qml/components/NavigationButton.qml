@@ -5,8 +5,9 @@ Button {
     id: control
     required property string marker
     property bool selected: false
-    implicitHeight: 48
-    padding: 14
+    property bool compact: false
+    implicitHeight: compact ? 38 : 48
+    padding: compact ? 8 : 14
     Accessible.name: text
     font.pixelSize: Theme.fontSize
     contentItem: Text {

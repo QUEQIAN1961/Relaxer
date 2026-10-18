@@ -21,7 +21,9 @@ Item {
           ColumnLayout {
             width: artworkScroll.availableWidth; spacing: 10
             Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: Math.min(width, Math.max(130, page.height - 270)); radius: 22; color: Theme.hover; clip: true
+                property real coverSide: Math.min(artworkScroll.availableWidth, Math.max(110, page.height - 270))
+                Layout.preferredWidth: coverSide; Layout.preferredHeight: coverSide; Layout.alignment: Qt.AlignHCenter
+                radius: 22; color: Theme.hover; clip: true
                 scale: page.fullScreen ? 1 : 0.98
                 Behavior on scale { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
                 Text { anchors.centerIn: parent; text: "♫"; font.pixelSize: 84; color: Theme.secondary; visible: art.status !== Image.Ready }

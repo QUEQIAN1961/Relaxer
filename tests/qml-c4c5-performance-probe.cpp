@@ -107,7 +107,7 @@ int main(int argc,char **argv) {
     auto *list=visual(window->contentItem(),"trackListView");if(!list||list->property("count").toInt()!=count)return 13;
     int maxDelegates=delegates(window->contentItem());
     if((count>0&&maxDelegates<1)||maxDelegates>100)return 14;
-    QJsonObject result{{"tracks",count},{"databaseOpenMs",openMs},{"shellAndModelInitMs",shellInitMs},
+    QJsonObject result{{"sourceFingerprint",RELAXER_BUILD_SOURCE_SHA256},{"qtVersion",QT_VERSION_STR},{"tracks",count},{"databaseOpenMs",openMs},{"shellAndModelInitMs",shellInitMs},
         {"firstFrameFromShellInitMs",firstFrameMs},{"firstScreenVisibleDelegates",maxDelegates},
         {"graphicsApi",int(window->rendererInterface()->graphicsApi())},{"qpa",QGuiApplication::platformName()},
         {"quickBackend",qEnvironmentVariable("QT_QUICK_BACKEND")},{"windowWidth",window->width()},{"windowHeight",window->height()},
@@ -222,6 +222,14 @@ int main(int argc,char **argv) {
     if(!shots.isEmpty()&&!window->grabWindow().save(QDir(shots).filePath("settings.png")))return 35;
     settings->setProperty("section",2);if(frame(window)<0)return 42;
     if(!shots.isEmpty()&&!window->grabWindow().save(QDir(shots).filePath("translation-ai.png")))return 35;
+    if(!shots.isEmpty()) {
+        auto *translation=visual(window->contentItem(),"translationPage");
+        auto *flick=translation?qvariant_cast<QQuickItem *>(translation->property("contentItem")):nullptr;
+        if(!flick)return 42;
+        flick->setProperty("contentY",qMax(0.,flick->property("contentHeight").toDouble()-flick->height()));
+        if(frame(window)<0||!window->grabWindow().save(QDir(shots).filePath("ai-config.png")))return 35;
+        flick->setProperty("contentY",0.);
+    }
     const auto incoming=QDir(root).filePath("incoming");QDir().mkpath(incoming);
     for(int i=0;i<10;++i){QFile file(QDir(incoming).filePath(QString("导入 %1.mid").arg(i)));if(!file.open(QIODevice::WriteOnly))return 44;file.write(QByteArray::fromHex("4d546864000000060000000100604d54726b0000000400ff2f00")+QByteArray::number(i));}
     settings->setProperty("section",1);if(frame(window)<0)return 42;
@@ -233,6 +241,17 @@ int main(int argc,char **argv) {
     result["importTenFilesMs"]=clock.nsecsElapsed()/1000000.;result["importFrameResponseMs"]=importFrames;
     result["importResult"]=QJsonObject::fromVariantMap(shell.importBridge()->result());result["tracksAfterImport"]=double(library.trackCount());
     if(!shots.isEmpty()&&!window->grabWindow().save(QDir(shots).filePath("import.png")))return 35;
+    if(!shots.isEmpty()) {
+        if(!shell.settingsBridge()->setTheme(1))return 43;
+        settings->setProperty("section",0);QTest::qWait(250);
+        if(frame(window)<0||!window->grabWindow().save(QDir(shots).filePath("settings-dark.png")))return 35;
+        QMetaObject::invokeMethod(window,"showLyrics");QTest::qWait(250);
+        if(frame(window)<0||!window->grabWindow().save(QDir(shots).filePath("lyrics-dark.png")))return 35;
+        QMetaObject::invokeMethod(window,"toggleFullscreen");QTest::qWait(250);
+        if(frame(window)<0||!window->grabWindow().save(QDir(shots).filePath("fullscreen-dark.png")))return 35;
+        QMetaObject::invokeMethod(window,"toggleFullscreen");
+        if(frame(window)<0||!shell.settingsBridge()->setTheme(0))return 43;
+    }
     result["warnings"]=QJsonArray::fromStringList(shell.warnings());if(!shell.warnings().isEmpty())return 24;
     result["databaseConnections"]=QSqlDatabase::connectionNames().size();result["playbackInstances"]=shell.findChildren<Playback *>().size();
     result["method"]="Fresh measurement process after separate fixture preparation; real Qt first frame and next-frame response to 40 requested scroll steps. These response times are not real FPS or a physical display smoothness claim. Memory sampled before legacy materialization benchmark; payload is retained capacity lower bound, not total allocator traffic.";
