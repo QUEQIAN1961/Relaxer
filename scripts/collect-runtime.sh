@@ -27,6 +27,7 @@ fi
 mkdir -p "$stage/bin" "$stage/resources"
 printf '%s\n' "$owner" > "$stage/.relaxer-staging-owner"
 cp "$build/Relaxer.exe" "$stage/"
+if [[ -f "$build/RelaxerQmlUi.dll" ]]; then cp "$build/RelaxerQmlUi.dll" "$stage/"; fi
 cp RelaxerStart.exe THIRD_PARTY_NOTICES.md "$stage/"
 # Prefer the newly compiled launcher when available; the first-start bootstrap
 # in the source root remains intact while Windows is executing it.
@@ -39,10 +40,13 @@ for name in windeployqt6 windeployqt-qt6 windeployqt; do
 done
 [[ -n "$deploy_qt" ]] || { echo 'windeployqt missing' >&2; exit 2; }
 qml_args=()
+qml_binaries=()
 if grep -q '^RELAXER_ENABLE_QML:BOOL=ON$' "$build/CMakeCache.txt"; then
+  [[ -f "$stage/RelaxerQmlUi.dll" ]] || { echo 'Optional QML module missing' >&2; exit 2; }
   qml_args=(--qmldir "$(cygpath -m "$(pwd)/src/qml")")
+  qml_binaries=("$(cygpath -m "$stage/RelaxerQmlUi.dll")")
 fi
-"$deploy_qt" --release --no-translations "${qml_args[@]}" "$(cygpath -m "$stage/Relaxer.exe")"
+"$deploy_qt" --release --no-translations "${qml_args[@]}" "$(cygpath -m "$stage/Relaxer.exe")" "${qml_binaries[@]}"
 plugins=/ucrt64/share/qt6/plugins
 [[ -d "$plugins" ]] || plugins=/ucrt64/lib/qt6/plugins
 # windeployqt can copy every installed SQL driver, including drivers whose
