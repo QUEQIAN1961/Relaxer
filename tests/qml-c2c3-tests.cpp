@@ -45,6 +45,34 @@ int delegates(QQuickItem *item) {
 class C2C3Tests : public QObject {
     Q_OBJECT
   private slots:
+    void modeCommandsAffectTraversalAndMissingMediaIsDiagnosed() {
+        QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,3));
+        QVector<qint64> ids;
+        {
+        QmlShell shell(&library,nullptr,true); QVERIFY(shell.load()); shell.libraryBridge()->playAll();
+        auto *bridge=shell.playbackBridge(); ids=shell.facade()->queue().items;
+        bridge->setMode(1); bridge->playQueued(QString::number(ids.last())); bridge->next();
+        QTRY_COMPARE(shell.facade()->current().id,ids.first());
+        bridge->setMode(0); bridge->playQueued(QString::number(ids.last())); bridge->next();
+        QCOMPARE(shell.facade()->current().id,ids.last()); QVERIFY(!shell.facade()->playing());
+        bridge->setMode(2); bridge->playQueued(QString::number(ids.first())); QTRY_VERIFY(bridge->seekable());
+        QVERIFY(QMetaObject::invokeMethod(shell.facade()->backend()->media(),"mediaStatusChanged",Qt::DirectConnection,
+            Q_ARG(QMediaPlayer::MediaStatus,QMediaPlayer::EndOfMedia)));
+        QCOMPARE(shell.facade()->current().id,ids.first());
+        bridge->setMode(3); bridge->playQueued(QString::number(ids.first())); QSet<qint64> visited{ids.first()};
+        for(int i=1;i<ids.size();++i) { bridge->next(); const auto id=shell.facade()->current().id; QVERIFY(!visited.contains(id)); visited.insert(id); }
+        QCOMPARE(visited.size(),ids.size());
+        QVERIFY(shell.shutdown());
+        }
+        // Windows keeps a decoded file open. Model the real between-session
+        // disappearance, after the previous player has released its handle.
+        QVERIFY(QFile::remove(library.absolute("Music/fixture.wav")));
+        QmlShell shell(&library,nullptr,true); QVERIFY(shell.load()); auto *bridge=shell.playbackBridge();
+        shell.libraryBridge()->playAll(); QTRY_VERIFY(!bridge->error().isEmpty()); QTRY_VERIFY(!bridge->canPlay());
+        for(auto id:ids) bridge->removeFromQueue(QString::number(id));
+        QTRY_COMPARE(shell.queueModel()->count(),0); QTRY_VERIFY(!bridge->hasTrack());
+        QCOMPARE(library.trackCount(),qint64(3)); QVERIFY(shell.shutdown()); QVERIFY(shell.warnings().isEmpty());
+    }
     void queueProjectionHasOneAuthorityAndNoProgressResets() {
         QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,4));
         QmlShell shell(&library,nullptr,true); QVERIFY(shell.load());

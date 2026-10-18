@@ -28,7 +28,7 @@ ApplicationWindow {
         RowLayout {
             Layout.fillWidth: true; Layout.fillHeight: true; spacing: 0
             Rectangle {
-                Layout.preferredWidth: 208; Layout.fillHeight: true
+                Layout.preferredWidth: root.width < 1050 ? 168 : 208; Layout.fillHeight: true
                 color: Theme.panel
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 20; spacing: 10
@@ -55,7 +55,7 @@ ApplicationWindow {
                 }
             }
             ColumnLayout {
-                Layout.fillWidth: true; Layout.fillHeight: true; Layout.margins: 32; spacing: 16
+                Layout.fillWidth: true; Layout.fillHeight: true; Layout.margins: root.width < 1050 ? 20 : 32; spacing: 16
                 RowLayout {
                     Layout.fillWidth: true
                     Text { text: "QML FOUNDATION"; color: Theme.secondary; font.pixelSize: 11; font.letterSpacing: 2 }
