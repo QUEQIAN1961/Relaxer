@@ -11,7 +11,8 @@ Button {
     font.pixelSize: Theme.fontSize
     contentItem: Text {
         text: control.marker + "   " + control.text
-        font: control.font
+        font.pixelSize: control.font.pixelSize
+        font.family: control.font.family
         font.weight: control.selected ? Font.DemiBold : Font.Normal
         color: !control.enabled ? Theme.disabled : control.selected ? Theme.accent : Theme.text
         verticalAlignment: Text.AlignVCenter

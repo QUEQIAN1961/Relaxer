@@ -47,6 +47,11 @@ try {
     $image=Join-Path $stage 'verify-window.png'
     Run-Checked (Join-Path $stage 'Relaxer.exe') @('--screenshot',('"'+$image+'"')) 'verify-window'
     if (-not (Test-Path -LiteralPath $image) -or (Get-Item -LiteralPath $image).Length -lt 1024) { throw 'Qt window verification failed.' }
+    if (Test-Path -LiteralPath (Join-Path $stage 'Qt6Quick.dll')) {
+        $qmlImage=Join-Path $stage 'verify-qml-window.png'
+        Run-Checked (Join-Path $stage 'Relaxer.exe') @('--ui=qml','--screenshot',('"'+$qmlImage+'"')) 'verify-qml-window'
+        if (-not (Test-Path -LiteralPath $qmlImage) -or (Get-Item -LiteralPath $qmlImage).Length -lt 1024) { throw 'QML window verification failed.' }
+    }
     # Decode real PCM through the bundled Qt multimedia plugin. A sound card is
     # deliberately not required: device enumeration/rendering is machine-specific.
     # --audio-device-smoke remains available as a separate hardware diagnostic.

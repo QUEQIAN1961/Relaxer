@@ -19,8 +19,9 @@ Button {
     }
     background: Rectangle {
         radius: 10
-        color: !control.enabled ? Theme.background : control.down ? Theme.pressed
-             : control.hovered ? Theme.hover : control.primary ? Theme.accent : Theme.panel
+        color: !control.enabled ? Theme.background
+             : control.primary ? (control.down ? Qt.darker(Theme.accent, 1.2) : control.hovered ? Qt.lighter(Theme.accent, 1.1) : Theme.accent)
+             : control.down ? Theme.pressed : control.hovered ? Theme.hover : Theme.panel
         border.color: control.activeFocus ? Theme.accent : Theme.border
         border.width: control.activeFocus ? 2 : 1
     }

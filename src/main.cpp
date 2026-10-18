@@ -22,6 +22,7 @@
 #include <QTextStream>
 #include <QTimer>
 using namespace relaxer;
+static void initializeAppResources() { Q_INIT_RESOURCE(resources); }
 static QString dataRoot() {
     auto specified = qEnvironmentVariable("RELAXER_DATA");
     if (!specified.isEmpty())
@@ -62,6 +63,7 @@ int main(int argc, char **argv) {
     app.setProperty("relaxerDevelopmentTitle", QString::fromLatin1(phaseC::WindowTitle));
     app.setOrganizationName("Relaxer");
     app.setStyle("Fusion");
+    initializeAppResources();
     app.setWindowIcon(QIcon(":/icon.svg"));
     QCommandLineParser parser;
     parser.setApplicationDescription("Relaxer · 本地音乐播放器");
@@ -173,6 +175,7 @@ int main(int argc, char **argv) {
     diagnostics.result["version"] = QString::fromLatin1(phaseC::Version);
     diagnostics.result["dataRoot"] = lib.root();
     diagnostics.result["qtVersion"] = qVersion();
+    if (parser.isSet("diagnostics")) diagnostics.write(parser.value("diagnostics"));
     auto finish = [&](int code, bool saved) {
         diagnostics.mark("shutdownCompleteMs");
         diagnostics.result["saveSucceeded"] = saved;
@@ -204,6 +207,7 @@ int main(int argc, char **argv) {
             diagnostics.mark("closeRequestedMs"); window->close();
         });
         diagnostics.mark("windowShownMs");
+        if (parser.isSet("diagnostics")) diagnostics.write(parser.value("diagnostics"));
         const int code = app.exec();
         diagnostics.mark("eventLoopReturnedMs");
         return finish(code, shell.shutdown());
@@ -219,6 +223,7 @@ int main(int argc, char **argv) {
     diagnostics.result["title"] = window.windowTitle();
     diagnostics.result["databaseConnections"] = QSqlDatabase::connectionNames().size();
     diagnostics.result["playbackInstances"] = window.findChildren<Playback *>().size();
+    if (parser.isSet("diagnostics")) diagnostics.write(parser.value("diagnostics"));
     if (parser.isSet("quit-after")) QTimer::singleShot(quitAfter, &app, [&] {
         diagnostics.mark("closeRequestedMs");
         // Explicit measurements must close even if the fixture requests close-to-tray.

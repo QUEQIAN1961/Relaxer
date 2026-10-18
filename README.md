@@ -1,4 +1,28 @@
-# Relaxer V0.2.0 · Phase B Foundation 正式版
+# Relaxer V0.2.1-dev-c1 · Phase C / C0 + C1 开发交付
+
+本分支从正式 `v0.2.0` / `43203314012f509a2f83e4558b9206001b2e5f75` 起步。C1 不等于 V0.2.1 正式发布；未创建正式 V0.2.1 标签。默认仍为完整 Widgets，`runtime/Relaxer.exe --ui=qml`（便携包内也可用 `RelaxerQml.cmd`）打开 QML Foundation。两种界面互斥，沿用同一 dataRoot、资料锁、Library 和 Playback。
+
+QML 已实现原生窗口、导航、主题/组件、真实曲库数量与播放状态、已恢复曲目的播放/暂停。进度和音量只读。列表、歌单、歌词、完整设置和 AI 入口尚未迁移，界面明确标注。文档见 `docs/phase-c/`，本轮仅 C0/C1。
+
+构建仍用 MSYS2 UCRT64 / C++17 / CMake / Ninja / Qt 6；GUI 增加官方 Qml、Quick、QuickControls2（MSYS2 `mingw-w64-ucrt-x86_64-qt6-declarative`）。可用 `-DRELAXER_ENABLE_QML=OFF` 单独构建 Widgets。四种服务配置在 Quick 查找前返回，不需要 Widgets/Quick。
+
+本地隔离 overlay 构建示例（prefix 必须是同版本 Qt）：
+
+```powershell
+cmake -S . -B build-c1 -G Ninja -DCMAKE_BUILD_TYPE=Release -DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=D:/path/to/quick/ucrt64
+cmake --build build-c1 --parallel 8
+# overlay 模式运行测试前设置 PATH 和 QML_IMPORT_PATH；正常完整 Qt 安装无需 overlay。
+ctest --test-dir build-c1 --output-on-failure
+python scripts/deploy-phase-c.py --source . --build build-c1 --qt-prefix C:/Software/MSYS2/ucrt64 --quick-prefix D:/path/to/quick/ucrt64 --destination D:/path/to/fresh-package
+```
+
+可重复观测：`Relaxer.exe --data <隔离目录> --ui=qml --diagnostics <JSON> --quit-after 4000`。`quit-after` 仅供显式资料目录的诊断；正式回归另用原生关闭验证。部署脚本只收集运行时，必须通过系统 PATH 的原生验证后才可视为已验证便携包。
+
+以下为保留的 V0.2.0 使用说明与验收背景，其发布结论仅适用于原稳定提交。
+
+---
+
+# V0.2.0 历史说明
 
 Windows 本地音乐播放器，基于 C++17、Qt 6 Widgets、SQLite 和 FFmpeg。正式数值版本为 0.2.0，窗口标题为 Relaxer V0.2.0。
 

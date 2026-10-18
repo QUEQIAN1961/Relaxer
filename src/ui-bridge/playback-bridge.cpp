@@ -8,7 +8,11 @@ PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent) : QObjec
     connect(facade, &PlaybackFacade::saved, this, [this] { refresh(); });
     connect(facade, &PlaybackFacade::error, this, &PlaybackBridge::setError);
     connect(facade, &PlaybackFacade::saveFailed, this, &PlaybackBridge::setError);
-    connect(facade, &QObject::destroyed, this, [this] { m_facade = nullptr; refresh(); });
+    const auto invalidate = [this] { m_facade = nullptr; refresh(); };
+    // The legacy facade disconnects every outgoing connection at the start of
+    // its destructor. Its owned backend still emits destroyed, before facade
+    // QObject destruction, so use that lifetime notification as well.
+    connect(facade->backend(), &QObject::destroyed, this, invalidate);
     refresh();
 }
 void PlaybackBridge::refresh() {
@@ -27,7 +31,7 @@ void PlaybackBridge::refresh() {
 }
 void PlaybackBridge::toggle() {
     Q_ASSERT(QThread::currentThread() == thread());
-    if (available() && hasTrack()) m_facade->toggle();
+    if (available() && m_facade->current().id) m_facade->toggle();
 }
 void PlaybackBridge::setError(const QString &error) {
     if (m_error != error) { m_error = error; emit errorChanged(); }

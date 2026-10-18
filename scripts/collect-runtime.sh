@@ -38,7 +38,11 @@ for name in windeployqt6 windeployqt-qt6 windeployqt; do
   if command -v "$name" >/dev/null; then deploy_qt="$name"; break; fi
 done
 [[ -n "$deploy_qt" ]] || { echo 'windeployqt missing' >&2; exit 2; }
-"$deploy_qt" --release --no-translations "$(cygpath -m "$stage/Relaxer.exe")"
+qml_args=()
+if grep -q '^RELAXER_ENABLE_QML:BOOL=ON$' "$build/CMakeCache.txt"; then
+  qml_args=(--qmldir "$(cygpath -m "$(pwd)/src/qml")")
+fi
+"$deploy_qt" --release --no-translations "${qml_args[@]}" "$(cygpath -m "$stage/Relaxer.exe")"
 plugins=/ucrt64/share/qt6/plugins
 [[ -d "$plugins" ]] || plugins=/ucrt64/lib/qt6/plugins
 # windeployqt can copy every installed SQL driver, including drivers whose
@@ -58,7 +62,7 @@ for kind in sqldrivers multimedia imageformats; do
 done
 [[ -f "$stage/platforms/qwindows.dll" && -f "$stage/sqldrivers/qsqlite.dll" ]] || { echo 'Qt plugins missing' >&2; exit 2; }
 [[ -f "$stage/multimedia/ffmpegmediaplugin.dll" ]] || { echo 'Qt FFmpeg playback plugin missing' >&2; exit 2; }
-printf '%s\n' '[Paths]' 'Prefix=.' 'Plugins=.' > "$stage/qt.conf"
+printf '%s\n' '[Paths]' 'Prefix=.' 'Plugins=.' 'QmlImports=qml' > "$stage/qt.conf"
 if [[ -x runtime-ffmpeg/ffmpeg.exe && -x runtime-ffmpeg/ffprobe.exe ]]; then
   cp runtime-ffmpeg/ffmpeg.exe runtime-ffmpeg/ffprobe.exe "$stage/bin/"
 else

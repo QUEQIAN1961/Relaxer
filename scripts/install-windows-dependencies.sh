@@ -16,6 +16,7 @@ packages=(
   mingw-w64-ucrt-x86_64-cmake
   mingw-w64-ucrt-x86_64-ninja
   mingw-w64-ucrt-x86_64-qt6-base
+  mingw-w64-ucrt-x86_64-qt6-declarative
   mingw-w64-ucrt-x86_64-qt6-multimedia
   mingw-w64-ucrt-x86_64-qt6-multimedia-ffmpeg
   mingw-w64-ucrt-x86_64-qt6-svg

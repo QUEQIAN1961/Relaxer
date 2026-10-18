@@ -10,7 +10,8 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly)
     initializeQmlResources();
     setObjectName("qmlShell");
     // A fixed official style makes custom control backgrounds portable on Windows.
-    QQuickStyle::setStyle("Basic");
+    static const bool styleConfigured = [] { QQuickStyle::setStyle("Basic"); return true; }();
+    Q_UNUSED(styleConfigured)
     QQmlEngine::setObjectOwnership(&m_appBridge, QQmlEngine::CppOwnership);
     QQmlEngine::setObjectOwnership(&m_playbackBridge, QQmlEngine::CppOwnership);
     m_engine = std::make_unique<QQmlApplicationEngine>();

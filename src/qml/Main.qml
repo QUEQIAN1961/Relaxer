@@ -14,6 +14,7 @@ ApplicationWindow {
     color: Theme.background
     property int currentPage: appBridge.page
     property color themeAccent: Theme.accent
+    readonly property QtObject designTokens: Theme
     font.family: Qt.platform.os === "windows" ? "Microsoft YaHei UI" : "sans-serif"
     font.pixelSize: Theme.fontSize
     ColumnLayout {
