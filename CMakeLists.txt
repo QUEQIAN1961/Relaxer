@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Relaxer VERSION 0.2.0 LANGUAGES CXX)
+project(Relaxer VERSION 0.2.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -330,10 +330,24 @@ if(WIN32)
 endif()
 qt_add_executable(Relaxer WIN32 src/main.cpp)
 target_link_libraries(Relaxer PRIVATE relaxer_ui)
+# Service-only configurations return above this point, before any Quick lookup.
+option(RELAXER_ENABLE_QML "Build the optional Phase C QML shell" ON)
+if(RELAXER_ENABLE_QML)
+  find_package(Qt6 6.4 REQUIRED COMPONENTS Qml Quick QuickControls2)
+  add_library(relaxer_qml STATIC
+    src/ui-bridge/app-bridge.cpp src/ui-bridge/app-bridge.h
+    src/ui-bridge/playback-bridge.cpp src/ui-bridge/playback-bridge.h
+    src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
+    src/qml/qml.qrc)
+  target_include_directories(relaxer_qml PUBLIC src)
+  target_link_libraries(relaxer_qml PUBLIC relaxer_playback_facade Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+  target_link_libraries(Relaxer PRIVATE relaxer_qml)
+  target_compile_definitions(Relaxer PRIVATE RELAXER_ENABLE_QML=1)
+endif()
 if(WIN32)
-  target_sources(Relaxer PRIVATE resources/relaxer.rc)
+  target_sources(Relaxer PRIVATE resources/phase-c-relaxer.rc)
   target_include_directories(Relaxer PRIVATE resources)
-  add_executable(RelaxerStart WIN32 src/start-windows.cpp resources/start.rc)
+  add_executable(RelaxerStart WIN32 src/start-windows.cpp resources/phase-c-start.rc)
   set_target_properties(RelaxerStart PROPERTIES AUTOMOC OFF)
   target_include_directories(RelaxerStart PRIVATE resources)
   target_link_libraries(RelaxerStart PRIVATE user32 shell32 ole32 comctl32 gdi32 dwmapi uxtheme advapi32)
