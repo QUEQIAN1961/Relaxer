@@ -44,7 +44,7 @@ QJsonObject readJson(const QString &path) {
     return QJsonDocument::fromJson(file.readAll()).object();
 }
 QString appPath() {
-    return qEnvironmentVariable("RELAXER_TEST_APP", QString::fromLocal8Bit(RELAXER_APP_PATH));
+    return qEnvironmentVariable("RELAXER_TEST_APP", QString::fromUtf8(RELAXER_APP_PATH));
 }
 }
 class QmlFoundationTests final : public QObject {

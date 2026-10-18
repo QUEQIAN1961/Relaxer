@@ -334,6 +334,11 @@ target_link_libraries(Relaxer PRIVATE relaxer_ui)
 option(RELAXER_ENABLE_QML "Build the optional Phase C QML shell" ON)
 if(RELAXER_ENABLE_QML)
   find_package(Qt6 6.4 REQUIRED COMPONENTS Qml Quick QuickControls2)
+  # QRC is explicit and Qt plugins are shared. No static QML import scan is
+  # needed here; deployment scans src/qml separately with qmlimportscanner.
+  if(QT6_IS_SHARED_LIBS_BUILD)
+    set_property(TARGET Relaxer PROPERTY QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
+  endif()
   include(scripts/qml-test-environment.cmake)
   relaxer_configure_qml_tests()
   add_library(relaxer_qml STATIC
