@@ -3,7 +3,7 @@
 #include "phase-c-version.h"
 #include "ui-run-diagnostics.h"
 #ifdef RELAXER_ENABLE_QML
-#include "ui-bridge/qml-shell.h"
+#include "ui-bridge/optional-qml-runtime.h"
 #endif
 #include "media-smoke.h"
 #include <QApplication>
@@ -21,6 +21,7 @@
 #include <QTemporaryDir>
 #include <QTextStream>
 #include <QTimer>
+#include <memory>
 using namespace relaxer;
 static void initializeAppResources() { Q_INIT_RESOURCE(resources); }
 static QString dataRoot() {
@@ -117,6 +118,17 @@ int main(int argc, char **argv) {
         if (result.exitCode == 0) QTextStream(stderr) << "Audio worker returned no valid PCM verification proof.\n";
         return result.timedOut ? 6 : (result.exitCode ? result.exitCode : 5);
     }
+#ifdef RELAXER_ENABLE_QML
+    std::unique_ptr<OptionalQmlRuntime> qmlRuntime;
+    if (ui == "qml") {
+        qmlRuntime = std::make_unique<OptionalQmlRuntime>(QDir(app.applicationDirPath()).filePath(
+            QString::fromUtf8(RELAXER_QML_MODULE_FILENAME)));
+        if (!qmlRuntime->load()) {
+            QTextStream(stderr) << qmlRuntime->error() << '\n';
+            return 11; // Before mkdir, QLockFile, Library.open or Playback.
+        }
+    }
+#endif
     QString root = parser.isSet("data") ? parser.value("data") : dataRoot();
     QDir().mkpath(root);
     QLockFile lock(QDir(root).filePath("relaxer.lock"));
@@ -128,6 +140,14 @@ int main(int argc, char **argv) {
                                  "此音乐资料库已在另一个 Relaxer 窗口中打开。请切换到已有窗口。");
         return 3;
     }
+#ifdef RELAXER_ENABLE_QML
+    if (qmlRuntime) {
+        const QmlLaunchOptions options{QDir(root).absolutePath(), parser.value("screenshot"),
+            parser.value("diagnostics"), qmlPages.indexOf(parser.value("page")),
+            parser.isSet("quit-after") ? quitAfter : 0};
+        return qmlRuntime->run(&app, options, diagnostics);
+    }
+#endif
     Library lib(root);
     QString error;
     if (!lib.open(&error)) {
@@ -183,36 +203,6 @@ int main(int argc, char **argv) {
         if (parser.isSet("diagnostics") && !diagnostics.write(parser.value("diagnostics"))) return 9;
         return saved ? code : 8;
     };
-#ifdef RELAXER_ENABLE_QML
-    if (ui == "qml") {
-        QmlShell shell(&lib);
-        QObject::connect(&app, &QCoreApplication::aboutToQuit, &shell, &QmlShell::shutdown);
-        if (!shell.load()) {
-            QTextStream(stderr) << "QML window creation failed: " << shell.warnings().join('\n') << '\n';
-            return 10;
-        }
-        diagnostics.mark("uiLoadedMs");
-        const int page = qmlPages.indexOf(parser.value("page"));
-        shell.appBridge()->navigate(page);
-        auto *window = shell.window();
-        diagnostics.result["windowObject"] = window->objectName();
-        diagnostics.result["title"] = window->title();
-        diagnostics.result["databaseConnections"] = QSqlDatabase::connectionNames().size();
-        diagnostics.result["playbackInstances"] = shell.findChildren<Playback *>().size();
-        QObject::connect(window, &QQuickWindow::frameSwapped, &app, [&] { diagnostics.firstFrame(); }, Qt::QueuedConnection);
-        if (parser.isSet("screenshot")) QTimer::singleShot(800, &app, [&] {
-            app.exit(window->grabWindow().save(parser.value("screenshot")) ? 0 : 7);
-        });
-        if (parser.isSet("quit-after")) QTimer::singleShot(quitAfter, &app, [&, window] {
-            diagnostics.mark("closeRequestedMs"); window->close();
-        });
-        diagnostics.mark("windowShownMs");
-        if (parser.isSet("diagnostics")) diagnostics.write(parser.value("diagnostics"));
-        const int code = app.exec();
-        diagnostics.mark("eventLoopReturnedMs");
-        return finish(code, shell.shutdown());
-    }
-#endif
     Window window(&lib);
     window.installEventFilter(&diagnostics);
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &window, [&] { window.playbackFacade()->shutdown(); });

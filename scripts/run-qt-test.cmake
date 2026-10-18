@@ -6,8 +6,10 @@ endif()
 get_filename_component(report_directory "${RELAXER_TEST_LOG}" DIRECTORY)
 file(MAKE_DIRECTORY "${report_directory}")
 file(REMOVE "${RELAXER_TEST_LOG}")
+get_filename_component(report_name "${RELAXER_TEST_LOG}" NAME)
 execute_process(
-  COMMAND "${RELAXER_TEST_EXECUTABLE}" -v1 -o "${RELAXER_TEST_LOG},txt" -o "-,txt"
+  COMMAND "${RELAXER_TEST_EXECUTABLE}" -v1 -o "${report_name},txt" -o "-,txt"
+  WORKING_DIRECTORY "${report_directory}"
   RESULT_VARIABLE test_result)
 set(test_report "")
 if(EXISTS "${RELAXER_TEST_LOG}")
