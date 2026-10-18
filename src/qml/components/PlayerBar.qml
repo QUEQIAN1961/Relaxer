@@ -5,6 +5,9 @@ import "../theme"
 Rectangle {
     id: bar
     objectName: "playerBar"
+    property bool expanded: false
+    property real volumeWidth: expanded ? 160 : 110
+    Behavior on volumeWidth { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
     implicitHeight: 138
     color: Theme.panel
     function timeText(ms) {
@@ -75,7 +78,7 @@ Rectangle {
             }
             ToolButton { objectName: "muteButton"; Layout.preferredWidth: 48; text: playbackBridge.muted ? "静音" : "♫"; Accessible.name: playbackBridge.muted ? "取消静音" : "静音"; onClicked: playbackBridge.toggleMute() }
             Slider {
-                objectName: "volumeSlider"; Layout.preferredWidth: 110
+                objectName: "volumeSlider"; Layout.preferredWidth: bar.volumeWidth
                 from: 0; to: 100; stepSize: 1; value: playbackBridge.volume
                 onMoved: playbackBridge.setVolume(Math.round(value))
                 Accessible.name: "音量"

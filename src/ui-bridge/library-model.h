@@ -81,12 +81,12 @@ class PlaylistListModel final : public QAbstractListModel {
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
     bool contains(qint64 id) const;
+    void refresh();
   signals:
     void countChanged();
   private:
     QPointer<Library> m_library;
     QVector<Playlist> m_playlists;
     QTimer m_refresh;
-    void refresh();
 };
 }

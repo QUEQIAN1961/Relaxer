@@ -19,6 +19,7 @@ class AppBridge final : public QObject {
     int page() const { return m_page; }
     bool available() const { return !m_library.isNull(); }
     Q_INVOKABLE bool navigate(int page);
+    void refresh();
   signals:
     void trackCountChanged();
     void pageChanged();
@@ -27,6 +28,5 @@ class AppBridge final : public QObject {
     QPointer<Library> m_library;
     QTimer m_refresh;
     int m_count = 0, m_page = 0;
-    void refresh();
 };
 }

@@ -3,6 +3,12 @@
 #include "playback-bridge.h"
 #include "library-bridge.h"
 #include "queue-model.h"
+#include "lyrics-model.h"
+#include "settings-bridge.h"
+#include "import-bridge.h"
+#include "ai-bridge.h"
+#include "translation-bridge.h"
+#include "lyrics-search-bridge.h"
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <memory>
@@ -12,7 +18,8 @@ namespace relaxer {
 class QmlShell final : public QObject {
     Q_OBJECT
   public:
-    explicit QmlShell(Library *library, QObject *parent = nullptr, bool decodeOnly = false);
+    explicit QmlShell(Library *library, QObject *parent = nullptr, bool decodeOnly = false,
+                      ai::AiRuntime *runtime = nullptr, std::unique_ptr<TranslationBrowserBackend> browser = {});
     ~QmlShell() override;
     bool load();
     bool shutdown();
@@ -24,6 +31,14 @@ class QmlShell final : public QObject {
     LibraryBridge *libraryBridge() { return &m_libraryBridge; }
     PlaylistListModel *playlistModel() { return &m_playlists; }
     QueueListModel *queueModel() { return &m_queue; }
+    LyricsModel *lyricsModel() { return &m_lyrics; }
+    SettingsBridge *settingsBridge() { return &m_settings; }
+    ImportBridge *importBridge() { return &m_importBridge; }
+    ImportCoordinator *importCoordinator() { return &m_import; }
+    AiBridge *aiBridge() { return &m_aiBridge; }
+    TranslationBridge *translationBridge() { return &m_translationBridge; }
+    TranslationCoordinator *translationCoordinator() { return &m_translation; }
+    LyricsSearchBridge *lyricsSearchBridge() { return &m_searchBridge; }
     QStringList warnings() const { return m_warnings; }
   private:
     PlaybackFacade m_facade;
@@ -34,6 +49,17 @@ class QmlShell final : public QObject {
     PlaylistListModel m_playlists;
     LibraryBridge m_libraryBridge;
     QueueListModel m_queue;
+    std::unique_ptr<ai::AiRuntime> m_ownedAi;
+    ai::AiRuntime *m_ai;
+    ImportCoordinator m_import;
+    LyricsModel m_lyrics;
+    SettingsBridge m_settings;
+    AiBridge m_aiBridge;
+    TranslationCoordinator m_translation;
+    TranslationBridge m_translationBridge;
+    ImportBridge m_importBridge;
+    LyricsSearchCoordinator m_search;
+    LyricsSearchBridge m_searchBridge;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QStringList m_warnings;
 };

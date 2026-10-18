@@ -350,6 +350,11 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/library-bridge.cpp src/ui-bridge/library-bridge.h
     src/ui-bridge/queue-model.cpp src/ui-bridge/queue-model.h
     src/ui-bridge/lyrics-model.cpp src/ui-bridge/lyrics-model.h
+    src/ui-bridge/settings-bridge.cpp src/ui-bridge/settings-bridge.h
+    src/ui-bridge/import-bridge.cpp src/ui-bridge/import-bridge.h
+    src/ui-bridge/ai-bridge.cpp src/ui-bridge/ai-bridge.h
+    src/ui-bridge/translation-bridge.cpp src/ui-bridge/translation-bridge.h
+    src/ui-bridge/lyrics-search-bridge.cpp src/ui-bridge/lyrics-search-bridge.h
     src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
     src/qml/qml.qrc)
   target_include_directories(relaxer_qml PUBLIC src)
@@ -383,6 +388,17 @@ if(RELAXER_ENABLE_QML)
   add_executable(relaxer_qml_lyrics_model_tests tests/qml-lyrics-model-tests.cpp)
   target_link_libraries(relaxer_qml_lyrics_model_tests PRIVATE relaxer_qml Qt6::Test)
   relaxer_add_qt_test(relaxer_qml_lyrics_model relaxer_qml_lyrics_model_tests)
+  add_executable(relaxer_c4c5_bridge_tests tests/qml-c4c5-bridge-tests.cpp)
+  target_link_libraries(relaxer_c4c5_bridge_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_c4c5_bridges relaxer_c4c5_bridge_tests)
+  set_tests_properties(relaxer_qml_c4c5_bridges PROPERTIES TIMEOUT 240)
+  add_executable(relaxer_c4c5_ui_tests tests/qml-c4c5-ui-tests.cpp)
+  target_link_libraries(relaxer_c4c5_ui_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_c4c5_ui relaxer_c4c5_ui_tests)
+  relaxer_qml_test_environment(relaxer_qml_c4c5_ui)
+  add_executable(relaxer_qml_search_bridge_tests tests/qml-lyrics-search-bridge-tests.cpp)
+  target_link_libraries(relaxer_qml_search_bridge_tests PRIVATE relaxer_qml Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_search_bridge relaxer_qml_search_bridge_tests)
   add_executable(relaxer_qml_widgets_parity_tests tests/qml-widgets-parity-tests.cpp)
   target_link_libraries(relaxer_qml_widgets_parity_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
   relaxer_add_qt_test(relaxer_qml_widgets_parity relaxer_qml_widgets_parity_tests)
