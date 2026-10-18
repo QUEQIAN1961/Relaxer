@@ -23,7 +23,7 @@ ColumnLayout {
                 anchors.fill: parent; anchors.margins: 12
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Text { text: name; color: Theme.text; font.pixelSize: 18; elide: Text.ElideRight; Layout.fillWidth: true }
+                    Text { text: name; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 18; elide: Text.ElideRight; Layout.fillWidth: true }
                     Text { text: trackCount + " 首歌曲"; color: Theme.secondary }
                 }
                 ShellButton { text: "打开"; onClicked: { if (libraryBridge.openPlaylist(playlistKey)) appBridge.navigate(0) } }

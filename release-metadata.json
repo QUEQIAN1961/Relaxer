@@ -1,12 +1,12 @@
 {
   "numericVersion": "0.2.1",
-  "prerelease": "dev-c1-fix1",
-  "displayVersion": "V0.2.1-dev-c1-fix1",
-  "status": "DEVELOPER-VERIFIED — AWAITING HARNESS R13",
+  "prerelease": "dev-c2c3",
+  "displayVersion": "V0.2.1-dev-c2c3",
+  "status": "C2+C3 DEVELOPER-VERIFIED — AWAITING HARNESS",
   "applicationName": "Relaxer",
   "organizationName": "Relaxer",
-  "baselineCommit": "57f95d71503594f973f0e4180d62a09ccc1d21a6",
-  "baselineTree": "c265064b065eb7b8d7653384eb6e8427e7015977",
+  "baselineCommit": "a4fbda6d5919e5d53771db394d5f94f16f0810b5",
+  "baselineTree": "0a45e11576ded7882abec764ddbd2248465b1eb0",
   "stableCommit": "43203314012f509a2f83e4558b9206001b2e5f75",
   "stableTag": "v0.2.0",
   "defaultUi": "widgets",
@@ -16,12 +16,25 @@
   "officialReleaseApproved": false,
   "publicPublicationAuthorized": false,
   "classificationStorage": "existing Library settings rows keyed by stable trackId and content hash",
-  "releaseScope": "C1 Fix1 only: R12 CTest imports, optional QML loading and clean portable staging; no C2",
+  "releaseScope": "C2+C3: typed library, navigation, playlists, facade playback controls and read-only queue projection; no C4/C5/C6",
   "optionalQmlModule": "RelaxerQmlUi.dll",
   "qmlLoadFailureExit": 11,
   "moduleCodeLifetime": "Pinned until process exit; per-session QML and business objects are destroyed",
-  "independentAcceptance": "Pending Harness R13; R12 findings remain registered until independent verification",
-  "defectLedgerBeforeFix": {"P2": 2, "P3": 25, "total": 27},
-  "developerFixedPendingVerification": ["D-R12-01", "D-R12-02", "D-R12-03"],
-  "C1-P301": "Unchanged; first C2 task: efficient count and read-only typed model, 0/1000/10000 tracks"
+  "independentAcceptance": "C1 Fix1 baseline passed Harness R13; current C2+C3 batch awaits independent Harness",
+  "defectLedgerBeforeFix": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 0,
+    "P3": 24,
+    "total": 24
+  },
+  "developerFixedPendingVerification": [
+    "C1-P301"
+  ],
+  "C1-P301": "Efficient count with existing SQLite connection; 0/1k/10k functional and measured evidence; developer-fixed pending independent verification",
+  "inheritedClosedByHarnessR13": [
+    "D-R12-01",
+    "D-R12-02",
+    "D-R12-03"
+  ]
 }

@@ -58,9 +58,9 @@ Rectangle {
                         Accessible.name: "播放 " + row.title
                         onClicked: table.playRequested(row.trackKey)
                     }
-                    Text { text: row.title; color: table.currentKey === row.trackKey ? Theme.accent : Theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
-                    Text { text: row.artist; color: Theme.secondary; Layout.preferredWidth: table.showAlbum ? 140 : 100; elide: Text.ElideRight }
-                    Text { visible: table.showAlbum; text: row.album; color: Theme.secondary; Layout.preferredWidth: 140; elide: Text.ElideRight }
+                    Text { text: row.title; textFormat: Text.PlainText; color: table.currentKey === row.trackKey ? Theme.accent : Theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
+                    Text { text: row.artist; textFormat: Text.PlainText; color: Theme.secondary; Layout.preferredWidth: table.showAlbum ? 140 : 100; elide: Text.ElideRight }
+                    Text { visible: table.showAlbum; text: row.album; textFormat: Text.PlainText; color: Theme.secondary; Layout.preferredWidth: 140; elide: Text.ElideRight }
                     Text {
                         text: Math.floor(row.duration / 60000) + ":" + (Math.floor(row.duration / 1000) % 60 < 10 ? "0" : "") + Math.floor(row.duration / 1000) % 60
                         color: Theme.secondary; Layout.preferredWidth: 58

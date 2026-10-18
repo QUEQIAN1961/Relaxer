@@ -57,7 +57,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staging", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--prefix", default="Relaxer-V0.2.1-dev-C1-Fix1")
+    parser.add_argument("--prefix", default="Relaxer-V0.2.1-dev-C2C3")
     args = parser.parse_args()
     entries = package(args.staging.resolve(), args.output.resolve(), args.prefix)
     print(json.dumps({"files": len(entries), "residue": False, "output": str(args.output)}))

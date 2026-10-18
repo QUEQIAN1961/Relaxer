@@ -1,28 +1,38 @@
-# Relaxer V0.2.1-dev-c1-fix1 · C1 工程修复开发交付
+# Relaxer V0.2.1-dev-c2c3 · QML 音乐库与播放控制
 
-本修复分支从 C1 冻结提交 `57f95d71503594f973f0e4180d62a09ccc1d21a6` 起步；上游稳定版仍为 `v0.2.0` / `43203314012f509a2f83e4558b9206001b2e5f75`。状态：**DEVELOPER-VERIFIED — AWAITING HARNESS R13**。未开始 C2，未创建正式 V0.2.1 标签。默认仍为完整 Widgets，`runtime/Relaxer.exe --ui=qml`（便携包内也可用 `RelaxerQml.cmd`）打开 QML Foundation。两种界面互斥，沿用同一 dataRoot、资料锁及业务核心实现，每个会话仅一套 Library/Playback/Queue。
+本批次从 Harness R13 PASS 的 C1 Fix1 `a4fbda6d5919e5d53771db394d5f94f16f0810b5` 起步。当前状态 **C2+C3 DEVELOPER-VERIFIED — AWAITING HARNESS**；本版是开发交付，未进入 C4/C5/C6，未创建正式 v0.2.1 标签或公开发布。
 
-QML 已实现原生窗口、导航、主题/组件、真实曲库数量与播放状态、已恢复曲目的播放/暂停。进度和音量只读。列表、歌单、歌词、完整设置和 AI 入口尚未迁移，界面明确标注。文档见 `docs/phase-c/`，本轮仅 C0/C1。
+默认 `RelaxerStart.exe` 使用完整 Widgets。`RelaxerQml.cmd` 或 `runtime/Relaxer.exe --ui=qml` 使用 QML；切换界面前先关闭另一入口。两种模式沿用同一 dataRoot、relaxer.lock、SQLite schema、PlaybackFacade、Queue 和会话设置。不要在运行中复制真实资料库。
 
-构建仍用 MSYS2 UCRT64 / C++17 / CMake / Ninja / Qt 6；GUI 增加官方 Qml、Quick、QuickControls2（MSYS2 `mingw-w64-ucrt-x86_64-qt6-declarative`）。可用 `-DRELAXER_ENABLE_QML=OFF` 单独构建 Widgets。四种服务配置在 Quick 查找前返回，不需要 Widgets/Quick。
+QML 已接入真实本地曲目、文字筛选、排序、单选/双击播放、收藏、歌单创建/重命名/删除/切换及成员管理。播放栏支持实际播放暂停、上下曲、Seek、音量、静音与四种既有模式；队列是核心的只读投影，可以选择播放或移除。队列按原始顺序显示，随机下一曲由既有核心决定；不另建 QML 播放器或队列状态机。
 
-本地隔离 overlay 构建示例（prefix 必须是同版本 Qt）：
+使用步骤：先在 Widgets 导入音乐，再关闭并打开 QML。从音乐库/歌单双击或点播放，会以当前筛选排序后的列表建立既有核心队列。单击只选择，不改变正在播放曲目。筛选隐藏选中项时保留其 ID，隐藏项操作禁用；删除曲目后清除失效选择。歌单内上移/下移要求清空筛选、恢复原顺序。删除歌单仅删除关联；确认“移除引用”会移除歌曲引用、歌单关联和统计，音乐文件保留。完整导入管理、歌词、AI、高级设置继续在 Widgets 使用。
+
+曲目角色 trackId 保持 qint64，另提供十进制 trackKey 供 QML 命令传递，避免 JavaScript 数值精度损失。模型只读，不另开数据库连接。Library::trackCount 使用同一连接的 COUNT，不物化全库。粗粒度 Library::changed 合并后刷新快照，播放进度不刷新列表。静音调用原音量接口，最后可听音量只存于已有 settings 表的 qml.lastAudibleVolume UI 偏好，不新增 schema。
+
+Quick 仍按需加载于 `RelaxerQmlUi.dll`。主 EXE 不导入 Quick/QML；显式 QML 缺模块或依赖时返回 11，在创建 dataRoot、锁和数据库前失败。模块代码保留至进程结束，以保护 Qt 全局类型缓存；每次会话按 engine → model/bridge → facade → Library 释放。private ABI 只用于同包相同 Qt/编译器构建。
+
+## 构建与测试
+
+Windows MSYS2 UCRT64、C++17、CMake/Ninja、匹配 Qt 6 Core/Gui/Widgets/Sql/Multimedia/Svg/Test/Network/Qml/Quick/QuickControls2。
 
 ```powershell
-cmake -S . -B build-c1 -G Ninja -DCMAKE_BUILD_TYPE=Release -DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=D:/path/to/quick/ucrt64
-cmake --build build-c1 --parallel 8
-# CTest 自动注入已解析 Qt 前缀的 QML imports；无需手工设置 QML_IMPORT_PATH。
-ctest --test-dir build-c1 --output-on-failure
-python scripts/deploy-phase-c.py --source . --build build-c1 --qt-prefix C:/Software/MSYS2/ucrt64 --quick-prefix D:/path/to/quick/ucrt64 --destination D:/path/to/fresh-package
+cmake -S . -B build-c2c3 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Software/MSYS2/ucrt64 -DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=D:/path/to/quick/ucrt64
+cmake --build build-c2c3 --parallel 8
+ctest --test-dir build-c2c3 --output-on-failure
 ```
 
-可重复观测：`Relaxer.exe --data <隔离目录> --ui=qml --diagnostics <JSON> --quit-after 4000`。`quit-after` 仅供显式资料目录的诊断；回归另用原生关闭验证。
+CTest 自动设置所选 Declarative 的真实 imports，无需手工设置 QML_IMPORT_PATH。Qt Base/Declarative 必须版本匹配。开发机 Qt moc 的完整中文 build 输出路径限制仍存在；空格 build、中文运行/data/import 路径分别验证，不把工具限制冒充通过。
 
-Fix1：Quick 专属代码位于按需加载的 `RelaxerQmlUi.dll`。Widgets 主 EXE 不导入 Quick/QML；显式 QML 缺失模块或运行依赖时返回 11，在创建 dataRoot、取得锁和打开数据库之前失败。模块代码保持映射到进程结束，以保护 Qt 全局类型缓存；每次 QML 会话仍先销毁 engine，再销毁 Bridge、PlaybackFacade、Library。接口只适用于本包相同工具链，不是第三方插件 ABI。
+专用测试包括 library model、QML C2+C3 和真实 Widgets/QML parity；旧用例完整保留。原生性能探针 `relaxer_c2c3_performance_probe` 按需构建，先 --prepare 创建新合成夹具，再用新进程测量；拒绝无合成标记的已有资料库。帧响应指标不代表真实 FPS 或物理听音结果。
 
-部署先生成全新候选目录，以 `scripts/validate-phase-c-native.py` 和 `scripts/validate-c1-fix1-isolation.py` 验证。再用 `deploy-phase-c.py --verification-proof <native-qa/verification-proof.json>` 从相同构建输入生成另一全新 shipping 目录，最后运行 `scripts/package-phase-c.py --staging <shipping> --output <新ZIP>`。验证过的候选目录保留证据；不可直接压缩。打包器拒绝日志、数据库、data、媒体、缓存和凭据。策略测试：`python tests/package-phase-c-tests.py`。Qt Base/Declarative 必须版本匹配；不永久修改系统环境。
+## 部署与打包
 
-以下为保留的 V0.2.0 使用说明与验收背景，其发布结论仅适用于原稳定提交。
+先用 scripts/deploy-phase-c.py 组装全新候选，再以 scripts/validate-phase-c-native.py 和继承的 validate-c1-fix1-isolation.py 验证。用候选的 binary-hash-bound verification-proof 重新部署到另一全新 shipping 目录，最后 scripts/package-phase-c.py 生成 ZIP。候选运行过的目录保留证据，禁止直接打包；打包器拒绝日志、数据库、媒体、缓存和凭据，并验证核心三二进制哈希与包内清单。--data 和 RELAXER_DATA 优先级不变。
+
+详细边界见 docs/phase-c/c2c3.md；批次末仅一次完整交付，开发日志与性能结果在 Evidence，报告不冒充独立 Harness 验收。
+
+以下为原稳定版历史说明，其发布结论仅适用于对应稳定提交。
 
 ---
 

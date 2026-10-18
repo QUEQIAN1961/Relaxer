@@ -65,7 +65,7 @@ bool prepare(const QString &root,int count) {
     library.deferChanges(true);
     for(int i=0;i<count;++i) {
         Track track;track.hash=QString("perf-%1").arg(i);track.file="Music/fixture.wav";
-        track.title=QString("歌曲 日本語 Track %1 — 长标题用于桌面省略测试").arg(i,5,10,QChar('0'));
+        track.title=QString("歌曲 日本語 テスト Track %1 — 长标题用于桌面省略测试").arg(i,5,10,QChar('0'));
         track.artist=i%2?"Artist B":"Artist A";track.album=QString("Album %1").arg(i%11);track.duration=10000;
         if(!library.insert(track)){db.rollback();library.deferChanges(false);return false;}
     }
@@ -101,7 +101,8 @@ int main(int argc,char **argv) {
     QJsonObject result{{"tracks",count},{"databaseOpenMs",openMs},{"shellAndModelInitMs",shellInitMs},
         {"firstFrameFromShellInitMs",firstFrameMs},{"firstScreenVisibleDelegates",maxDelegates},
         {"graphicsApi",int(window->rendererInterface()->graphicsApi())},{"qpa",QGuiApplication::platformName()},
-        {"quickBackend",qEnvironmentVariable("QT_QUICK_BACKEND")},{"windowWidth",window->width()},{"windowHeight",window->height()}};
+        {"quickBackend",qEnvironmentVariable("QT_QUICK_BACKEND")},{"windowWidth",window->width()},{"windowHeight",window->height()},
+        {"devicePixelRatio",window->devicePixelRatio()},{"cachePolicy","Fresh process; OS caches not flushed; synthetic fixture prepared immediately beforehand"}};
     auto *model=shell.libraryModel();if(count)model->setSelectedId(model->idAt(count/2));const auto selection=model->selectedId();
     clock.restart();model->setFilterText("Artist A");result["filterModelMs"]=clock.nsecsElapsed()/1000000.;
     if(frame(window)<0||model->count()!=(count+1)/2)return 15;
@@ -132,10 +133,35 @@ int main(int argc,char **argv) {
     }
     result["legacyMaterializedCountMeanNs"]=double(clock.nsecsElapsed()/5);
     result["legacyRetainedPayloadLowerBoundBytes"]=double(payload);result["newCountMaterializedTracks"]=0;
+    if(count>0) {
+        clock.restart();shell.libraryBridge()->playAll();result["playCommandMs"]=clock.nsecsElapsed()/1000000.;
+        QElapsedTimer ready;ready.start();
+        while((shell.queueModel()->count()!=count||!shell.playbackBridge()->playing())&&ready.elapsed()<5000)QTest::qWait(5);
+        if(shell.queueModel()->count()!=count||!shell.playbackBridge()->playing())return 25;
+        result["queueAndPlaybackReadyMs"]=clock.nsecsElapsed()/1000000.;
+        QSignalSpy queueResets(shell.queueModel(),&QAbstractItemModel::modelReset);
+        QSignalSpy trackResets(shell.libraryModel(),&QAbstractItemModel::modelReset);
+        QSignalSpy playlistResets(shell.playlistModel(),&QAbstractItemModel::modelReset);
+        QTest::qWait(1100);
+        if(shell.facade()->position()<500||!queueResets.isEmpty()||!trackResets.isEmpty()||!playlistResets.isEmpty())return 26;
+        result["playingPositionMs"]=double(shell.facade()->position());result["queueCountWhilePlaying"]=shell.queueModel()->count();
+        result["modelResetsDuringPlayback"]=queueResets.size()+trackResets.size()+playlistResets.size();
+        result["memoryWhilePlaying"]=memory();
+        list->setProperty("contentY",0.);if(frame(window)<0)return 19;
+    }
     if(parser.isSet("screenshots")) {
         const auto directory=parser.value("screenshots");QDir().mkpath(directory);
         for(const auto &size:{QSize(900,600),QSize(1180,760),QSize(1600,900)}) {
             window->resize(size);if(frame(window)<0||!window->grabWindow().save(QDir(directory).filePath(QString("%1x%2.png").arg(size.width()).arg(size.height()))))return 23;
+        }
+        shell.appBridge()->navigate(2);if(frame(window)<0||!window->grabWindow().save(QDir(directory).filePath("queue.png")))return 23;
+        shell.appBridge()->navigate(1);if(frame(window)<0||!window->grabWindow().save(QDir(directory).filePath("playlists.png")))return 23;
+        const auto lists=library.playlists();if(!lists.isEmpty()) {
+            clock.restart();if(!shell.libraryBridge()->openPlaylist(QString::number(lists.first().id)))return 27;
+            shell.appBridge()->navigate(0);if(frame(window)<0)return 27;
+            result["playlistOpenUntilNextFrameMs"]=clock.nsecsElapsed()/1000000.;
+            result["playlistVisibleTracks"]=shell.libraryModel()->count();
+            if(!window->grabWindow().save(QDir(directory).filePath("playlist-tracks.png")))return 23;
         }
     }
     result["warnings"]=QJsonArray::fromStringList(shell.warnings());if(!shell.warnings().isEmpty())return 24;

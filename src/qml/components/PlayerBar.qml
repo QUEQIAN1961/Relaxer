@@ -21,11 +21,13 @@ Rectangle {
                 Text {
                     objectName: "currentTitle"; Layout.fillWidth: true
                     text: playbackBridge.hasTrack ? playbackBridge.title : "选择一首音乐，开始放松"
+                    textFormat: Text.PlainText
                     font.pixelSize: Theme.fontSize; font.weight: Font.DemiBold; color: Theme.text; elide: Text.ElideRight
                 }
                 Text {
                     objectName: "currentArtist"; Layout.fillWidth: true
                     text: playbackBridge.hasTrack ? playbackBridge.artist : "从音乐库或歌单开始播放"
+                    textFormat: Text.PlainText
                     font.pixelSize: 12; color: Theme.secondary; elide: Text.ElideRight
                 }
             }

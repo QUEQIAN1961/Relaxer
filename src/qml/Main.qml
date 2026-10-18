@@ -10,7 +10,7 @@ ApplicationWindow {
     visible: true
     width: 1180; height: 760
     minimumWidth: 900; minimumHeight: 600
-    title: appBridge.windowTitle + " · QML Foundation"
+    title: appBridge.windowTitle + " · QML"
     color: Theme.background
     palette.window: Theme.background
     palette.base: Theme.panel
@@ -50,17 +50,17 @@ ApplicationWindow {
                     Item { Layout.fillHeight: true }
                     Rectangle {
                         Layout.fillWidth: true; implicitHeight: 74; radius: 10; color: Theme.background
-                        Text { anchors.fill: parent; anchors.margins: 12; text: appBridge.version + "\nC1 · 开发预览"; color: Theme.secondary; font.pixelSize: 12; lineHeight: 1.5 }
+                        Text { anchors.fill: parent; anchors.margins: 12; text: appBridge.version + "\nC2+C3 · 开发预览"; color: Theme.secondary; font.pixelSize: 12; lineHeight: 1.5 }
                     }
                 }
             }
             ColumnLayout {
-                Layout.fillWidth: true; Layout.fillHeight: true; Layout.margins: root.width < 1050 ? 20 : 32; spacing: 16
+                Layout.fillWidth: true; Layout.fillHeight: true; Layout.margins: root.width < 1050 ? 20 : 24; spacing: 12
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "QML FOUNDATION"; color: Theme.secondary; font.pixelSize: 11; font.letterSpacing: 2 }
+                    Text { text: "MUSIC · PLAYER"; color: Theme.secondary; font.pixelSize: 11; font.letterSpacing: 2 }
                     Item { Layout.fillWidth: true }
-                    ShellButton { objectName: "themeToggle"; text: Theme.dark ? "切换浅色" : "切换深色"; onClicked: Theme.dark = !Theme.dark }
+                    ShellButton { objectName: "themeToggle"; implicitHeight: 34; text: Theme.dark ? "切换浅色" : "切换深色"; onClicked: Theme.dark = !Theme.dark }
                 }
                 StackLayout {
                     objectName: "pageStack"
@@ -69,7 +69,7 @@ ApplicationWindow {
                     LocalPage {}
                     PlaylistsPage {}
                     QueuePage {}
-                    TransitionPage { objectName: "settingsPage"; heading: "设置"; description: "C1 只提供基础浅色 / 深色预览，不保存主题设置。\n完整外观、快捷键、导入及 AI 设置仍由 Widgets 提供。\n本界面不提供 AI 翻译入口。" }
+                    TransitionPage { objectName: "settingsPage"; heading: "设置"; description: "这里提供基础浅色 / 深色预览，不保存主题设置。\n完整外观、快捷键、导入及 AI 设置仍由 Widgets 提供。\n歌词与 AI 界面将在后续阶段迁移。" }
                 }
                 Text {
                     Layout.fillWidth: true; wrapMode: Text.Wrap
