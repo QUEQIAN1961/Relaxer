@@ -349,10 +349,11 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/playback-bridge.cpp src/ui-bridge/playback-bridge.h
     src/ui-bridge/library-bridge.cpp src/ui-bridge/library-bridge.h
     src/ui-bridge/queue-model.cpp src/ui-bridge/queue-model.h
+    src/ui-bridge/lyrics-model.cpp src/ui-bridge/lyrics-model.h
     src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
     src/qml/qml.qrc)
   target_include_directories(relaxer_qml PUBLIC src)
-  target_link_libraries(relaxer_qml PUBLIC relaxer_library_models relaxer_playback_facade Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+  target_link_libraries(relaxer_qml PUBLIC relaxer_library_models relaxer_playback_facade relaxer_translation relaxer_lyrics_search relaxer_services Qt6::Qml Qt6::Quick Qt6::QuickControls2)
   add_executable(relaxer_library_model_tests tests/library-model-tests.cpp)
   target_link_libraries(relaxer_library_model_tests PRIVATE relaxer_library_models Qt6::Test)
   relaxer_add_qt_test(relaxer_library_models relaxer_library_model_tests)
@@ -379,6 +380,9 @@ if(RELAXER_ENABLE_QML)
   add_executable(relaxer_queue_projection_tests tests/queue-projection-tests.cpp)
   target_link_libraries(relaxer_queue_projection_tests PRIVATE relaxer_qml Qt6::Test)
   relaxer_add_qt_test(relaxer_queue_projection relaxer_queue_projection_tests)
+  add_executable(relaxer_qml_lyrics_model_tests tests/qml-lyrics-model-tests.cpp)
+  target_link_libraries(relaxer_qml_lyrics_model_tests PRIVATE relaxer_qml Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_lyrics_model relaxer_qml_lyrics_model_tests)
   add_executable(relaxer_qml_widgets_parity_tests tests/qml-widgets-parity-tests.cpp)
   target_link_libraries(relaxer_qml_widgets_parity_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
   relaxer_add_qt_test(relaxer_qml_widgets_parity relaxer_qml_widgets_parity_tests)
