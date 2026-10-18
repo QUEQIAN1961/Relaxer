@@ -16,7 +16,7 @@ def inventory(stage):
     stage = stage.resolve()
     proof = json.loads((stage / "deployment.json").read_text(encoding="utf-8"))
     if proof.get("stagingPolicy") != "fresh-build-inputs-only" or proof.get("verified") is not True:
-        raise ValueError("Package only a fresh stage assembled with the matching independent candidate QA proof")
+        raise ValueError("Package only a fresh stage assembled with the matching separate candidate QA proof")
     entries = {}
     media = {".mp3", ".flac", ".wav", ".ogg", ".opus", ".mid", ".midi", ".m4a", ".lrc"}
     for file in sorted(stage.rglob("*")):
@@ -33,6 +33,10 @@ def inventory(stage):
     for name in ["RelaxerStart.exe", "RelaxerQml.cmd", "runtime/Relaxer.exe", "runtime/RelaxerQmlUi.dll",
                  "runtime/relaxer-ready.json", "runtime/Qt6Qml.dll", "runtime/Qt6Quick.dll", "runtime/Qt6QuickControls2.dll"]:
         if name not in entries: raise ValueError(f"Required release input missing: {name}")
+    actual = {name: entries[("" if name == "RelaxerStart.exe" else "runtime/") + name]
+              for name in ("Relaxer.exe", "RelaxerStart.exe", "RelaxerQmlUi.dll")}
+    if actual != proof.get("binarySHA256"):
+        raise ValueError("Stage binaries differ from the native candidate QA proof")
     return entries
 
 

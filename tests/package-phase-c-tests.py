@@ -1,5 +1,6 @@
 """Policy tests; synthetic filenames are not a substitute for native QA."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -17,12 +18,14 @@ class PackagingPolicy(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.stage = self.root / "fresh stage"
         self.stage.mkdir()
-        (self.stage / "deployment.json").write_text(json.dumps({"stagingPolicy": "fresh-build-inputs-only", "verified": True}))
         for name in ["RelaxerStart.exe", "RelaxerQml.cmd", "runtime/Relaxer.exe", "runtime/RelaxerQmlUi.dll",
                      "runtime/relaxer-ready.json", "runtime/Qt6Qml.dll", "runtime/Qt6Quick.dll", "runtime/Qt6QuickControls2.dll"]:
             file = self.stage / name
             file.parent.mkdir(exist_ok=True)
             file.write_bytes(b"policy fixture")
+        (self.stage / "deployment.json").write_text(json.dumps({"stagingPolicy": "fresh-build-inputs-only", "verified": True,
+            "binarySHA256": {name: hashlib.sha256(b"policy fixture").hexdigest()
+                             for name in ("Relaxer.exe", "RelaxerStart.exe", "RelaxerQmlUi.dll")}}))
 
     def test_deterministic_archive(self):
         a, b = self.root / "a.zip", self.root / "b.zip"
@@ -57,6 +60,10 @@ class PackagingPolicy(unittest.TestCase):
 
     def test_required_module_is_checked(self):
         (self.stage / "runtime/RelaxerQmlUi.dll").unlink()
+        with self.assertRaises(ValueError): packager.inventory(self.stage)
+
+    def test_replaced_binary_is_rejected(self):
+        (self.stage / "runtime/RelaxerQmlUi.dll").write_bytes(b"unverified replacement")
         with self.assertRaises(ValueError): packager.inventory(self.stage)
 
 
