@@ -2,6 +2,7 @@
 #include "ui-run-diagnostics.h"
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QProcess>
@@ -14,12 +15,19 @@
 #include <windows.h>
 #endif
 using namespace relaxer;
+static QString hostPath() {
+    return qEnvironmentVariable("RELAXER_TEST_APP", QString::fromUtf8(RELAXER_APP_PATH));
+}
+static QString modulePath() {
+    return qEnvironmentVariableIsSet("RELAXER_TEST_APP")
+        ? QFileInfo(hostPath()).dir().filePath("RelaxerQmlUi.dll") : QString::fromUtf8(RELAXER_QML_MODULE_PATH);
+}
 class QmlRuntimeLoadingTests : public QObject {
     Q_OBJECT
   private slots:
     void loadDoesNotOpenDatabase() {
         const auto before = QSqlDatabase::connectionNames();
-        OptionalQmlRuntime runtime(QString::fromUtf8(RELAXER_QML_MODULE_PATH));
+        OptionalQmlRuntime runtime(modulePath());
         QVERIFY2(runtime.load(), qPrintable(runtime.error()));
         QVERIFY(runtime.load());
         QCOMPARE(QSqlDatabase::connectionNames(), before);
@@ -32,14 +40,15 @@ class QmlRuntimeLoadingTests : public QObject {
         QVERIFY(QDir(dir.path()).entryList(QDir::Files).isEmpty());
     }
     void incompatibleInterfaceIsDiagnosable() {
-        OptionalQmlRuntime runtime(QString::fromUtf8(RELAXER_QT_CORE_PATH));
+        const auto deployedCore = QFileInfo(hostPath()).dir().filePath("Qt6Core.dll");
+        OptionalQmlRuntime runtime(QFile::exists(deployedCore) ? deployedCore : QString::fromUtf8(RELAXER_QT_CORE_PATH));
         QVERIFY(!runtime.load()); QVERIFY(runtime.error().contains("incompatible"));
     }
     void repeatedSessionsReleaseEveryConnection() {
         const auto before = QSqlDatabase::connectionNames();
         QTemporaryDir dir;
         for (int i = 0; i < 3; ++i) {
-            OptionalQmlRuntime runtime(QString::fromUtf8(RELAXER_QML_MODULE_PATH));
+            OptionalQmlRuntime runtime(modulePath());
             QVERIFY2(runtime.load(), qPrintable(runtime.error()));
             UiRunDiagnostics diagnostics;
             const auto report = dir.filePath(QString("session-%1.json").arg(i));
@@ -58,7 +67,21 @@ class QmlRuntimeLoadingTests : public QObject {
         const auto bin = dir.filePath(QString::fromUtf8("隔离 bin"));
         QVERIFY(QDir().mkpath(bin));
         const auto app = bin + "/Relaxer.exe";
-        QVERIFY(QFile::copy(QString::fromUtf8(RELAXER_APP_PATH), app));
+        QVERIFY(QFile::copy(hostPath(), app));
+        // Standalone deployment tests have system-only PATH. Copy only the
+        // host's colocated base runtime, excluding the optional UI and Quick.
+        const auto origin = QFileInfo(hostPath()).dir();
+        for (const auto &name : origin.entryList({"*.dll"}, QDir::Files)) {
+            if (name == "RelaxerQmlUi.dll" || name.startsWith("Qt6Quick") || name.startsWith("Qt6Qml")) continue;
+            QVERIFY(QFile::copy(origin.filePath(name), bin + "/" + name));
+        }
+        if (QFile::exists(origin.filePath("qt.conf"))) {
+            QVERIFY(QFile::copy(origin.filePath("qt.conf"), bin + "/qt.conf"));
+            QVERIFY(QDir().mkpath(bin + "/platforms"));
+            const auto platforms = QDir(origin.filePath("platforms"));
+            for (const auto &name : platforms.entryList({"*.dll"}, QDir::Files))
+                QVERIFY(QFile::copy(platforms.filePath(name), bin + "/platforms/" + name));
+        }
         const auto root = dir.filePath("must-not-create");
         QProcess process;
         process.start(app, {"--ui=qml", "--data", root});
@@ -70,11 +93,11 @@ class QmlRuntimeLoadingTests : public QObject {
     }
     void hostPeImportsExcludeOptionalQuick() {
         QProcess process;
-        process.start(QString::fromUtf8(RELAXER_OBJDUMP), {"-p", QString::fromUtf8(RELAXER_APP_PATH)});
+        process.start(QString::fromUtf8(RELAXER_OBJDUMP), {"-p", hostPath()});
         QVERIFY(process.waitForFinished()); QCOMPARE(process.exitCode(), 0);
         const auto imports = process.readAllStandardOutput();
         QVERIFY(!imports.contains("Qt6Quick")); QVERIFY(!imports.contains("Qt6Qml"));
-        process.start(QString::fromUtf8(RELAXER_OBJDUMP), {"-p", QString::fromUtf8(RELAXER_QML_MODULE_PATH)});
+        process.start(QString::fromUtf8(RELAXER_OBJDUMP), {"-p", modulePath()});
         QVERIFY(process.waitForFinished()); QCOMPARE(process.exitCode(), 0);
         const auto optional = process.readAllStandardOutput();
         QVERIFY(optional.contains("Qt6Quick.dll")); QVERIFY(optional.contains("Qt6Qml.dll"));
@@ -82,13 +105,13 @@ class QmlRuntimeLoadingTests : public QObject {
     }
     void moduleCodeRemainsMappedAfterObjectsAreDestroyed() {
         {
-            OptionalQmlRuntime runtime(QString::fromUtf8(RELAXER_QML_MODULE_PATH));
+            OptionalQmlRuntime runtime(modulePath());
             QVERIFY(runtime.load());
         }
 #ifdef Q_OS_WIN
         // Explicit process-lifetime pin policy; no unsupported hard-unload can
         // invalidate Quick's process-global type/metaobject caches.
-        const auto module = QString::fromUtf8(RELAXER_QML_MODULE_PATH).toStdWString();
+        const auto module = modulePath().toStdWString();
         QVERIFY(GetModuleHandleW(module.c_str()) != nullptr);
 #endif
         QCoreApplication::processEvents();
