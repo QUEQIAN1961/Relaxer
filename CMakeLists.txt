@@ -334,6 +334,8 @@ target_link_libraries(Relaxer PRIVATE relaxer_ui)
 option(RELAXER_ENABLE_QML "Build the optional Phase C QML shell" ON)
 if(RELAXER_ENABLE_QML)
   find_package(Qt6 6.4 REQUIRED COMPONENTS Qml Quick QuickControls2)
+  include(scripts/qml-test-environment.cmake)
+  relaxer_configure_qml_tests()
   add_library(relaxer_qml STATIC
     src/ui-bridge/app-bridge.cpp src/ui-bridge/app-bridge.h
     src/ui-bridge/playback-bridge.cpp src/ui-bridge/playback-bridge.h
@@ -348,7 +350,7 @@ if(RELAXER_ENABLE_QML)
   add_dependencies(relaxer_qml_tests Relaxer)
   target_compile_definitions(relaxer_qml_tests PRIVATE RELAXER_APP_PATH="$<TARGET_FILE:Relaxer>")
   relaxer_add_qt_test(relaxer_qml_foundation relaxer_qml_tests)
-  set_property(TEST relaxer_qml_foundation APPEND PROPERTY ENVIRONMENT "QT_QUICK_BACKEND=software")
+  relaxer_qml_test_environment(relaxer_qml_foundation)
   add_executable(relaxer_ui_navigation_probe EXCLUDE_FROM_ALL tests/ui-navigation-probe.cpp)
   target_link_libraries(relaxer_ui_navigation_probe PRIVATE relaxer_qml relaxer_ui)
 endif()
