@@ -36,6 +36,13 @@ class Memory(c.Structure):
                 ("peakPagefile", c.c_size_t), ("private", c.c_size_t)]
 
 
+class SystemMemory(c.Structure):
+    _fields_ = [("length", w.DWORD), ("load", w.DWORD), ("totalPhysical", c.c_ulonglong),
+                ("availablePhysical", c.c_ulonglong), ("totalPagefile", c.c_ulonglong),
+                ("availablePagefile", c.c_ulonglong), ("totalVirtual", c.c_ulonglong),
+                ("availableVirtual", c.c_ulonglong), ("availableExtended", c.c_ulonglong)]
+
+
 k.CreateToolhelp32Snapshot.restype = w.HANDLE
 k.Process32FirstW.argtypes = [w.HANDLE, c.POINTER(ProcessEntry)]
 k.Process32NextW.argtypes = [w.HANDLE, c.POINTER(ProcessEntry)]
@@ -87,6 +94,7 @@ def clean_environment(out):
     system = Path(os.environ.get("SystemRoot", r"C:\Windows"))
     env["PATH"] = str(system / "System32") + ";" + str(system)
     env["QT_QPA_PLATFORM"] = "windows"
+    env["QT_MEDIA_BACKEND"] = "ffmpeg"
     env["RELAXER_SKIP_AUDIO_DEVICE_TESTS"] = "1"
     for name in ("TEMP", "TMP", "APPDATA", "LOCALAPPDATA"):
         directory = out / name; directory.mkdir(exist_ok=True)
@@ -103,7 +111,8 @@ def main():
     out = args.output.resolve(); out.mkdir(parents=True, exist_ok=False)
     runtime = args.package.resolve() / "runtime"
     env = clean_environment(out)
-    startup = subprocess.STARTUPINFO(); startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW; startup.wShowWindow = 0
+    # Visibility/frame timings require an exposed GUI window, not SW_HIDE.
+    startup = subprocess.STARTUPINFO(); startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW; startup.wShowWindow = 5
     k.SetErrorMode(0x8003)
     initial = out / "unprimed.json"
     seed = out / "seed"
@@ -160,7 +169,10 @@ def main():
     cpu = "unknown"
     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
         cpu = winreg.QueryValueEx(key, "ProcessorNameString")[0]
+    memory = SystemMemory(); memory.length = c.sizeof(memory)
+    assert k.GlobalMemoryStatusEx(c.byref(memory))
     summary = {"windows": platform.platform(), "cpu": cpu, "logicalProcessors": os.cpu_count(),
+               "physicalMemoryGiB": memory.totalPhysical / 1073741824,
                "method": "Native Windows QPA, default Qt Quick rendering, system-only PATH; WM_CLOSE; identical mature empty SQLite copies; includes Library/Playback initialization; no physical audio output; 25ms OS visibility polling; 2s idle CPU window after 1.5s settling",
                "cacheState": "OS caches not flushed. Unprimed first Widgets launch separate; samples are warm-cache repeated launches with alternating order. uiLoadedMs is process clock; nativeVisibleMs includes CreateProcess/DLL load.",
                "limitations": "Widgets initializes all legacy settings/import/AI UI; QML initializes only C1 Library/Playback and bridges. Different feature completeness: these numbers do not predict final migrated UI performance. Widgets Paint and QML frameSwapped are different first-frame boundaries.",

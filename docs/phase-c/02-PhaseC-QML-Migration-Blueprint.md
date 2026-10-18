@@ -48,6 +48,6 @@ flowchart TD
 
 `RELAXER_ENABLE_QML` 作为 GUI 构建选项；放在四种服务配置 return 之后，使独立服务既不 find Quick 也不链接 Widgets/Quick。关闭选项时仍能构建稳定 Widgets；显式 qml 请求应说明本构建未启用。
 
-Qt 6.11.2 已安装 Base/Multimedia/Svg，缺完整 Declarative。使用官方 MSYS2 相同版本包、核验仓库 SHA 与签名，解压到工作区 overlay，不修改已验收的系统 Qt。配置 CMAKE_PREFIX_PATH 时 overlay 在前、既有 UCRT prefix 在后。Windows 包必须用 qmldir 扫描部署并在清除工具链 PATH/QML 环境的原生 Windows 会话验证，不能仅凭构建成功认定可便携。
+Qt 6.11.2 已安装 Base/Multimedia/Svg，缺完整 Declarative。使用官方 MSYS2 相同版本包、核验仓库 SHA 与签名，解压到工作区 overlay，不修改已验收的系统 Qt。配置 `QT_ADDITIONAL_PACKAGES_PREFIX_PATH=<overlay>/ucrt64`；只设置 CMAKE_PREFIX_PATH 不足以覆盖 Qt 自身的受限模块查找。开发运行需同时设置 overlay/bin 的 PATH 与 share/qt6/qml 的 QML_IMPORT_PATH。Windows 包用 qmlimportscanner 扫描本地 qmldir / QML，并递归收集所有 PE 导入；在清除工具链 PATH/QML 环境的原生 Windows 会话和最终 ZIP 解压目录验证，不能仅凭构建成功认定可便携。
 
 所有测量使用相同空 fixture、明确初始化差异、样本数/缓存状态，分别报告 load/show/first frame 和关闭；不把首次启动或空库结果泛化为大库性能。打包生成源码、完整 bundle、便携包、日志、10 份报告和 SHA256，正式交付目录保持只读。
