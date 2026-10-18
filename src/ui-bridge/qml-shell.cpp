@@ -6,7 +6,7 @@ static void initializeQmlResources() { Q_INIT_RESOURCE(qml); }
 namespace relaxer {
 QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly)
     : QObject(parent), m_facade(library, this, decodeOnly), m_appBridge(library, this),
-      m_playbackBridge(&m_facade, this), m_tracks(library, this), m_trackView(&m_tracks, this),
+      m_playbackBridge(&m_facade, this, library), m_tracks(library, this), m_trackView(&m_tracks, this),
       m_playlists(library, this), m_libraryBridge(library, &m_facade, &m_tracks, &m_trackView, &m_playlists, this) {
     initializeQmlResources();
     setObjectName("qmlShell");

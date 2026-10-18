@@ -45,6 +45,46 @@ int delegates(QQuickItem *item) {
 class C2C3Tests : public QObject {
     Q_OBJECT
   private slots:
+    void playbackCommandsSeekAndModes() {
+        QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,3));
+        QmlShell shell(&library,nullptr,true); QVERIFY(shell.load());
+        auto *bridge=shell.playbackBridge(); const auto ids=shell.libraryModel()->ids();
+        shell.libraryBridge()->play(QString::number(ids[0])); QTRY_VERIFY(bridge->playing()); QTRY_VERIFY(bridge->seekable());
+        QVERIFY(bridge->canPlay()); QCOMPARE(bridge->trackId(),QString::number(ids[0]));
+        bridge->pause(); QTRY_VERIFY(!bridge->playing()); bridge->pause(); QVERIFY(!shell.facade()->playing());
+        bridge->seek(3500); QTRY_VERIFY(qAbs(shell.facade()->position()-3500)<150);
+        QCOMPARE(bridge->position(),shell.facade()->position()); QVERIFY(!bridge->playing());
+        bridge->play(); QTRY_VERIFY(bridge->playing()); bridge->play(); QVERIFY(shell.facade()->playing());
+        bridge->setMode(0); QCOMPARE(shell.facade()->mode(),Mode::Sequential);
+        bridge->next(); QTRY_COMPARE(bridge->trackId(),QString::number(ids[1]));
+        QVERIFY(bridge->position()<1000); bridge->previous(); QTRY_COMPARE(bridge->trackId(),QString::number(ids[0]));
+        for(int mode=0;mode<4;++mode) { bridge->setMode(mode); QCOMPARE(bridge->mode(),mode); QCOMPARE(int(shell.facade()->queue().mode),mode); }
+        bridge->setMode(-1); QCOMPARE(bridge->mode(),3); bridge->setMode(4); QCOMPARE(bridge->mode(),3);
+        bridge->playQueued(QString::number(ids[2])); QTRY_COMPARE(bridge->trackId(),QString::number(ids[2]));
+        QCOMPARE(shell.facade()->queue().items,ids);
+        bridge->removeFromQueue(QString::number(ids[1])); QVERIFY(!shell.facade()->queue().items.contains(ids[1]));
+        QCOMPARE(library.trackCount(),qint64(3)); QVERIFY(shell.shutdown());
+        bridge->setVolume(10); bridge->next(); bridge->seek(10); QVERIFY(!bridge->available());
+        QVERIFY(shell.warnings().isEmpty());
+    }
+    void volumeMuteAndWindowRecreation() {
+        QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open());
+        {
+            QmlShell shell(&library,nullptr,true); auto *bridge=shell.playbackBridge();
+            bridge->setVolume(37); QCOMPARE(shell.facade()->volume(),37); QVERIFY(!bridge->muted());
+            bridge->toggleMute(); QCOMPARE(shell.facade()->volume(),0); QVERIFY(bridge->muted());
+            bridge->toggleMute(); QCOMPARE(shell.facade()->volume(),37);
+            bridge->setVolume(200); QCOMPARE(bridge->volume(),100); bridge->setVolume(-10); QCOMPARE(bridge->volume(),0);
+            bridge->setVolume(37); bridge->toggleMute(); QVERIFY(shell.shutdown());
+        }
+        QCOMPARE(library.setting("volume").toInt(),0);
+        {
+            QmlShell rebuilt(&library,nullptr,true); QCOMPARE(rebuilt.facade()->volume(),0);
+            rebuilt.playbackBridge()->toggleMute(); QCOMPARE(rebuilt.facade()->volume(),37);
+            QVERIFY(rebuilt.shutdown());
+        }
+        QCOMPARE(library.setting("volume").toInt(),37);
+    }
     void commandsUseRealLibraryAndFacade() {
         QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,3));
         const auto connections=QSqlDatabase::connectionNames(); QmlShell shell(&library,nullptr,true); QVERIFY2(shell.load(),qPrintable(shell.warnings().join('\n')));

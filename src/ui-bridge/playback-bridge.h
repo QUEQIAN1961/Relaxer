@@ -13,10 +13,14 @@ class PlaybackBridge final : public QObject {
     Q_PROPERTY(qint64 position READ position NOTIFY progressChanged)
     Q_PROPERTY(qint64 duration READ duration NOTIFY progressChanged)
     Q_PROPERTY(int volume READ volume NOTIFY volumeChanged)
+    Q_PROPERTY(bool muted READ muted NOTIFY volumeChanged)
+    Q_PROPERTY(bool seekable READ seekable NOTIFY capabilitiesChanged)
+    Q_PROPERTY(bool canPlay READ canPlay NOTIFY capabilitiesChanged)
+    Q_PROPERTY(int mode READ mode NOTIFY modeChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
   public:
-    explicit PlaybackBridge(PlaybackFacade *facade, QObject *parent = nullptr);
+    explicit PlaybackBridge(PlaybackFacade *facade, QObject *parent = nullptr, Library *library = nullptr);
     QString title() const { return m_state.track.title; }
     QString artist() const { return m_state.track.artist; }
     QString trackId() const { return QString::number(m_state.track.id); }
@@ -25,21 +29,40 @@ class PlaybackBridge final : public QObject {
     qint64 position() const { return m_state.position; }
     qint64 duration() const { return m_state.duration; }
     int volume() const { return m_state.volume; }
+    bool muted() const { return volume() == 0; }
+    bool seekable() const { return m_state.seekable && m_state.duration > 0 && available(); }
+    bool canPlay() const { return m_canPlay; }
+    int mode() const { return int(m_state.mode); }
     bool available() const { return m_facade && !m_facade->isShutdown(); }
     QString error() const { return m_error; }
     Q_INVOKABLE void toggle();
+    Q_INVOKABLE void play();
+    Q_INVOKABLE void pause();
+    Q_INVOKABLE void next();
+    Q_INVOKABLE void previous();
+    Q_INVOKABLE void seek(qint64 position);
+    Q_INVOKABLE void setVolume(int volume);
+    Q_INVOKABLE void toggleMute();
+    Q_INVOKABLE void setMode(int mode);
+    Q_INVOKABLE void playQueued(const QString &id);
+    Q_INVOKABLE void removeFromQueue(const QString &id);
   signals:
     void trackChanged();
     void playingChanged();
     void progressChanged();
     void volumeChanged();
+    void capabilitiesChanged();
+    void modeChanged();
     void availableChanged();
     void errorChanged();
   private:
     QPointer<PlaybackFacade> m_facade;
+    QPointer<Library> m_library;
     PlaybackSnapshot m_state;
     QString m_error;
     bool m_available = false;
+    bool m_canPlay = false;
+    int m_lastVolume = 65;
     void refresh();
     void setError(const QString &error);
 };
