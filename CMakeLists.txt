@@ -341,13 +341,19 @@ if(RELAXER_ENABLE_QML)
   endif()
   include(scripts/qml-test-environment.cmake)
   relaxer_configure_qml_tests()
+  add_library(relaxer_library_models STATIC src/ui-bridge/library-model.cpp src/ui-bridge/library-model.h)
+  target_include_directories(relaxer_library_models PUBLIC src)
+  target_link_libraries(relaxer_library_models PUBLIC relaxer_core)
   add_library(relaxer_qml STATIC
     src/ui-bridge/app-bridge.cpp src/ui-bridge/app-bridge.h
     src/ui-bridge/playback-bridge.cpp src/ui-bridge/playback-bridge.h
     src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
     src/qml/qml.qrc)
   target_include_directories(relaxer_qml PUBLIC src)
-  target_link_libraries(relaxer_qml PUBLIC relaxer_playback_facade Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+  target_link_libraries(relaxer_qml PUBLIC relaxer_library_models relaxer_playback_facade Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+  add_executable(relaxer_library_model_tests tests/library-model-tests.cpp)
+  target_link_libraries(relaxer_library_model_tests PRIVATE relaxer_library_models Qt6::Test)
+  relaxer_add_qt_test(relaxer_library_models relaxer_library_model_tests)
   add_library(relaxer_qml_runtime MODULE src/ui-bridge/qml-runtime.cpp)
   set_target_properties(relaxer_qml_runtime PROPERTIES PREFIX "" OUTPUT_NAME "RelaxerQmlUi")
   target_link_libraries(relaxer_qml_runtime PRIVATE relaxer_qml)

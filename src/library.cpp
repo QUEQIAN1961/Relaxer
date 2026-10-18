@@ -155,6 +155,17 @@ Track Library::fromQuery(const QSqlQuery &q) const {
     t.importedAt = q.value(13).toString();
     return t;
 }
+qint64 Library::trackCount() const {
+    // Count in the existing owning connection; never materialize Track rows.
+    if (QThread::currentThread() != thread()) {
+        m_error = "曲库计数必须在资料库所属线程执行";
+        return 0;
+    }
+    QSqlQuery query(m_db);
+    if (query.exec("SELECT COUNT(*) FROM tracks") && query.next()) return query.value(0).toLongLong();
+    m_error = query.lastError().text();
+    return 0;
+}
 QVector<Track> Library::tracks(qint64 list, const QString &f) const {
     QString sql = "SELECT "
                   "t.id,t.hash,t.file,t.title,t.artist,t.album,t.cover,t.lyrics,t.duration,t.plays,t.heard,t."

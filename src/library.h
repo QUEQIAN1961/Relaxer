@@ -31,6 +31,7 @@ class Library : public QObject {
     QString root() const { return m_root; }
     QString absolute(const QString &relative) const;
     bool open(QString *error = nullptr);
+    qint64 trackCount() const;
     QVector<Track> tracks(qint64 playlist = 0, const QString &filter = {}) const;
     QVector<Track> recent() const;
     Track track(qint64 id) const;

@@ -1,6 +1,7 @@
 #include "app-bridge.h"
 #include "phase-c-version.h"
 #include <QThread>
+#include <climits>
 
 namespace relaxer {
 AppBridge::AppBridge(Library *library, QObject *parent) : QObject(parent), m_library(library) {
@@ -29,7 +30,7 @@ bool AppBridge::navigate(int page) {
 }
 void AppBridge::refresh() {
     Q_ASSERT(QThread::currentThread() == thread());
-    const int count = m_library ? m_library->tracks().size() : 0;
+    const int count = m_library ? int(qMin<qint64>(m_library->trackCount(), INT_MAX)) : 0;
     if (m_count != count) { m_count = count; emit trackCountChanged(); }
 }
 }
