@@ -57,6 +57,10 @@
 #include <algorithm>
 static void initializeResources(){Q_INIT_RESOURCE(resources);}
 namespace relaxer {
+static QString displayVersion() {
+    const auto development = qApp->property("relaxerDevelopmentTitle").toString();
+    return development.isEmpty() ? QString::fromLatin1(release::WindowTitle) : development;
+}
 static QLabel *label(const QString &text, const QString &style, QWidget *parent = nullptr) {
     auto *l = new QLabel(text, parent);
     l->setObjectName(style);
@@ -79,7 +83,7 @@ Window::Window(Library *l, QWidget *p) : QMainWindow(p), m_library(l), m_player(
     m_importCoordinator->setObjectName("importCoordinator");
     m_aiRuntime = new ai::AiRuntime(m_library, this);
     installSmoothScrolling(qApp);
-    setWindowTitle(QString::fromLatin1(release::WindowTitle));
+    setWindowTitle(displayVersion());
     setWindowFlag(Qt::FramelessWindowHint);
     qApp->installEventFilter(this);
 #if QT_VERSION >= QT_VERSION_CHECK(6,9,0)
@@ -747,7 +751,7 @@ QWidget *Window::buildSettings() {
     about->setObjectName("settingsCard");
     auto *av = new QVBoxLayout(about);
     av->setContentsMargins(22, 20, 22, 20);
-    av->addWidget(label(QString::fromLatin1(release::WindowTitle), "profileName"));
+    av->addWidget(label(displayVersion(), "profileName"));
     av->addWidget(label("为本地音乐留一个安静的位置。", "muted"));
     av->addWidget(label("本地音乐播放器 · 支持联网查找歌词", "muted"));
 
@@ -763,7 +767,7 @@ QWidget *Window::buildSettings() {
     scroll->setWidget(page);outer->addWidget(scroll,1);
     return host;
 }
-QWidget *Window::buildVersionLog(){auto *page=new QWidget;page->setObjectName("versionLogPage");auto *outer=new QVBoxLayout(page);outer->setContentsMargins(34,28,34,28);auto *header=new QHBoxLayout;auto *head=new QVBoxLayout;head->setSpacing(16);head->addWidget(label("版本日志","heading"));auto *spacer=label(" ","muted");auto policy=spacer->sizePolicy();policy.setRetainSizeWhenHidden(true);spacer->setSizePolicy(policy);head->addWidget(spacer);spacer->hide();header->addLayout(head);header->addStretch();auto *back=button("返回设置","plain");back->setObjectName("versionLogBack");connect(back,&QPushButton::clicked,this,&Window::showSettings);header->addWidget(back);outer->addLayout(header);auto *scroll=new QScrollArea;scroll->setObjectName("versionLogScroll");scroll->setFrameShape(QFrame::NoFrame);scroll->setWidgetResizable(true);scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);auto *body=new QWidget;auto *layout=new QVBoxLayout(body);layout->setContentsMargins(0,0,0,0);layout->addWidget(new ChangeLog);auto *copyright=label(QString::fromLatin1(release::WindowTitle)+" | © QUEQIAN. All rights reserved.","copyright");copyright->setWordWrap(true);layout->addWidget(copyright);layout->addStretch();scroll->setWidget(body);outer->addWidget(scroll,1);return page;}
+QWidget *Window::buildVersionLog(){auto *page=new QWidget;page->setObjectName("versionLogPage");auto *outer=new QVBoxLayout(page);outer->setContentsMargins(34,28,34,28);auto *header=new QHBoxLayout;auto *head=new QVBoxLayout;head->setSpacing(16);head->addWidget(label("版本日志","heading"));auto *spacer=label(" ","muted");auto policy=spacer->sizePolicy();policy.setRetainSizeWhenHidden(true);spacer->setSizePolicy(policy);head->addWidget(spacer);spacer->hide();header->addLayout(head);header->addStretch();auto *back=button("返回设置","plain");back->setObjectName("versionLogBack");connect(back,&QPushButton::clicked,this,&Window::showSettings);header->addWidget(back);outer->addLayout(header);auto *scroll=new QScrollArea;scroll->setObjectName("versionLogScroll");scroll->setFrameShape(QFrame::NoFrame);scroll->setWidgetResizable(true);scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);auto *body=new QWidget;auto *layout=new QVBoxLayout(body);layout->setContentsMargins(0,0,0,0);layout->addWidget(new ChangeLog);auto *copyright=label(displayVersion()+" | © QUEQIAN. All rights reserved.","copyright");copyright->setWordWrap(true);layout->addWidget(copyright);layout->addStretch();scroll->setWidget(body);outer->addWidget(scroll,1);return page;}
 void Window::editAppearance() {
     if(m_appearancePage&&m_pages->currentWidget()==m_appearancePage)return;
     if(m_pages->currentIndex()==3)m_settingsScrollPosition=findChild<QScrollArea *>("settingsScroll")->verticalScrollBar()->value();
