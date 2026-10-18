@@ -7,7 +7,8 @@ namespace relaxer {
 QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly)
     : QObject(parent), m_facade(library, this, decodeOnly), m_appBridge(library, this),
       m_playbackBridge(&m_facade, this, library), m_tracks(library, this), m_trackView(&m_tracks, this),
-      m_playlists(library, this), m_libraryBridge(library, &m_facade, &m_tracks, &m_trackView, &m_playlists, this) {
+      m_playlists(library, this), m_libraryBridge(library, &m_facade, &m_tracks, &m_trackView, &m_playlists, this),
+      m_queue(library, &m_facade, this) {
     initializeQmlResources();
     setObjectName("qmlShell");
     // A fixed official style makes custom control backgrounds portable on Windows.
@@ -23,6 +24,9 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly)
     m_engine->rootContext()->setContextProperty("libraryModel", &m_trackView);
     m_engine->rootContext()->setContextProperty("playlistModel", &m_playlists);
     m_engine->rootContext()->setContextProperty("libraryBridge", &m_libraryBridge);
+    QQmlEngine::setObjectOwnership(&m_queue, QQmlEngine::CppOwnership);
+    m_engine->rootContext()->setContextProperty("queueModel", &m_queue);
+    connect(&m_queue, &QueueListModel::missingTracks, &m_libraryBridge, &LibraryBridge::forgetMissing, Qt::QueuedConnection);
     connect(m_engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
         for (const auto &error : errors) m_warnings.append(error.toString());
     });

@@ -12,6 +12,12 @@ ApplicationWindow {
     minimumWidth: 900; minimumHeight: 600
     title: appBridge.windowTitle + " · QML Foundation"
     color: Theme.background
+    palette.window: Theme.background
+    palette.base: Theme.panel
+    palette.text: Theme.text
+    palette.buttonText: Theme.text
+    palette.button: Theme.panel
+    palette.highlight: Theme.accent
     property int currentPage: appBridge.page
     property color themeAccent: Theme.accent
     readonly property QtObject designTokens: Theme
@@ -29,7 +35,7 @@ ApplicationWindow {
                     Text { text: "relaxer"; color: Theme.text; font.pixelSize: 28; font.weight: Font.Bold; Layout.topMargin: 12 }
                     Text { text: "让音乐慢下来"; color: Theme.secondary; font.pixelSize: 12; Layout.bottomMargin: 28 }
                     Repeater {
-                        model: ["本地音乐", "歌单", "正在播放", "设置"]
+                        model: ["本地音乐", "歌单", "播放队列", "设置"]
                         NavigationButton {
                             required property string modelData
                             required property int index
@@ -62,24 +68,13 @@ ApplicationWindow {
                     currentIndex: appBridge.page
                     LocalPage {}
                     PlaylistsPage {}
-                    ColumnLayout {
-                        objectName: "playingPage"
-                        Text { text: "正在播放"; font.pixelSize: Theme.headingSize; font.weight: Font.DemiBold; color: Theme.text }
-                        Rectangle {
-                            Layout.fillWidth: true; Layout.fillHeight: true; color: Theme.panel; radius: Theme.radius; border.color: Theme.border
-                            EmptyState {
-                                anchors.centerIn: parent; width: Math.min(parent.width - 64, 520)
-                                heading: playbackBridge.hasTrack ? playbackBridge.title : "等待一首好歌"
-                                description: (playbackBridge.hasTrack ? playbackBridge.artist + "\n" : "") + "播放状态来自既有 C++ PlaybackFacade。\n详情、队列、歌词与动画尚未迁移。"
-                            }
-                        }
-                    }
+                    QueuePage {}
                     TransitionPage { objectName: "settingsPage"; heading: "设置"; description: "C1 只提供基础浅色 / 深色预览，不保存主题设置。\n完整外观、快捷键、导入及 AI 设置仍由 Widgets 提供。\n本界面不提供 AI 翻译入口。" }
                 }
                 Text {
                     Layout.fillWidth: true; wrapMode: Text.Wrap
                     text: libraryBridge.error.length > 0 ? libraryBridge.error : playbackBridge.error.length > 0 ? playbackBridge.error : "本地音乐与歌单 · 导入、歌词及高级设置仍可在 Widgets 中使用"
-                    color: playbackBridge.error.length > 0 ? Theme.accent : Theme.secondary
+                    color: playbackBridge.error.length > 0 || libraryBridge.error.length > 0 ? Theme.accent : Theme.secondary
                     font.pixelSize: 12
                 }
             }

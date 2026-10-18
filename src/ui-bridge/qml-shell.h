@@ -2,6 +2,7 @@
 #include "app-bridge.h"
 #include "playback-bridge.h"
 #include "library-bridge.h"
+#include "queue-model.h"
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <memory>
@@ -22,6 +23,7 @@ class QmlShell final : public QObject {
     TrackFilterModel *libraryModel() { return &m_trackView; }
     LibraryBridge *libraryBridge() { return &m_libraryBridge; }
     PlaylistListModel *playlistModel() { return &m_playlists; }
+    QueueListModel *queueModel() { return &m_queue; }
     QStringList warnings() const { return m_warnings; }
   private:
     PlaybackFacade m_facade;
@@ -31,6 +33,7 @@ class QmlShell final : public QObject {
     TrackFilterModel m_trackView;
     PlaylistListModel m_playlists;
     LibraryBridge m_libraryBridge;
+    QueueListModel m_queue;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QStringList m_warnings;
 };

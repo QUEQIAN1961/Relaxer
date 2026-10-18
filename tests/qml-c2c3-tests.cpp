@@ -45,6 +45,67 @@ int delegates(QQuickItem *item) {
 class C2C3Tests : public QObject {
     Q_OBJECT
   private slots:
+    void queueProjectionHasOneAuthorityAndNoProgressResets() {
+        QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,4));
+        QmlShell shell(&library,nullptr,true); QVERIFY(shell.load());
+        auto *queue=shell.queueModel(); QAbstractItemModelTester tester(queue,QAbstractItemModelTester::FailureReportingMode::QtTest);
+        shell.libraryBridge()->playAll(); QTRY_COMPARE(queue->ids(),shell.facade()->queue().items); QCOMPARE(queue->count(),4);
+        QSignalSpy resets(queue,&QAbstractItemModel::modelReset);
+        QTest::qWait(600); QCOMPARE(resets.size(),0);
+        const auto id=queue->ids()[1]; shell.playbackBridge()->playQueued(QString::number(id));
+        QTRY_COMPARE(shell.facade()->current().id,id); QCoreApplication::processEvents(); QCOMPARE(resets.size(),0);
+        // An external existing Library command is reconciled through facade,
+        // never by mutating a writable queue inside the model.
+        QVERIFY(library.remove({id})); QTRY_VERIFY(!shell.facade()->queue().items.contains(id));
+        QTRY_COMPARE(queue->ids(),shell.facade()->queue().items); QCOMPARE(queue->count(),3);
+        const auto other=queue->ids().first(); QVERIFY(shell.libraryBridge()->toggleFavorite(QString::number(other)));
+        QTRY_VERIFY(queue->data(queue->index(queue->indexForKey(QString::number(other)),0),TrackListModel::Favorite).toBool());
+        QVERIFY(shell.shutdown()); QVERIFY(shell.warnings().isEmpty());
+    }
+    void progressDraggingDoesNotFightPlaybackOrSeekNewTrack() {
+        QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,3));
+        QmlShell shell(&library,nullptr,true); QVERIFY(shell.load()); shell.libraryBridge()->playAll();
+        QTRY_VERIFY(shell.playbackBridge()->seekable()); shell.playbackBridge()->pause(); QTest::qWait(50);
+        auto *slider=visual(shell.window()->contentItem(),"playbackProgress"); QVERIFY(slider);
+        const auto start=slider->mapToScene(QPointF(slider->width()*.3,slider->height()/2)).toPoint();
+        const auto moved=slider->mapToScene(QPointF(slider->width()*.6,slider->height()/2)).toPoint();
+        QTest::mousePress(shell.window(),Qt::LeftButton,Qt::NoModifier,start);
+        QTest::mouseMove(shell.window(),moved,20); QTRY_VERIFY(slider->property("pressed").toBool());
+        const auto held=slider->property("value").toDouble(); QTest::qWait(300);
+        QVERIFY(qAbs(slider->property("value").toDouble()-held)<1);
+        QTest::mouseRelease(shell.window(),Qt::LeftButton,Qt::NoModifier,moved);
+        QTRY_VERIFY(qAbs(shell.facade()->position()-qint64(held))<200);
+        QTest::mousePress(shell.window(),Qt::LeftButton,Qt::NoModifier,start);
+        QTest::mouseMove(shell.window(),moved,20); const auto previous=shell.facade()->current().id;
+        shell.playbackBridge()->setMode(0); shell.playbackBridge()->next(); QTRY_VERIFY(shell.facade()->current().id!=previous);
+        QTest::mouseRelease(shell.window(),Qt::LeftButton,Qt::NoModifier,moved);
+        QVERIFY(shell.facade()->position()<1500); QVERIFY(shell.warnings().isEmpty());
+    }
+    void queueSessionRestoresWithExistingFacadeSemantics() {
+        QTemporaryDir dir; QVector<qint64> ids; qint64 current=0;
+        {
+            Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,3));
+            QmlShell shell(&library,nullptr,true); QVERIFY(shell.load()); shell.libraryBridge()->playAll();
+            QTRY_VERIFY(shell.playbackBridge()->seekable()); shell.playbackBridge()->pause();
+            ids=shell.facade()->queue().items; current=ids[1]; shell.playbackBridge()->playQueued(QString::number(current));
+            QTRY_VERIFY(shell.playbackBridge()->seekable()); shell.playbackBridge()->pause(); shell.playbackBridge()->seek(2400);
+            QTRY_VERIFY(qAbs(shell.facade()->position()-2400)<150); shell.playbackBridge()->setMode(3); QVERIFY(shell.shutdown());
+        }
+        {
+            Library library(dir.path()); QVERIFY(library.open()); PlaybackFacade widgetsFacade(&library,nullptr,true);
+            widgetsFacade.restore(); QCOMPARE(widgetsFacade.queue().items,ids); QCOMPARE(widgetsFacade.current().id,current);
+            QCOMPARE(widgetsFacade.mode(),Mode::Shuffle); QTRY_VERIFY(widgetsFacade.seekable());
+            QTRY_VERIFY(qAbs(widgetsFacade.position()-2400)<200); QVERIFY(!widgetsFacade.playing());
+            widgetsFacade.setMode(Mode::ListLoop); QVERIFY(widgetsFacade.shutdown());
+        }
+        {
+            Library library(dir.path()); QVERIFY(library.open()); QmlShell shell(&library,nullptr,true);
+            QTRY_COMPARE(shell.queueModel()->ids(),ids); QCOMPARE(shell.facade()->current().id,current); QCOMPARE(shell.playbackBridge()->mode(),1);
+            QCOMPARE(QSqlDatabase::connectionNames().size(),1); QCOMPARE(shell.findChildren<Playback *>().size(),1);
+            QVERIFY(shell.shutdown());
+        }
+        QVERIFY(QSqlDatabase::connectionNames().isEmpty());
+    }
     void playbackCommandsSeekAndModes() {
         QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,3));
         QmlShell shell(&library,nullptr,true); QVERIFY(shell.load());

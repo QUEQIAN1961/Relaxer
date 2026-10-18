@@ -25,6 +25,7 @@ class LibraryBridge final : public QObject {
     Q_INVOKABLE bool addToPlaylist(const QString &playlist, const QString &track);
     Q_INVOKABLE bool removeFromPlaylist(const QString &track);
     Q_INVOKABLE bool moveInPlaylist(const QString &track, int direction);
+    void forgetMissing(const QVector<qint64> &ids);
   signals:
     void playlistChanged();
     void errorChanged();

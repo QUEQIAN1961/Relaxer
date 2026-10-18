@@ -348,6 +348,7 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/app-bridge.cpp src/ui-bridge/app-bridge.h
     src/ui-bridge/playback-bridge.cpp src/ui-bridge/playback-bridge.h
     src/ui-bridge/library-bridge.cpp src/ui-bridge/library-bridge.h
+    src/ui-bridge/queue-model.cpp src/ui-bridge/queue-model.h
     src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
     src/qml/qml.qrc)
   target_include_directories(relaxer_qml PUBLIC src)

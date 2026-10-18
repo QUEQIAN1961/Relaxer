@@ -81,4 +81,10 @@ bool LibraryBridge::moveInPlaylist(const QString &track, int direction) {
     if (at < 0 || at + direction < 0 || at + direction >= ids.size()) return false;
     ids.swapItemsAt(at, at + direction); return result(m_library->reorder(m_source->playlist(), ids));
 }
+void LibraryBridge::forgetMissing(const QVector<qint64> &ids) {
+    if (!m_library || !m_facade || m_facade->isShutdown()) return;
+    QVector<qint64> missing;
+    for (auto id : ids) if (!m_library->track(id).id) missing.append(id);
+    if (!missing.isEmpty()) m_facade->forget(missing);
+}
 }
