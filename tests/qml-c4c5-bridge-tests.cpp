@@ -6,6 +6,12 @@
 #include <QComboBox>
 #include <QSignalSpy>
 #include <QSpinBox>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 namespace {
 class BrowserFake final:public TranslationBrowserBackend {
 public:
@@ -76,6 +82,15 @@ private slots:
         QVERIFY(bridge.start({QUrl::fromLocalFile(dir.filePath("missing.wav"))}));QTRY_VERIFY_WITH_TIMEOUT(!bridge.busy(),30000);QCOMPARE(library.trackCount(),qint64(2));
         QVERIFY(bridge.result()["ignoredPaths"].toInt()+bridge.result()["failed"].toInt()>0||!bridge.result()["fatalError"].toString().isEmpty());
         const auto empty=dir.filePath("empty");QVERIFY(QDir().mkpath(empty));QVERIFY(bridge.start({QUrl::fromLocalFile(empty)}));QTRY_VERIFY_WITH_TIMEOUT(!bridge.busy(),30000);QCOMPARE(library.trackCount(),qint64(2));
+        const auto fresh=dir.filePath("new.mid"),broken=dir.filePath("broken.wav");QVERIFY(import_fixture::midi(fresh,999));QFile bad(broken);QVERIFY(bad.open(QIODevice::WriteOnly));bad.write("invalid audio fixture");bad.close();
+        QVERIFY(bridge.start({QUrl::fromLocalFile(fresh),QUrl::fromLocalFile(broken)}));QTRY_VERIFY_WITH_TIMEOUT(!bridge.busy(),30000);
+        QCOMPARE(bridge.result()["added"].toInt(),1);QCOMPARE(bridge.result()["failed"].toInt(),1);QVERIFY(bridge.result()["partialSuccess"].toBool());QTRY_COMPARE(model.count(),3);
+#ifdef Q_OS_WIN
+        const auto locked=dir.filePath("access denied.wav");QVERIFY(wave20(locked));
+        std::unique_ptr<void,decltype(&CloseHandle)> handle(CreateFileW(reinterpret_cast<LPCWSTR>(locked.utf16()),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr),&CloseHandle);
+        QVERIFY(handle.get()!=INVALID_HANDLE_VALUE);QVERIFY(bridge.start({QUrl::fromLocalFile(locked)}));QTRY_VERIFY_WITH_TIMEOUT(!bridge.busy(),30000);
+        QCOMPARE(bridge.result()["failed"].toInt(),1);QCOMPARE(library.trackCount(),qint64(3));
+#endif
         QCOMPARE(import_fixture::schema(library),schema);QCOMPARE(QSqlDatabase::connectionNames().size(),1);
     }
     void importCancellationAndCloseBarrier(){

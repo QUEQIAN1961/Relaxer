@@ -34,6 +34,10 @@ private slots:
         emit player.positionChanged(2000,20000);QCOMPARE(model.currentIndex(),1);
         QVERIFY(model.data(model.index(0),LyricsModel::Played).toBool());QVERIFY(model.data(model.index(1),LyricsModel::Current).toBool());
         emit player.positionChanged(0,20000);QCOMPARE(model.currentIndex(),-1);
+        QVERIFY(lib.saveLyrics(id,"[00:03.00]Late\n[00:01.00]Early\n[00:02.00]Middle\n"));
+        QTRY_COMPARE(model.data(model.index(0),LyricsModel::Original).toString(),QString("Early"));
+        emit player.positionChanged(2999,20000);QCOMPARE(model.currentIndex(),1);
+        emit player.positionChanged(3000,20000);QCOMPARE(model.currentIndex(),2);
         QVERIFY(player.shutdown());
     }
     void offsetSeekAndPerTrackOwnership() {

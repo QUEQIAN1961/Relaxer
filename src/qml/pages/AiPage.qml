@@ -23,8 +23,8 @@ ColumnLayout {
     }
     RowLayout {
         Layout.fillWidth: true
-        CheckBox { text: "启用默认模型思考模式"; checked: aiBridge.draft.thinkingEnabled; onClicked: aiBridge.edit("thinkingEnabled", checked) }
-        ComboBox { Layout.fillWidth: true; model: ["low", "high", "max"]; currentIndex: model.indexOf(aiBridge.draft.reasoningEffort); displayText: currentIndex >= 0 ? currentText : "选择思考强度"; enabled: aiBridge.draft.thinkingEnabled; onActivated: aiBridge.edit("reasoningEffort", currentText) }
+        CheckBox { text: "启用默认模型思考模式"; checked: aiBridge.draft.thinkingEnabled; enabled: aiBridge.defaultEfforts.length > 0 || checked; onClicked: aiBridge.edit("thinkingEnabled", checked) }
+        ComboBox { Layout.fillWidth: true; model: aiBridge.defaultEfforts; currentIndex: model.indexOf(aiBridge.draft.reasoningEffort); displayText: currentIndex >= 0 ? currentText : "选择支持的强度"; enabled: aiBridge.draft.thinkingEnabled; onActivated: aiBridge.edit("reasoningEffort", currentText) }
     }
     CheckBox { text: "歌词翻译使用默认模型"; checked: aiBridge.draft.translationUsesDefaults; onClicked: aiBridge.edit("translationUsesDefaults", checked) }
     ColumnLayout {
@@ -32,8 +32,8 @@ ColumnLayout {
         ComboBox { Layout.fillWidth: true; model: aiBridge.models; textRole: "label"; valueRole: "id"; currentIndex: indexOfValue(aiBridge.draft.translationModelId); onActivated: { aiBridge.edit("translationProviderId", "deepseek"); aiBridge.edit("translationModelId", currentValue) } }
         RowLayout {
             Layout.fillWidth: true
-            CheckBox { text: "翻译专用思考模式"; checked: aiBridge.draft.translationThinkingEnabled; onClicked: aiBridge.edit("translationThinkingEnabled", checked) }
-            ComboBox { Layout.fillWidth: true; model: ["low", "high", "max"]; currentIndex: model.indexOf(aiBridge.draft.translationReasoningEffort); displayText: currentIndex >= 0 ? currentText : "选择思考强度"; enabled: aiBridge.draft.translationThinkingEnabled; onActivated: aiBridge.edit("translationReasoningEffort", currentText) }
+            CheckBox { text: "翻译专用思考模式"; checked: aiBridge.draft.translationThinkingEnabled; enabled: aiBridge.translationEfforts.length > 0 || checked; onClicked: aiBridge.edit("translationThinkingEnabled", checked) }
+            ComboBox { Layout.fillWidth: true; model: aiBridge.translationEfforts; currentIndex: model.indexOf(aiBridge.draft.translationReasoningEffort); displayText: currentIndex >= 0 ? currentText : "选择支持的强度"; enabled: aiBridge.draft.translationThinkingEnabled; onActivated: aiBridge.edit("translationReasoningEffort", currentText) }
         }
     }
     Text { text: "翻译目标：简体中文"; color: Theme.secondary }

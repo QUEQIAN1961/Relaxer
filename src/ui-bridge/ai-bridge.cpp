@@ -23,6 +23,14 @@ QVariantList AiBridge::models()const {
         {"availability",int(m.availability)},{"reasoningEfforts",m.capabilities.reasoningEfforts}});
     return result;
 }
+QStringList AiBridge::defaultEfforts()const{
+    const auto *model=m_runtime->model(m_draft["providerId"].toString(),m_draft["modelId"].toString());
+    auto efforts=model?model->capabilities.reasoningEfforts:QStringList{};efforts.removeAll("off");return efforts;
+}
+QStringList AiBridge::translationEfforts()const{
+    const auto *model=m_runtime->model(m_draft["translationProviderId"].toString(),m_draft["translationModelId"].toString());
+    auto efforts=model?model->capabilities.reasoningEfforts:QStringList{};efforts.removeAll("off");return efforts;
+}
 bool AiBridge::edit(const QString &key,const QVariant &value){if(!m_draft.contains(key))return false;m_draft[key]=value;emit changed();return true;}
 bool AiBridge::save(){
     auto c=m_runtime->configuration();

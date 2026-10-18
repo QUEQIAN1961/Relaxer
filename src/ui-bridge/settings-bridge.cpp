@@ -3,7 +3,11 @@
 #include <QGuiApplication>
 #include <QPalette>
 namespace relaxer {
-SettingsBridge::SettingsBridge(Library *library,QObject *parent):QObject(parent),m_library(library),m_store(library),m_appearance(library){resetDraft();}
+SettingsBridge::SettingsBridge(Library *library,QObject *parent):QObject(parent),m_library(library),m_store(library),m_appearance(library){
+    resetDraft();
+    if(auto *app=qobject_cast<QGuiApplication *>(QCoreApplication::instance()))
+        connect(app,&QGuiApplication::paletteChanged,this,[this]{if(m_store.get("theme",0).toInt()==2)emit settingsChanged();});
+}
 QVariantMap SettingsBridge::values()const {
     return {{"theme",m_store.get("theme",0).toInt()},{"threshold",m_store.get("threshold",80).toInt()},
         {"showLyricTranslation",m_store.get("showLyricTranslation",true).toBool()},

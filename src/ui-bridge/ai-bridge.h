@@ -11,11 +11,14 @@ class AiBridge final:public QObject {
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString credentialStatus READ credentialStatus NOTIFY changed)
+    Q_PROPERTY(QStringList defaultEfforts READ defaultEfforts NOTIFY changed)
+    Q_PROPERTY(QStringList translationEfforts READ translationEfforts NOTIFY changed)
 public:
     AiBridge(ai::AiRuntime *runtime,QObject *parent=nullptr);
     QVariantMap draft()const{return m_draft;}QVariantList models()const;
     bool busy()const{return m_request!=0;}QString status()const{return m_status;}
     QString credentialStatus()const{return m_credentialStatus;}
+    QStringList defaultEfforts()const;QStringList translationEfforts()const;
     Q_INVOKABLE void resetDraft();
     Q_INVOKABLE bool edit(const QString &key,const QVariant &value);
     Q_INVOKABLE bool save();
