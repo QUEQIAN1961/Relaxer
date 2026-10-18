@@ -92,12 +92,20 @@ class QmlRuntimeLoadingTests : public QObject {
         QVERIFY(!QFile::exists(root));
     }
     void hostPeImportsExcludeOptionalQuick() {
+        // GNU objdump's narrow Windows filename handling cannot open a
+        // non-ASCII absolute path. Qt copies the actual inputs losslessly;
+        // inspect ASCII basenames relative to the temporary working directory.
+        QTemporaryDir inspection;
+        QVERIFY(inspection.isValid());
+        QVERIFY(QFile::copy(hostPath(), inspection.filePath("host.exe")));
+        QVERIFY(QFile::copy(modulePath(), inspection.filePath("optional.dll")));
         QProcess process;
-        process.start(QString::fromUtf8(RELAXER_OBJDUMP), {"-p", hostPath()});
+        process.setWorkingDirectory(inspection.path());
+        process.start(QString::fromUtf8(RELAXER_OBJDUMP), {"-p", "host.exe"});
         QVERIFY(process.waitForFinished()); QCOMPARE(process.exitCode(), 0);
         const auto imports = process.readAllStandardOutput();
         QVERIFY(!imports.contains("Qt6Quick")); QVERIFY(!imports.contains("Qt6Qml"));
-        process.start(QString::fromUtf8(RELAXER_OBJDUMP), {"-p", modulePath()});
+        process.start(QString::fromUtf8(RELAXER_OBJDUMP), {"-p", "optional.dll"});
         QVERIFY(process.waitForFinished()); QCOMPARE(process.exitCode(), 0);
         const auto optional = process.readAllStandardOutput();
         QVERIFY(optional.contains("Qt6Quick.dll")); QVERIFY(optional.contains("Qt6Qml.dll"));
