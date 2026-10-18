@@ -208,6 +208,30 @@ Track Library::track(qint64 id) const {
         return fromQuery(q);
     return {};
 }
+QHash<qint64, Track> Library::tracksByIds(const QVector<qint64> &ids) const {
+    QHash<qint64, Track> result;
+    if (QThread::currentThread() != thread()) {
+        m_error = "曲目查询必须在资料库所属线程执行";
+        return result;
+    }
+    QSet<qint64> seen;
+    QVector<qint64> unique;
+    unique.reserve(ids.size());
+    for (auto id : ids) if (id > 0 && !seen.contains(id)) { seen.insert(id); unique.append(id); }
+    // Bounded bind count supports existing SQLite builds and large queues.
+    constexpr int batchSize = 256;
+    for (qsizetype start = 0; start < unique.size(); start += batchSize) {
+        const int count = int(qMin<qsizetype>(batchSize, unique.size() - start));
+        QStringList placeholders;
+        for (int i = 0; i < count; ++i) placeholders.append("?");
+        QSqlQuery query(m_db);
+        query.prepare("SELECT id,hash,file,title,artist,album,cover,lyrics,duration,plays,heard,favorite,cover_origin,added FROM tracks WHERE id IN (" + placeholders.join(',') + ')');
+        for (int i = 0; i < count; ++i) query.addBindValue(unique[start + i]);
+        if (!query.exec()) { m_error = query.lastError().text(); return {}; }
+        while (query.next()) { auto row = fromQuery(query); result.insert(row.id, std::move(row)); }
+    }
+    return result;
+}
 QVector<Track> Library::recent() const {
     QSqlQuery q(m_db);
     q.exec("SELECT "

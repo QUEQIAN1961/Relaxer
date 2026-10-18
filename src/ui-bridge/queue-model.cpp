@@ -46,9 +46,8 @@ void QueueListModel::refresh() {
     const auto ids = m_facade && m_library ? m_facade->queue().items : QVector<qint64>{};
     QVector<Track> rows; QVector<qint64> missing;
     if (!ids.isEmpty()) {
-        QHash<qint64,Track> catalog;
-        const auto snapshot = m_library->tracks(); catalog.reserve(snapshot.size()); rows.reserve(ids.size());
-        for (const auto &track : snapshot) catalog.insert(track.id,track);
+        const auto catalog = m_library->tracksByIds(ids);
+        rows.reserve(ids.size());
         for (auto id : ids) {
             auto t = catalog.value(id);
             if (!t.id) { missing.append(id); t.id = id; t.title = "歌曲已从曲库移除"; }

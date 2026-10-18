@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QHash>
 namespace relaxer {
 enum class TranslationJudgment { Unknown, NeedsTranslation, NoTranslationNeeded };
 struct LookupCache { bool fresh=false, noResult=false; QJsonArray records; };
@@ -35,6 +36,8 @@ class Library : public QObject {
     QVector<Track> tracks(qint64 playlist = 0, const QString &filter = {}) const;
     QVector<Track> recent() const;
     Track track(qint64 id) const;
+    // Unique existing rows only; callers retain their own order/duplicates.
+    QHash<qint64, Track> tracksByIds(const QVector<qint64> &ids) const;
     qint64 insert(const Track &t);
     qint64 insertImportedTrack(const Track &t,bool *added);
     QVector<Playlist> playlists() const;
