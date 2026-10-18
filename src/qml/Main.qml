@@ -61,7 +61,7 @@ ApplicationWindow {
                     Layout.fillWidth: true; Layout.fillHeight: true
                     currentIndex: appBridge.page
                     LocalPage {}
-                    TransitionPage { objectName: "playlistsPage"; heading: "歌单"; description: "C1 尚未迁移歌单界面。\n创建、排序、标签与管理请使用默认 Widgets 模式。" }
+                    PlaylistsPage {}
                     ColumnLayout {
                         objectName: "playingPage"
                         Text { text: "正在播放"; font.pixelSize: Theme.headingSize; font.weight: Font.DemiBold; color: Theme.text }
@@ -78,7 +78,7 @@ ApplicationWindow {
                 }
                 Text {
                     Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: playbackBridge.error.length > 0 ? playbackBridge.error : "C1 基础建设预览 · 完整功能请重启默认 Widgets 模式"
+                    text: libraryBridge.error.length > 0 ? libraryBridge.error : playbackBridge.error.length > 0 ? playbackBridge.error : "本地音乐与歌单 · 导入、歌词及高级设置仍可在 Widgets 中使用"
                     color: playbackBridge.error.length > 0 ? Theme.accent : Theme.secondary
                     font.pixelSize: 12
                 }

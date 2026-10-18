@@ -6,7 +6,8 @@ static void initializeQmlResources() { Q_INIT_RESOURCE(qml); }
 namespace relaxer {
 QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly)
     : QObject(parent), m_facade(library, this, decodeOnly), m_appBridge(library, this),
-      m_playbackBridge(&m_facade, this) {
+      m_playbackBridge(&m_facade, this), m_tracks(library, this), m_trackView(&m_tracks, this),
+      m_playlists(library, this), m_libraryBridge(library, &m_facade, &m_tracks, &m_trackView, &m_playlists, this) {
     initializeQmlResources();
     setObjectName("qmlShell");
     // A fixed official style makes custom control backgrounds portable on Windows.
@@ -17,6 +18,11 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly)
     m_engine = std::make_unique<QQmlApplicationEngine>();
     m_engine->rootContext()->setContextProperty("appBridge", &m_appBridge);
     m_engine->rootContext()->setContextProperty("playbackBridge", &m_playbackBridge);
+    for (auto *object : {static_cast<QObject *>(&m_trackView), static_cast<QObject *>(&m_playlists), static_cast<QObject *>(&m_libraryBridge)})
+        QQmlEngine::setObjectOwnership(object, QQmlEngine::CppOwnership);
+    m_engine->rootContext()->setContextProperty("libraryModel", &m_trackView);
+    m_engine->rootContext()->setContextProperty("playlistModel", &m_playlists);
+    m_engine->rootContext()->setContextProperty("libraryBridge", &m_libraryBridge);
     connect(m_engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
         for (const auto &error : errors) m_warnings.append(error.toString());
     });

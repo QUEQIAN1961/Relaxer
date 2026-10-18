@@ -7,6 +7,7 @@ class PlaybackBridge final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString title READ title NOTIFY trackChanged)
     Q_PROPERTY(QString artist READ artist NOTIFY trackChanged)
+    Q_PROPERTY(QString trackId READ trackId NOTIFY trackChanged)
     Q_PROPERTY(bool hasTrack READ hasTrack NOTIFY trackChanged)
     Q_PROPERTY(bool playing READ playing NOTIFY playingChanged)
     Q_PROPERTY(qint64 position READ position NOTIFY progressChanged)
@@ -18,6 +19,7 @@ class PlaybackBridge final : public QObject {
     explicit PlaybackBridge(PlaybackFacade *facade, QObject *parent = nullptr);
     QString title() const { return m_state.track.title; }
     QString artist() const { return m_state.track.artist; }
+    QString trackId() const { return QString::number(m_state.track.id); }
     bool hasTrack() const { return m_state.track.id != 0; }
     bool playing() const { return m_state.playing; }
     qint64 position() const { return m_state.position; }

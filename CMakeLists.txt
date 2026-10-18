@@ -347,6 +347,7 @@ if(RELAXER_ENABLE_QML)
   add_library(relaxer_qml STATIC
     src/ui-bridge/app-bridge.cpp src/ui-bridge/app-bridge.h
     src/ui-bridge/playback-bridge.cpp src/ui-bridge/playback-bridge.h
+    src/ui-bridge/library-bridge.cpp src/ui-bridge/library-bridge.h
     src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
     src/qml/qml.qrc)
   target_include_directories(relaxer_qml PUBLIC src)
@@ -370,6 +371,10 @@ if(RELAXER_ENABLE_QML)
   target_compile_definitions(relaxer_qml_tests PRIVATE RELAXER_APP_PATH="$<TARGET_FILE:Relaxer>")
   relaxer_add_qt_test(relaxer_qml_foundation relaxer_qml_tests)
   relaxer_qml_test_environment(relaxer_qml_foundation)
+  add_executable(relaxer_c2c3_tests tests/qml-c2c3-tests.cpp)
+  target_link_libraries(relaxer_c2c3_tests PRIVATE relaxer_qml Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_c2c3 relaxer_c2c3_tests)
+  relaxer_qml_test_environment(relaxer_qml_c2c3)
   add_executable(relaxer_qml_loading_tests tests/qml-runtime-loading-tests.cpp)
   target_link_libraries(relaxer_qml_loading_tests PRIVATE relaxer_optional_qml relaxer_core Qt6::Test)
   add_dependencies(relaxer_qml_loading_tests Relaxer)
