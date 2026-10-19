@@ -348,6 +348,9 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/app-bridge.cpp src/ui-bridge/app-bridge.h
     src/ui-bridge/playback-bridge.cpp src/ui-bridge/playback-bridge.h
     src/ui-bridge/library-bridge.cpp src/ui-bridge/library-bridge.h
+    src/ui-bridge/upcoming-model.cpp src/ui-bridge/upcoming-model.h
+    src/ui-bridge/ui-images.cpp src/ui-bridge/ui-images.h
+    src/ui-bridge/ui-integration.cpp src/ui-bridge/ui-integration.h
     src/ui-bridge/queue-model.cpp src/ui-bridge/queue-model.h
     src/ui-bridge/lyrics-model.cpp src/ui-bridge/lyrics-model.h
     src/ui-bridge/settings-bridge.cpp src/ui-bridge/settings-bridge.h
@@ -358,7 +361,7 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
     src/qml/qml.qrc)
   target_include_directories(relaxer_qml PUBLIC src)
-  target_link_libraries(relaxer_qml PUBLIC relaxer_library_models relaxer_playback_facade relaxer_translation relaxer_lyrics_search relaxer_services Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+  target_link_libraries(relaxer_qml PUBLIC relaxer_ui relaxer_library_models relaxer_playback_facade relaxer_translation relaxer_lyrics_search relaxer_services Qt6::Qml Qt6::Quick Qt6::QuickControls2)
   add_executable(relaxer_library_model_tests tests/library-model-tests.cpp)
   target_link_libraries(relaxer_library_model_tests PRIVATE relaxer_library_models Qt6::Test)
   relaxer_add_qt_test(relaxer_library_models relaxer_library_model_tests)
@@ -372,6 +375,32 @@ if(RELAXER_ENABLE_QML)
   add_dependencies(Relaxer relaxer_qml_runtime)
   target_compile_definitions(Relaxer PRIVATE RELAXER_ENABLE_QML=1
     RELAXER_QML_MODULE_FILENAME="$<TARGET_FILE_NAME:relaxer_qml_runtime>")
+  add_executable(relaxer_qml_upcoming_parity_tests tests/qml-upcoming-parity-tests.cpp)
+  target_link_libraries(relaxer_qml_upcoming_parity_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_upcoming_parity relaxer_qml_upcoming_parity_tests)
+  relaxer_qml_test_environment(relaxer_qml_upcoming_parity)
+  add_executable(relaxer_qml_ai_parity_tests tests/qml-ai-parity-tests.cpp)
+  target_link_libraries(relaxer_qml_ai_parity_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_ai_parity relaxer_qml_ai_parity_tests)
+  relaxer_qml_test_environment(relaxer_qml_ai_parity)
+  add_executable(relaxer_qml_settings_parity_tests tests/qml-settings-parity-tests.cpp)
+  target_link_libraries(relaxer_qml_settings_parity_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_settings_parity relaxer_qml_settings_parity_tests)
+  relaxer_qml_test_environment(relaxer_qml_settings_parity)
+  add_executable(relaxer_qml_ui_parity_library_tests tests/qml-ui-parity-library-tests.cpp)
+  target_link_libraries(relaxer_qml_ui_parity_library_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_ui_parity_library relaxer_qml_ui_parity_library_tests)
+  relaxer_qml_test_environment(relaxer_qml_ui_parity_library)
+  add_executable(relaxer_qml_lyrics_workspace_parity_tests tests/qml-lyrics-workspace-parity-tests.cpp)
+  target_link_libraries(relaxer_qml_lyrics_workspace_parity_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_lyrics_workspace_parity relaxer_qml_lyrics_workspace_parity_tests)
+  relaxer_qml_test_environment(relaxer_qml_lyrics_workspace_parity)
+  add_executable(relaxer_qml_v020_ui_parity_tests tests/qml-v020-ui-parity-tests.cpp)
+  target_link_libraries(relaxer_qml_v020_ui_parity_tests PRIVATE relaxer_qml relaxer_ui Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_v020_ui_parity relaxer_qml_v020_ui_parity_tests)
+  relaxer_qml_test_environment(relaxer_qml_v020_ui_parity)
+  add_executable(relaxer_qml_v020_parity_preview EXCLUDE_FROM_ALL tests/qml-v020-parity-preview.cpp)
+  target_link_libraries(relaxer_qml_v020_parity_preview PRIVATE relaxer_qml relaxer_ui Qt6::Test)
   add_executable(relaxer_qml_tests tests/qml-foundation-tests.cpp)
   target_link_libraries(relaxer_qml_tests PRIVATE relaxer_qml Qt6::Test)
   add_dependencies(relaxer_qml_tests Relaxer)

@@ -21,8 +21,8 @@ ScrollView {
         }
         RowLayout {
             Layout.fillWidth: true
-            ComboBox { id: provider; model: ["bing", "baidu"]; Layout.fillWidth: true }
-            ComboBox { id: language; model: ["en", "ja", "auto"] }
+            ChoiceBox { id: provider; model: ["bing", "baidu"]; Layout.fillWidth: true }
+            ChoiceBox { id: language; model: ["en", "ja", "auto"] }
             ShellButton { text: "浏览器翻译"; enabled: playbackBridge.hasTrack && !translationBridge.pending && !translationBridge.preview; onClicked: { const task = translationBridge.prepareBrowser(provider.currentText, language.currentText); if (task.length) { consent.exactTask = task; consent.browser = true; consent.open() } } }
         }
         Text { Layout.fillWidth: true; text: translationBridge.status + (translationBridge.details.length ? "\n" + translationBridge.details : ""); textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap }

@@ -59,7 +59,7 @@ class QmlFoundationTests final : public QObject {
         QVERIFY(shell.load()); QVERIFY(shell.load());
         auto *window = shell.window(); QVERIFY(window);
         QVERIFY(window->isVisible());
-        QCOMPARE(window->title(), QString("Relaxer V0.2.1-dev-c4c5 · QML"));
+        QCOMPARE(window->title(), QString("Relaxer V0.2.1-dev-c4c5-ui1 · QML"));
         QCOMPARE(shell.appBridge()->version(), QString::fromLatin1(phaseC::Display));
         QVERIFY(window->minimumWidth() >= 900); QVERIFY(window->minimumHeight() >= 600);
         QCOMPARE(QSqlDatabase::connectionNames(), connections);
@@ -87,19 +87,19 @@ class QmlFoundationTests final : public QObject {
         for (int page = 0; page < 4; ++page) {
             auto *button = visualChild(root, QString("navigation%1").arg(page)); QVERIFY(button);
             QVERIFY(QMetaObject::invokeMethod(button, "click"));
-            QCOMPARE(shell.appBridge()->page(), page);
+            QTRY_COMPARE(shell.appBridge()->page(), page);
             QCOMPARE(shell.window()->property("currentPage").toInt(), page);
         }
         QCOMPARE(changes.size(), 3);
         QVERIFY(shell.appBridge()->navigate(3)); QCOMPARE(changes.size(), 3);
         QVERIFY(!shell.appBridge()->navigate(-1)); QVERIFY(!shell.appBridge()->navigate(4));
         QCOMPARE(shell.appBridge()->page(), 3);
-        auto *theme = visualChild(root, "themeToggle"); QVERIFY(theme);
-        const auto accent = shell.window()->property("themeAccent");
-        QVERIFY(accent.isValid());
-        QVERIFY(QMetaObject::invokeMethod(theme, "click"));
-        QVERIFY(shell.window()->property("themeAccent") != accent);
-        QVERIFY(QMetaObject::invokeMethod(theme, "click"));
+        auto *theme = visualChild(root, "qmlThemeSetting"); QVERIFY(theme);
+        auto *tokens=shell.window()->property("designTokens").value<QObject *>();QVERIFY(tokens);
+        const auto background=tokens->property("background");
+        QVERIFY(theme->setProperty("currentIndex",1));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,1)));
+        QTRY_VERIFY(tokens->property("background")!=background);
+        QVERIFY(theme->setProperty("currentIndex",0));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,0)));
         QTest::qWait(20); QVERIFY(shell.warnings().isEmpty());
     }
     void realLibraryNotificationsAreCoalesced() {
@@ -222,7 +222,7 @@ class QmlFoundationTests final : public QObject {
         QCOMPARE(result["mode"].toString(), mode == "qml" ? QString("qml") : QString("widgets"));
         QCOMPARE(result["databaseConnections"].toInt(), 1); QCOMPARE(result["playbackInstances"].toInt(), 1);
         QVERIFY(result["saveSucceeded"].toBool());
-        QVERIFY(result["title"].toString().contains("V0.2.1-dev-c4c5"));
+        QVERIFY(result["title"].toString().contains("V0.2.1-dev-c4c5-ui1"));
         QVERIFY(!QFile::exists(dir.filePath("must-not-open")));
         QVERIFY(!QFile::exists(data + "/data")); QVERIFY(!QFile::exists(data + "/relaxer.lock"));
         Library reopened(data); QVERIFY(reopened.open()); QCOMPARE(reopened.tracks().size(), 1);

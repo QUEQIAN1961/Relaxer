@@ -1,84 +1,104 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 import "../components"
 import "../theme"
 Item {
-    id: page
-    objectName: "lyricsPage"
-    property bool fullScreen: false
-    property string importTrack: "0"
-    property url pendingLyricsFile
-    property string localNotice: ""
+    id:page
+    objectName:"lyricsPage"
+    property bool fullScreen:false
+    property bool metadataTravelling:false
+    property alias metadataTitle:largeTitle
+    property alias metadataArtist:largeArtist
+    property bool artworkTravelling:false
+    property real detailsOpacity:1
+    property int trackDirection:1
+    property alias largeArtwork:art
+    property bool toolsVisible:false
+    property bool delayOpen:false
+    signal collapseRequested()
     signal fullscreenRequested()
     signal translationRequested()
-    RowLayout {
-        anchors.fill: parent; spacing: page.width < 850 ? 20 : 40
-        ScrollView {
-          id: artworkScroll; contentWidth: availableWidth; clip: true
-          Layout.minimumWidth: 220; Layout.maximumWidth: 340; Layout.preferredWidth: Math.max(220, Math.min(340, page.width * 0.34)); Layout.fillHeight: true; Layout.minimumHeight: 0
-          ColumnLayout {
-            width: artworkScroll.availableWidth; spacing: 10
-            Rectangle {
-                property real coverSide: Math.min(artworkScroll.availableWidth, Math.max(110, page.height - 270))
-                Layout.preferredWidth: coverSide; Layout.preferredHeight: coverSide; Layout.alignment: Qt.AlignHCenter
-                radius: 22; color: Theme.hover; clip: true
-                scale: page.fullScreen ? 1 : 0.98
-                Behavior on scale { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
-                Text { anchors.centerIn: parent; text: "♫"; font.pixelSize: 84; color: Theme.secondary; visible: art.status !== Image.Ready }
-                Image {
-                    id: art; objectName: "currentArtwork"; anchors.fill: parent
-                    source: lyricsModel.cover; asynchronous: true; cache: false; retainWhileLoading: false
-                    sourceSize.width: 640; sourceSize.height: 640; fillMode: Image.PreserveAspectCrop
-                    visible: status === Image.Ready
-                    opacity: visible ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 180 } }
+    Rectangle { anchors.fill:parent;color:Theme.background }
+    Image {
+        anchors.fill:parent
+        source:settingsBridge.values.playerCoverBackground ? "image://relaxer/blur?file="+encodeURIComponent(playbackBridge.coverUrl)+"&seed="+encodeURIComponent(playbackBridge.hasTrack?playbackBridge.title:"Relaxer")+"&rev="+playbackBridge.artworkRevision : String(settingsBridge.palette.expandedImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.expandedImage))+"&blur="+Number(settingsBridge.palette.blurExpanded||0):""
+        asynchronous:true;cache:false;retainWhileLoading:false
+        sourceSize.width:720;sourceSize.height:720;fillMode:Image.PreserveAspectCrop
+        visible:source.toString().length>0
+    }
+    Rectangle{anchors.fill:parent;color:Theme.background;opacity:settingsBridge.values.playerCoverBackground?.68:0}
+    RowLayout{
+        x:34;y:28;width:parent.width-68;height:34;opacity:page.detailsOpacity
+        ShellButton{objectName:"playerCollapse";text:"收起";flat:true;symbol:"collapse";onClicked:page.collapseRequested()}
+        Item{Layout.fillWidth:true}
+        IconButton{objectName:"fullscreenButton";symbol:page.fullScreen?"contract":"expand";tip:page.fullScreen?"退出窗口全屏":"窗口全屏";onClicked:page.fullscreenRequested()}
+    }
+    RowLayout{
+        anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;anchors.bottom:parent.bottom
+        anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:76;anchors.bottomMargin:20;spacing:32
+        Item{
+            Layout.fillWidth:true;Layout.fillHeight:true;Layout.preferredWidth:page.width/2
+            Column{
+                width:parent.width;anchors.verticalCenter:parent.verticalCenter;spacing:0
+                Artwork{
+                    id:art;objectName:"currentArtwork";width:Math.max(160,Math.min(360,parent.width-40,page.height-310));height:width;anchors.horizontalCenter:parent.horizontalCenter
+                    file:playbackBridge.coverUrl;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";revision:playbackBridge.artworkRevision;radius:24
+                    animated:page.visible&&!page.artworkTravelling;direction:page.trackDirection
+                    opacity:page.artworkTravelling?0:1
+                }
+                Item{height:22;width:1}
+                Text{
+                    id:largeTitle
+                    width:parent.width-40;anchors.horizontalCenter:parent.horizontalCenter;text:playbackBridge.hasTrack?playbackBridge.title:"还没有音乐正在播放";textFormat:Text.PlainText
+                    wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter
+                    font.pixelSize:27;font.weight:Font.DemiBold;color:Theme.text;opacity:page.metadataTravelling?0:page.detailsOpacity
+                }
+                Item{height:8;width:1}
+                Text{id:largeArtist;width:parent.width-40;anchors.horizontalCenter:parent.horizontalCenter;text:playbackBridge.hasTrack?playbackBridge.artist:"选一首喜欢的歌，慢慢听。";textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter;font.pixelSize:16;color:Theme.secondary;opacity:page.metadataTravelling?0:page.detailsOpacity}
+            }
+        }
+        Item{
+            id:lyricSide;Layout.fillWidth:true;Layout.fillHeight:true;Layout.preferredWidth:page.width/2;opacity:page.detailsOpacity
+            LyricsList{id:lyrics;anchors.fill:parent}
+            HoverHandler{onPointChanged:{page.toolsVisible=true;idle.restart()} onHoveredChanged:if(hovered){page.toolsVisible=true;idle.restart()}}
+            ToolButton{
+                id:question;objectName:"lyricToolsQuestion";width:20;height:20;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.rightMargin:26;anchors.bottomMargin:6
+                text:"?";font.pixelSize:12;opacity:page.toolsVisible||tools.opened?1:0;enabled:opacity>0
+                background:Rectangle{radius:10;color:Theme.hover;border.color:Theme.border}
+                onClicked:{if(tools.opened)tools.close();else{page.delayOpen=false;tools.open()}}
+                Behavior on opacity{NumberAnimation{duration:settingsBridge.values.reduceMotion?0:140}}
+            }
+            Timer{id:idle;interval:3000;onTriggered:if(!page.delayOpen&&!tools.hovered){page.toolsVisible=false;tools.close()}}
+            Popup{
+                id:tools;objectName:"lyricToolsMenu";property bool hovered:false
+                x:Math.max(0,lyricSide.width-width-28);y:Math.max(0,lyricSide.height-height-30)
+                width:page.delayOpen?320:210;padding:12
+                closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutside
+                background:Rectangle{radius:12;color:Theme.card;border.color:Theme.border}
+                HoverHandler{onHoveredChanged:{tools.hovered=hovered;if(hovered)idle.stop();else if(!page.delayOpen)idle.restart()}}
+                onClosed:{page.delayOpen=false;idle.restart()}
+                contentItem:ColumnLayout{
+                    spacing:8
+                    ShellButton{objectName:"lyricDelayEntry";Layout.fillWidth:true;visible:!page.delayOpen;text:lyricsModel.timed?"歌词延时":"歌词延时 · 查找滚动歌词";enabled:playbackBridge.hasTrack;onClicked:{if(lyricsModel.timed){page.delayOpen=true;idle.stop()}else{tools.close();page.translationRequested()}}}
+                    CheckBox{visible:!page.delayOpen;text:"显示译文";checked:settingsBridge.values.showLyricTranslation;onClicked:settingsBridge.setPreference("showLyricTranslation",checked)}
+                    ShellButton{visible:!page.delayOpen;Layout.fillWidth:true;text:"查找歌词…";enabled:playbackBridge.hasTrack;onClicked:{tools.close();page.translationRequested()}}
+                    ShellButton{visible:page.delayOpen;text:"‹ 返回";onClicked:page.delayOpen=false}
+                    RowLayout{
+                        visible:page.delayOpen
+                        Text{text:"歌词延时";color:Theme.secondary}
+                        EntryField {
+                            id:offset;objectName:"lyricsOffset";Layout.fillWidth:true;text:(lyricsModel.offsetMs/1000).toFixed(2)+" s";enabled:lyricsModel.timed
+                            onEditingFinished:{const v=Number(text.replace("s","").trim());if(!isNaN(v))lyricsModel.setOffsetMs(Math.max(-5000,Math.min(5000,Math.round(v*1000))));text=(lyricsModel.offsetMs/1000).toFixed(2)+" s"}
+                        }
+                        Column{
+                            IconButton{width:20;height:16;symbol:"up";onClicked:lyricsModel.setOffsetMs(Math.min(5000,lyricsModel.offsetMs+10))}
+                            IconButton{width:20;height:16;symbol:"down";onClicked:lyricsModel.setOffsetMs(Math.max(-5000,lyricsModel.offsetMs-10))}
+                        }
+                        ShellButton{text:"归零";onClicked:lyricsModel.setOffsetMs(0)}
+                    }
                 }
             }
-            Text { Layout.fillWidth: true; Layout.minimumWidth: 0; text: playbackBridge.title; textFormat: Text.PlainText; font.pixelSize: 25; font.weight: Font.Bold; color: Theme.text; elide: Text.ElideRight }
-            Text { Layout.fillWidth: true; Layout.minimumWidth: 0; text: playbackBridge.artist; textFormat: Text.PlainText; font.pixelSize: 15; color: Theme.secondary; elide: Text.ElideRight }
-            RowLayout {
-                Layout.fillWidth: true
-                ShellButton { objectName: "fullscreenButton"; Layout.fillWidth: true; text: page.fullScreen ? "↙ 退出全屏" : "↗ 全屏播放"; onClicked: page.fullscreenRequested() }
-                ShellButton { text: "歌词文件"; enabled: playbackBridge.hasTrack; onClicked: { page.importTrack = playbackBridge.trackId; localLyrics.open() } }
-            }
-            Text { Layout.fillWidth: true; text: "歌词延时 · 正数晚出现，负数提前"; font.pixelSize: 12; color: Theme.secondary; wrapMode: Text.Wrap }
-            RowLayout {
-                Layout.fillWidth: true
-                ToolButton { text: "−"; enabled: lyricsModel.timed && lyricsModel.offsetMs > -5000; onClicked: lyricsModel.setOffsetMs(Math.max(-5000, lyricsModel.offsetMs - 10)) }
-                TextField {
-                    id: offset; objectName: "lyricsOffset"; Layout.fillWidth: true; horizontalAlignment: TextInput.AlignHCenter
-                    text: (lyricsModel.offsetMs / 1000).toFixed(2)
-                    enabled: lyricsModel.timed
-                    validator: DoubleValidator { bottom: -5; top: 5; decimals: 2; locale: "C"; notation: DoubleValidator.StandardNotation }
-                    onEditingFinished: { if (acceptableInput) lyricsModel.setOffsetMs(Math.round(Number(text) * 1000)); text = (lyricsModel.offsetMs / 1000).toFixed(2) }
-                    Accessible.name: "歌词延时秒，范围负五到正五"
-                }
-                ToolButton { text: "+"; enabled: lyricsModel.timed && lyricsModel.offsetMs < 5000; onClicked: lyricsModel.setOffsetMs(Math.min(5000, lyricsModel.offsetMs + 10)) }
-                ToolButton { text: "归零"; enabled: lyricsModel.timed; onClicked: lyricsModel.setOffsetMs(0) }
-            }
-            ShellButton { Layout.fillWidth: true; text: "检索歌词 / 翻译与预览"; onClicked: page.translationRequested() }
-            Text { Layout.fillWidth: true; text: page.localNotice; color: Theme.accent; wrapMode: Text.Wrap; textFormat: Text.PlainText }
-          }
-        }
-        LyricsList { Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumWidth: 0; Layout.minimumHeight: 0; Layout.preferredWidth: page.width * 0.64 }
-    }
-    FileDialog {
-        id: localLyrics; title: "导入当前歌曲的本地歌词"; nameFilters: ["歌词 (*.lrc *.txt)"]
-        onAccepted: {
-            if (page.importTrack !== playbackBridge.trackId) { page.localNotice = "歌曲已变化，请重新选择歌词文件"; return }
-            page.pendingLyricsFile = selectedFile; replaceLocal.open()
-        }
-    }
-    ConfirmDialog {
-        id: replaceLocal; parent: page.Overlay.overlay; anchors.centerIn: parent; width: Math.max(300, Math.min(440, page.width - 20)); modal: true
-        title: "保存所选本地歌词？"; standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: "将替换当前歌曲的本地歌词，并明确放弃该歌曲尚未保存的翻译任务或预览。"; wrapMode: Text.Wrap }
-        onAccepted: {
-            if (page.importTrack !== playbackBridge.trackId) { page.localNotice = "歌曲已变化，未写入"; return }
-            if (translationBridge.taskKey.length) translationBridge.discard()
-            page.localNotice = lyricsModel.importLocalLyrics(page.pendingLyricsFile) ? "歌词已保存" : "歌词保存失败，请检查文件"
         }
     }
 }

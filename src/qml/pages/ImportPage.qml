@@ -22,7 +22,7 @@ ScrollView {
         RowLayout {
             Layout.fillWidth: true
             Text { text: "同时加入歌单"; color: Theme.secondary }
-            ComboBox { id: target; Layout.fillWidth: true; model: playlistModel; textRole: "name"; valueRole: "playlistKey"; enabled: !importBridge.busy && addToPlaylist.checked }
+            ChoiceBox { id: target; Layout.fillWidth: true; model: playlistModel; textRole: "name"; valueRole: "playlistKey"; enabled: !importBridge.busy && addToPlaylist.checked }
             CheckBox { id: addToPlaylist; text: "启用"; enabled: playlistModel.count > 0 && !importBridge.busy }
         }
         ProgressBar { objectName: "importProgress"; Layout.fillWidth: true; from: 0; to: Math.max(1, importBridge.total); value: importBridge.current; indeterminate: importBridge.busy && importBridge.total === 0 }

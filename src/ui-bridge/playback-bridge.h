@@ -1,6 +1,7 @@
 #pragma once
 #include "playback-facade.h"
 #include <QPointer>
+#include <QUrl>
 
 namespace relaxer {
 class PlaybackBridge final : public QObject {
@@ -9,6 +10,10 @@ class PlaybackBridge final : public QObject {
     Q_PROPERTY(QString artist READ artist NOTIFY trackChanged)
     Q_PROPERTY(QString trackId READ trackId NOTIFY trackChanged)
     Q_PROPERTY(bool hasTrack READ hasTrack NOTIFY trackChanged)
+    Q_PROPERTY(QUrl coverUrl READ coverUrl NOTIFY artworkChanged)
+    Q_PROPERTY(QString artworkRevision READ artworkRevision NOTIFY artworkChanged)
+    Q_PROPERTY(bool currentFavorite READ currentFavorite NOTIFY currentFavoriteChanged)
+    Q_PROPERTY(int transitionDirection READ transitionDirection NOTIFY transitionDirectionChanged)
     Q_PROPERTY(bool playing READ playing NOTIFY playingChanged)
     Q_PROPERTY(qint64 position READ position NOTIFY progressChanged)
     Q_PROPERTY(qint64 duration READ duration NOTIFY progressChanged)
@@ -21,10 +26,14 @@ class PlaybackBridge final : public QObject {
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
   public:
     explicit PlaybackBridge(PlaybackFacade *facade, QObject *parent = nullptr, Library *library = nullptr);
-    QString title() const { return m_state.track.title; }
-    QString artist() const { return m_state.track.artist; }
+    QString title() const { return m_metadata.id == m_state.track.id ? m_metadata.title : m_state.track.title; }
+    QString artist() const { return m_metadata.id == m_state.track.id ? m_metadata.artist : m_state.track.artist; }
     QString trackId() const { return QString::number(m_state.track.id); }
     bool hasTrack() const { return m_state.track.id != 0; }
+    QUrl coverUrl() const { return m_coverUrl; }
+    QString artworkRevision() const { return m_artworkRevision; }
+    bool currentFavorite() const { return m_metadata.id == m_state.track.id && m_metadata.favorite; }
+    int transitionDirection() const { return m_transitionDirection; }
     bool playing() const { return m_state.playing; }
     qint64 position() const { return m_state.position; }
     qint64 duration() const { return m_state.duration; }
@@ -40,6 +49,8 @@ class PlaybackBridge final : public QObject {
     Q_INVOKABLE void pause();
     Q_INVOKABLE void next();
     Q_INVOKABLE void previous();
+    Q_INVOKABLE void playUpcoming(int index);
+    Q_INVOKABLE void toggleFavorite();
     Q_INVOKABLE void seek(qint64 position);
     Q_INVOKABLE void setVolume(int volume);
     Q_INVOKABLE void toggleMute();
@@ -48,6 +59,12 @@ class PlaybackBridge final : public QObject {
     Q_INVOKABLE void removeFromQueue(const QString &id);
   signals:
     void trackChanged();
+    void artworkChanged();
+    void currentFavoriteChanged();
+    void transitionDirectionChanged();
+    // Emitted before a manual command so the frontend can capture the old
+    // cover, including repeated presses in the same direction.
+    void transitionStarted(int direction);
     void playingChanged();
     void progressChanged();
     void volumeChanged();
@@ -59,11 +76,18 @@ class PlaybackBridge final : public QObject {
     QPointer<PlaybackFacade> m_facade;
     QPointer<Library> m_library;
     PlaybackSnapshot m_state;
+    Track m_metadata;
+    QUrl m_coverUrl;
+    QString m_artworkRevision;
     QString m_error;
     bool m_available = false;
     bool m_canPlay = false;
     int m_lastVolume = 65;
+    int m_transitionDirection = 0;
     void refresh();
+    void refreshMetadata();
+    void readMetadata();
+    void beginTransition(int direction);
     void setError(const QString &error);
 };
 }

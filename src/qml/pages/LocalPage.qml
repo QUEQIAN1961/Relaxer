@@ -1,60 +1,99 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import "../components"
 import "../theme"
-ColumnLayout {
+Item {
+    id: page
     objectName: "localPage"
-    spacing: 8
-    RowLayout {
-        Layout.fillWidth: true
-        Text { text: libraryBridge.playlistName; font.pixelSize: Theme.headingSize; font.weight: Font.DemiBold; color: Theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
-        ShellButton { text: "全部歌曲"; visible: libraryBridge.playlistId !== "0"; onClicked: libraryBridge.openPlaylist("0") }
-        ShellButton { objectName: "playAllButton"; text: "播放全部"; primary: true; enabled: libraryModel.count > 0; onClicked: libraryBridge.playAll() }
-    }
-    RowLayout {
-        Layout.fillWidth: true
-        TextField {
-            id: search; objectName: "librarySearch"
-            Layout.fillWidth: true; placeholderText: "搜索歌曲、歌手、专辑"
-            text: libraryModel.filterText; onTextEdited: libraryModel.filterText = text
-            Accessible.name: "搜索音乐库"
+    signal lyricsRequested(var keys, bool missingOnly)
+    signal importRequested()
+    signal bulkChanged(bool active, var keys)
+    readonly property bool isPlaylist: Number(libraryBridge.playlistId)>0
+    readonly property var details: libraryBridge.playlistDetails
+    function focusSearch(){search.forceActiveFocus();search.selectAll()}
+    function clearBulk(){trackList.clearBulk()}
+    function setBulkKeys(keys){trackList.checkedKeys=keys.slice();trackList.bulkChanged(true,keys)}
+    function sizeText(bytes){return bytes>=1073741824?(bytes/1073741824).toFixed(2)+" GB":(bytes/1048576).toFixed(1)+" MB"}
+    onVisibleChanged: if(!visible)clearBulk()
+    ColumnLayout {
+        anchors.fill:parent
+        anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:16
+        spacing:16
+        RowLayout {
+            Layout.fillWidth:true;spacing:16
+            Text { text:libraryBridge.playlistName;font.pixelSize:28;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true;elide:Text.ElideRight }
+            EntryField {
+                id:search;objectName:"librarySearch";Layout.preferredWidth:255;implicitHeight:36
+                placeholderText:"搜索歌曲、歌手、专辑";text:libraryModel.filterText
+                onTextEdited:{page.clearBulk();libraryModel.filterText=text}
+                selectByMouse:true;Accessible.name:"搜索音乐库"
+            }
+            ShellButton { objectName:"importMusicButton";text:"导入音乐";symbol:"plus";onClicked:page.importRequested() }
         }
-        ComboBox {
-            objectName: "librarySort"
-            model: ["原顺序", "歌曲名称", "歌手", "专辑", "时长"]
-            currentIndex: libraryModel.sortKey; onActivated: libraryModel.sortKey = currentIndex
-            Accessible.name: "列表排序"
+        RowLayout {
+            visible:page.isPlaylist;Layout.fillWidth:true;spacing:22
+            Artwork {
+                width:170;height:170;radius:16;resolution:384;file:page.details.cover||"";seed:libraryBridge.playlistName
+                TapHandler{onTapped:coverPicker.open()}
+            }
+            ColumnLayout {
+                Layout.fillWidth:true;spacing:12
+                Text{text:libraryBridge.playlistName;font.pixelSize:24;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true;elide:Text.ElideRight}
+                Text{text:(page.details.tags||[]).join(" / ");font.pixelSize:12;color:Theme.secondary;Layout.fillWidth:true;elide:Text.ElideRight}
+                Text{text:page.details.description||"还没有歌单简介";font.pixelSize:13;color:Theme.secondary;wrapMode:Text.Wrap;maximumLineCount:3;Layout.fillWidth:true}
+                ShellButton{text:"编辑歌单信息";flat:true;onClicked:{description.text=page.details.description||"";tagText.text=(page.details.tags||[]).join(" / ");metadata.open()}}
+            }
         }
-        ToolButton { text: libraryModel.descending ? "↓" : "↑"; Accessible.name: "反转排序"; onClicked: libraryModel.descending = !libraryModel.descending }
-        ToolButton { text: "♥"; Accessible.name: "我喜欢"; onClicked: libraryBridge.openPlaylist("-1") }
+        Text {
+            objectName:"librarySummary";Layout.fillWidth:true
+            text:libraryModel.count+" 首歌曲 · "+page.sizeText(libraryModel.totalFileSize)+(page.isPlaylist?" · "+(page.details.plays||0)+" 次播放":" · 本地音乐资料库")
+            color:Theme.secondary;font.pixelSize:12
+        }
+        RowLayout {
+            Layout.fillWidth:true;spacing:8
+            ShellButton {objectName:"playAllButton";text:"播放全部";symbol:"play";primary:true;enabled:libraryModel.count>0;onClicked:libraryBridge.playAll()}
+            ShellButton {text:"随机播放";symbol:"shuffle";enabled:libraryModel.count>0;onClicked:libraryBridge.shuffleAll()}
+            ChoiceBox {
+                visible:libraryBridge.playlistId==="0";Layout.preferredWidth:110
+                model:["全部歌手"].concat(libraryModel.artists)
+                currentIndex:Math.max(0,model.indexOf(libraryModel.artistFilter))
+                displayText:libraryModel.artistFilter||"歌手"
+                onActivated:{page.clearBulk();libraryModel.artistFilter=currentIndex>0?currentText:""}
+            }
+            ChoiceBox {
+                visible:libraryBridge.playlistId==="0";Layout.preferredWidth:110
+                model:["全部专辑"].concat(libraryModel.albums)
+                currentIndex:Math.max(0,model.indexOf(libraryModel.albumFilter))
+                displayText:libraryModel.albumFilter||"专辑"
+                onActivated:{page.clearBulk();libraryModel.albumFilter=currentIndex>0?currentText:""}
+            }
+            ShellButton {visible:libraryBridge.playlistId==="0";text:"清空";flat:true;onClicked:{page.clearBulk();libraryModel.clearFilters()}}
+            ShellButton {objectName:"findMissingLyrics";text:"查找缺失歌词";enabled:libraryModel.count>0;onClicked:page.lyricsRequested(libraryBridge.visibleTrackKeys(),true)}
+            Item{Layout.fillWidth:true}
+        }
+        TrackList {
+            id:trackList;objectName:"libraryListContainer"
+            Layout.fillWidth:true;Layout.fillHeight:true
+            trackModel:libraryModel;selectedKey:libraryModel.selectedId;currentKey:playbackBridge.trackId
+            emptyHeading:appBridge.trackCount===0?"音乐，从这里开始":"没有找到歌曲"
+            onSelected:key=>libraryModel.selectedId=key
+            onPlayRequested:key=>libraryBridge.play(key)
+            onFavoriteRequested:key=>libraryBridge.toggleFavorite(key)
+            onLyricsRequested:keys=>page.lyricsRequested(keys,false)
+            onBulkChanged:(active,keys)=>page.bulkChanged(active,keys)
+        }
     }
-    Text { objectName: "librarySummary"; text: libraryModel.count + " 首可见 · 曲库共 " + appBridge.trackCount + " 首"; color: Theme.secondary }
-    TrackList {
-        objectName: "libraryListContainer"
-        Layout.fillWidth: true; Layout.fillHeight: true
-        trackModel: libraryModel; selectedKey: libraryModel.selectedId
-        currentKey: playbackBridge.trackId
-        emptyHeading: appBridge.trackCount === 0 ? "音乐，从这里开始" : "没有找到歌曲"
-        onSelected: key => libraryModel.selectedId = key
-        onPlayRequested: key => libraryBridge.play(key)
-        onFavoriteRequested: key => libraryBridge.toggleFavorite(key)
-    }
-    Flow {
-        Layout.fillWidth: true; spacing: 6
-        ShellButton { text: "播放选中"; enabled: libraryModel.selectedRow >= 0; onClicked: libraryBridge.play(libraryModel.selectedId) }
-        ComboBox { id: destination; width: 150; model: playlistModel; textRole: "name"; valueRole: "playlistKey"; displayText: currentIndex < 0 ? "选择歌单" : currentText; Accessible.name: "目标歌单" }
-        ShellButton { text: "加入歌单"; enabled: libraryModel.selectedRow >= 0 && destination.currentIndex >= 0; onClicked: libraryBridge.addToPlaylist(destination.currentValue, libraryModel.selectedId) }
-        ShellButton { text: "移出歌单"; visible: Number(libraryBridge.playlistId) > 0; enabled: libraryModel.selectedRow >= 0; onClicked: libraryBridge.removeFromPlaylist(libraryModel.selectedId) }
-        ToolButton { text: "↑"; visible: Number(libraryBridge.playlistId) > 0; onClicked: libraryBridge.moveInPlaylist(libraryModel.selectedId, -1); Accessible.name: "歌单上移" }
-        ToolButton { text: "↓"; visible: Number(libraryBridge.playlistId) > 0; onClicked: libraryBridge.moveInPlaylist(libraryModel.selectedId, 1); Accessible.name: "歌单下移" }
-        ShellButton { text: "移除引用…"; enabled: libraryModel.selectedRow >= 0; onClicked: { removal.trackKey = libraryModel.selectedId; removal.open() } }
-    }
+    FileDialog{id:coverPicker;title:"设置歌单封面";nameFilters:["图片 (*.png *.jpg *.jpeg *.webp *.bmp)"];onAccepted:libraryBridge.setPlaylistCover(libraryBridge.playlistId,selectedFile)}
     Dialog {
-        id: removal; property string trackKey: "0"
-        title: "从曲库移除"; modal: true; anchors.centerIn: Overlay.overlay
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        Label { text: "移除歌曲引用、歌单关联和统计，保留音乐文件。"; wrapMode: Text.Wrap }
-        onAccepted: libraryBridge.removeTrack(trackKey)
+        id:metadata;parent:page.Overlay.overlay;anchors.centerIn:parent;width:460;modal:true;title:"编辑歌单信息";standardButtons:Dialog.Ok|Dialog.Cancel
+        contentItem:ColumnLayout {
+            Text{text:"标签（用 / 分隔）";color:Theme.secondary}
+            EntryField {id:tagText;Layout.fillWidth:true}
+            Text{text:"歌单简介";color:Theme.secondary}
+            TextArea{id:description;Layout.fillWidth:true;Layout.preferredHeight:100;wrapMode:Text.Wrap}
+        }
+        onAccepted:{libraryBridge.setPlaylistTags(libraryBridge.playlistId,tagText.text.split("/").map(t=>t.trim()).filter(t=>t.length));libraryBridge.setPlaylistDescription(libraryBridge.playlistId,description.text)}
     }
 }

@@ -11,4 +11,17 @@
   <file>pages/SettingsPage.qml</file><file>pages/ImportPage.qml</file>
   <file>pages/AiPage.qml</file><file>pages/TranslationPage.qml</file>
   <file>pages/LocalPage.qml</file><file>pages/TransitionPage.qml</file>
-</qresource></RCC>
+  <file>components/Symbol.qml</file><file>components/EntryField.qml</file><file>components/ChoiceBox.qml</file>
+  <file>components/IconButton.qml</file>
+  <file>components/Artwork.qml</file>
+  <file>components/PlaybackSlider.qml</file>
+  <file>components/UpcomingPanel.qml</file>
+  <file>components/LyricsWorkspace.qml</file>
+  <file>components/Toast.qml</file>
+  <file>components/ImportDialog.qml</file>
+  <file>components/PlaylistEditor.qml</file>
+  <file>pages/ProfilePage.qml</file><file>pages/VersionLogPage.qml</file>
+  <file>pages/AppearancePage.qml</file>
+  <file>pages/ShortcutsPage.qml</file>
+  <file>pages/FontDialog.qml</file>
+</qresource><qresource prefix="/"><file alias="changelog.json">../../resources/changelog.json</file><file alias="icon.svg">../../resources/icon.svg</file></qresource></RCC>

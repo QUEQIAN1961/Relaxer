@@ -19,6 +19,7 @@ Item {
     ColumnLayout {
         anchors.fill: parent; spacing: 8
         RowLayout {
+            visible: lyricsModel.preview || panel.manualScroll || lyricsModel.loading || lyricsModel.error.length > 0
             Layout.fillWidth: true
             Text { Layout.fillWidth: true; text: lyricsModel.status; wrapMode: Text.Wrap; color: lyricsModel.preview ? Theme.accent : Theme.secondary; font.pixelSize: 12; textFormat: Text.PlainText }
             ShellButton { objectName: "lyricsReturnCurrent"; visible: panel.manualScroll && lyricsModel.timed; text: "回到当前歌词"; onClicked: { panel.manualScroll = false; panel.centerCurrent() } }
@@ -62,7 +63,7 @@ Item {
                     Text {
                         width: parent.width; text: row.original; textFormat: Text.PlainText
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
-                        font.pixelSize: 24; font.weight: Font.DemiBold
+                        font.pixelSize: 22; font.family: { const f=settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("lyrics") || "Microsoft YaHei UI" } font.weight: Font.DemiBold
                         color: settingsBridge.values.lyricColor.length > 0 ? settingsBridge.values.lyricColor : Theme.text
                     }
                     Text {

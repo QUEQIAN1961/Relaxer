@@ -3,6 +3,8 @@
 #include "playback-bridge.h"
 #include "library-bridge.h"
 #include "queue-model.h"
+#include "upcoming-model.h"
+#include "ui-integration.h"
 #include "lyrics-model.h"
 #include "settings-bridge.h"
 #include "import-bridge.h"
@@ -31,6 +33,7 @@ class QmlShell final : public QObject {
     LibraryBridge *libraryBridge() { return &m_libraryBridge; }
     PlaylistListModel *playlistModel() { return &m_playlists; }
     QueueListModel *queueModel() { return &m_queue; }
+    UpcomingModel *upcomingModel() { return &m_upcoming; }
     LyricsModel *lyricsModel() { return &m_lyrics; }
     SettingsBridge *settingsBridge() { return &m_settings; }
     ImportBridge *importBridge() { return &m_importBridge; }
@@ -49,6 +52,8 @@ class QmlShell final : public QObject {
     PlaylistListModel m_playlists;
     LibraryBridge m_libraryBridge;
     QueueListModel m_queue;
+    UpcomingModel m_upcoming;
+    UiIntegration m_uiIntegration;
     std::unique_ptr<ai::AiRuntime> m_ownedAi;
     ai::AiRuntime *m_ai;
     ImportCoordinator m_import;

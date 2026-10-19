@@ -4,19 +4,24 @@ QtObject {
     objectName: "themeTokens"
     property bool dark: false
     property var custom: ({})
-    readonly property color background: custom.background || (dark ? "#17191e" : "#f5f4f1")
-    readonly property color panel: custom.panel || (dark ? "#22252c" : "#ffffff")
-    readonly property color text: custom.text || (dark ? "#f2f2f5" : "#292b35")
-    readonly property color secondary: custom.secondary || (dark ? "#b0b5c2" : "#707683")
-    readonly property color accent: custom.accent || (dark ? "#fb8198" : "#b62e50")
-    readonly property color accentText: dark ? "#251318" : "#ffffff"
-    readonly property color border: dark ? "#353a45" : "#e5e5e8"
-    readonly property color hover: dark ? "#30353f" : "#eeedf0"
-    readonly property color pressed: dark ? "#424957" : "#dfdce3"
-    readonly property color disabled: dark ? "#636977" : "#a1a5af"
-    readonly property color selected: dark ? "#432833" : "#f9e7ec"
-    readonly property int radius: 14
+    readonly property color background: custom.background || (dark ? "#19191e" : "#ffffff")
+    readonly property color panel: custom.panel || (dark ? "#222228" : "#f5f5f7")
+    readonly property color text: custom.text || (dark ? "#f0edf1" : "#25252b")
+    readonly property color secondary: custom.secondary || (dark ? "#a09ca6" : "#86818a")
+    readonly property color accent: custom.accent || "#e5455f"
+    readonly property color accentText: custom.accentText || "#ffffff"
+    readonly property color sideText: custom.sideText || text
+    readonly property color border: custom.border || (dark ? "#34343c" : "#e9e7eb")
+    readonly property color hover: dark ? "#302e37" : "#eeedf1"
+    readonly property color pressed: dark ? "#40353e" : "#e7e1e8"
+    readonly property color disabled: dark ? "#6d6874" : "#b5afb9"
+    readonly property color selected: dark ? "#49313a" : "#fbe6eb"
+    readonly property color card: custom.card || (dark ? "#25252d" : "#f7f6f8")
+    readonly property color footer: custom.footer || panel
+    readonly property color progress: custom.progressFill || accent
+    readonly property color progressTrack: custom.progressTrack || (dark ? "#45414a" : "#e6e1e7")
+    readonly property int radius: 10
     readonly property int spacing: 16
-    readonly property int fontSize: 14
+    readonly property int fontSize: 13
     readonly property int headingSize: 28
 }

@@ -6,61 +6,96 @@ Rectangle {
     id: bar
     objectName: "playerBar"
     property bool expanded: false
-    property real volumeWidth: expanded ? 160 : 110
-    Behavior on volumeWidth { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
-    implicitHeight: 138
-    color: Theme.panel
+    property bool artworkTravelling: false
+    readonly property alias smallArtwork: art
+    readonly property alias metadataTitle: title
+    readonly property alias metadataArtist: artist
+    readonly property alias playerCenter: center
+    signal expandRequested()
+    implicitHeight: 98
+    color: Theme.footer
     function timeText(ms) {
         const seconds = Math.floor(Math.max(0, ms) / 1000)
         return Math.floor(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + seconds % 60
     }
+    Image {anchors.fill:parent;source:String(settingsBridge.palette.footerImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.footerImage))+"&blur="+Number(settingsBridge.palette.blurRight||0):"";fillMode:Image.PreserveAspectCrop;asynchronous:true}
     Rectangle { width: parent.width; height: 1; color: Theme.border }
-    ColumnLayout {
-        anchors.fill: parent; anchors.margins: 16; spacing: 8
-        RowLayout {
-            Layout.fillWidth: true; spacing: 10
-            ColumnLayout {
-                Layout.fillWidth: true; spacing: 4
-                Text {
-                    objectName: "currentTitle"; Layout.fillWidth: true
-                    text: playbackBridge.hasTrack ? playbackBridge.title : "选择一首音乐，开始放松"
-                    textFormat: Text.PlainText
-                    font.pixelSize: Theme.fontSize; font.weight: Font.DemiBold; color: Theme.text; elide: Text.ElideRight
-                }
-                Text {
-                    objectName: "currentArtist"; Layout.fillWidth: true
-                    text: playbackBridge.hasTrack ? playbackBridge.artist : "从音乐库或歌单开始播放"
-                    textFormat: Text.PlainText
-                    font.pixelSize: 12; color: Theme.secondary; elide: Text.ElideRight
-                }
+    Item {
+        id: metadata
+        objectName: "playerMetadata"
+        x: 38; y: 12; width: 304; height: 74
+        opacity: bar.expanded || bar.artworkTravelling ? 0 : 1
+        Artwork {
+            id: art; objectName: "bottomCover"
+            x: 0; anchors.verticalCenter: parent.verticalCenter; width: 62; height: 62; radius: 10
+            file: playbackBridge.coverUrl; seed: playbackBridge.hasTrack ? playbackBridge.title : "Relaxer"
+            revision: playbackBridge.artworkRevision; resolution: 160; animated: false
+        }
+        Column {
+            x: 92; width: 194; anchors.verticalCenter: parent.verticalCenter; spacing: 4
+            Text {
+                id: title; objectName: "currentTitle"; width: parent.width
+                text: playbackBridge.hasTrack ? playbackBridge.title : "Relaxer"
+                textFormat: Text.PlainText; font.pixelSize: 15; font.weight:Font.DemiBold;color: Theme.text; elide: Text.ElideRight
             }
-            ShellButton { objectName: "previousButton"; Layout.preferredWidth: 44; text: "|‹"; Accessible.name: "上一首"; enabled: playbackBridge.available && playbackBridge.hasTrack; onClicked: playbackBridge.previous() }
-            ShellButton {
-                objectName: "playPauseButton"; Layout.preferredWidth: 76; primary: true
-                enabled: playbackBridge.available && playbackBridge.hasTrack && playbackBridge.canPlay
+            Text {
+                id: artist; objectName: "currentArtist"; width: parent.width
+                text: playbackBridge.hasTrack ? playbackBridge.artist : "选一首歌，开始放松。"
+                textFormat: Text.PlainText; font.pixelSize: 12; color: Theme.secondary; elide: Text.ElideRight
+            }
+        }
+        MouseArea {
+            anchors.fill: parent; enabled: !bar.expanded && !bar.artworkTravelling
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {metadata.forceActiveFocus();bar.expandRequested()}
+        }
+    }
+    Item {
+        id: center
+        objectName: "playerCenter"
+        x: 356; y: 12; width: Math.max(0, bar.width - 712); height: 74
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            height: 42; spacing: 12
+            IconButton {
+                objectName: "currentFavoriteButton"; anchors.verticalCenter: parent.verticalCenter
+                symbol: playbackBridge.currentFavorite ? "liked" : "heart"
+                iconColor: playbackBridge.currentFavorite ? Theme.accent : Theme.text
+                text: playbackBridge.currentFavorite ? "取消喜欢" : "喜欢歌曲"
+                enabled: playbackBridge.available && playbackBridge.hasTrack
+                onClicked: playbackBridge.toggleFavorite()
+            }
+            IconButton {
+                objectName: "previousButton"; anchors.verticalCenter: parent.verticalCenter; symbol: "previous"; text: "上一首"
+                enabled: playbackBridge.available && playbackBridge.hasTrack; onClicked: playbackBridge.previous()
+            }
+            IconButton {
+                objectName: "playPauseButton"; anchors.verticalCenter: parent.verticalCenter
+                circular: true; filled: true; symbol: playbackBridge.playing ? "pause" : "play"
                 text: playbackBridge.playing ? "暂停" : "播放"
+                enabled: playbackBridge.available && playbackBridge.hasTrack && playbackBridge.canPlay
                 onClicked: playbackBridge.toggle()
             }
-            ShellButton { objectName: "nextButton"; Layout.preferredWidth: 44; text: "›|"; Accessible.name: "下一首"; enabled: playbackBridge.available && playbackBridge.hasTrack; onClicked: playbackBridge.next() }
-            ComboBox {
-                objectName: "playMode"; Layout.preferredWidth: 132
-                model: ["顺序播放", "列表循环", "单曲循环", "随机播放"]
-                currentIndex: playbackBridge.mode; enabled: playbackBridge.available
-                onActivated: playbackBridge.setMode(currentIndex)
-                Accessible.name: "播放模式"
+            IconButton {
+                objectName: "nextButton"; anchors.verticalCenter: parent.verticalCenter; symbol: "next"; text: "下一首"
+                enabled: playbackBridge.available && playbackBridge.hasTrack; onClicked: playbackBridge.next()
             }
-            ShellButton { Layout.preferredWidth: 68; text: "队列"; onClicked: appBridge.navigate(2) }
+            IconButton {
+                objectName: "playMode"; anchors.verticalCenter: parent.verticalCenter
+                symbol: ["playlist", "repeat", "single", "shuffle"][playbackBridge.mode]
+                text: ["顺序播放", "列表循环", "单曲循环", "随机循环"][playbackBridge.mode]
+                Accessible.name: text
+                enabled: playbackBridge.available; onClicked: playbackBridge.setMode((playbackBridge.mode + 1) % 4)
+            }
         }
         RowLayout {
-            Layout.fillWidth: true; spacing: 12
+            x: 0; y: 46; width: parent.width; height: 22; spacing: 8
             Text {
-                objectName: "playbackState"; Layout.preferredWidth: 110
-                text: bar.timeText(playbackBridge.position) + " / " + bar.timeText(playbackBridge.duration)
-                color: Theme.secondary; font.pixelSize: 12
+                objectName: "playbackState"; Layout.preferredWidth: 40
+                text: bar.timeText(playbackBridge.position); color: Theme.secondary; font.pixelSize: 10
             }
-            Slider {
-                id: seek
-                objectName: "playbackProgress"; Layout.fillWidth: true
+            PlaybackSlider {
+                id: seek; objectName: "playbackProgress"; Layout.fillWidth: true
                 property string dragTrackKey: "0"
                 property real dragValue: 0
                 from: 0; to: Math.max(1, playbackBridge.duration)
@@ -71,19 +106,40 @@ Rectangle {
                     else if (dragTrackKey === playbackBridge.trackId && playbackBridge.seekable) playbackBridge.seek(Math.round(dragValue))
                 }
                 onMoved: { if (pressed) dragValue = value; else if (playbackBridge.seekable) playbackBridge.seek(Math.round(value)) }
-                Binding {
-                    target: seek; property: "value"; value: playbackBridge.position
-                    when: !seek.pressed; restoreMode: Binding.RestoreBindingOrValue
+                Binding { target: seek; property: "value"; value: Math.min(playbackBridge.position,seek.to); when: !seek.pressed; restoreMode: Binding.RestoreBindingOrValue }
+            }
+            Text {
+                objectName: "durationDisplay"; Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight
+                text: bar.timeText(playbackBridge.duration); color: Theme.secondary; font.pixelSize: 10
+            }
+        }
+    }
+    Item {
+        objectName: "playerRight"
+        x: bar.width - 342; y: 12; width: 320; height: 74
+        Item {
+            id: volumeHost; objectName: "volumeControls"; width: 320; height: 36
+            y: bar.expanded ? 19 : 0
+            Behavior on y { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 300; easing.type: Easing.OutCubic } }
+            Row {
+                anchors.right: parent.right; height: 36; spacing: 14
+                IconButton {
+                    objectName: "muteButton"; anchors.verticalCenter: parent.verticalCenter
+                    symbol: playbackBridge.volume === 0 ? "volumeMuted" : playbackBridge.volume < 34 ? "volumeLow" : playbackBridge.volume < 67 ? "volumeMedium" : "volumeHigh"
+                    text: playbackBridge.muted ? "取消静音" : "静音"; onClicked: playbackBridge.toggleMute()
+                }
+                PlaybackSlider {
+                    objectName: "volumeSlider"; anchors.verticalCenter: parent.verticalCenter; width: 80
+                    from: 0; to: 100; stepSize: 1; value: playbackBridge.volume
+                    onMoved: playbackBridge.setVolume(Math.round(value))
+                    Accessible.name: "音量"
+                }
+                IconButton {
+                    objectName: "playbackExpandButton"; anchors.verticalCenter: parent.verticalCenter
+                    symbol: bar.expanded ? "contract" : "expand"; text: bar.expanded ? "收起播放" : "展开播放"
+                    showTooltip: true; onClicked: {metadata.forceActiveFocus();bar.expandRequested()}
                 }
             }
-            ToolButton { objectName: "muteButton"; Layout.preferredWidth: 48; text: playbackBridge.muted ? "静音" : "♫"; Accessible.name: playbackBridge.muted ? "取消静音" : "静音"; onClicked: playbackBridge.toggleMute() }
-            Slider {
-                objectName: "volumeSlider"; Layout.preferredWidth: bar.volumeWidth
-                from: 0; to: 100; stepSize: 1; value: playbackBridge.volume
-                onMoved: playbackBridge.setVolume(Math.round(value))
-                Accessible.name: "音量"
-            }
-            Text { objectName: "volumeDisplay"; Layout.preferredWidth: 48; text: playbackBridge.volume + "%"; color: Theme.secondary; font.pixelSize: 12; horizontalAlignment: Text.AlignRight }
         }
     }
 }

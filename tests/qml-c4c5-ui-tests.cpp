@@ -44,9 +44,9 @@ private slots:
     }
     void artworkResetsAndReduceMotionSettingsAreLive(){
         Fixture f;QVERIFY(f.ok);auto *window=f.shell->window();QVERIFY(QMetaObject::invokeMethod(window,"showLyrics"));QTRY_VERIFY(!f.shell->lyricsModel()->cover().isEmpty());
-        auto *art=visual(window->contentItem(),"currentArtwork");QVERIFY(art);QTRY_COMPARE(art->property("status").toInt(),1);
+        auto *art=visual(window->contentItem(),"currentArtwork");QVERIFY(art);QTRY_COMPARE(art->property("file").toUrl(),f.shell->playbackBridge()->coverUrl());
         f.shell->facade()->play({f.a.id,f.b.id},f.b.id);QTRY_COMPARE(f.shell->lyricsModel()->trackKey(),QString::number(f.b.id));
-        QTRY_VERIFY(f.shell->lyricsModel()->cover().isEmpty());QTRY_COMPARE(art->property("source").toUrl(),QUrl());QVERIFY(!art->isVisible());
+        QTRY_VERIFY(f.shell->lyricsModel()->cover().isEmpty());QTRY_COMPARE(art->property("file").toUrl(),QUrl());QTRY_VERIFY(art->isVisible());QVERIFY(art->property("imageUrl").toUrl().scheme()=="image");
         QVERIFY(f.shell->settingsBridge()->edit("reduceMotion",true));QVERIFY(f.shell->settingsBridge()->save());
         auto *panel=visual(window->contentItem(),"lyricsPanel");QVERIFY(panel);QVERIFY(panel->property("reduceMotion").toBool());
         const auto queue=f.shell->facade()->queue().items;QVERIFY(f.shell->settingsBridge()->setTheme(1));QCOMPARE(f.shell->facade()->queue().items,queue);
@@ -54,7 +54,7 @@ private slots:
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void realConsentDialogDeclineAcceptAndSave(){
-        Fixture f(2);QVERIFY(f.ok);f.shell->appBridge()->navigate(3);auto *window=f.shell->window();auto *settings=visual(window->contentItem(),"settingsPage");QVERIFY(settings);settings->setProperty("section",2);
+        Fixture f(2);QVERIFY(f.ok);auto *window=f.shell->window();const QVariant selected=QStringList{QString::number(f.a.id)};QVERIFY(QMetaObject::invokeMethod(window,"openLyricsTools",Q_ARG(QVariant,selected),Q_ARG(QVariant,QVariant(false))));
         QTRY_COMPARE(f.shell->lyricsModel()->count(),2);QVERIFY(f.shell->translationBridge()->classify(1));QCOMPARE(f.http.requestCount(),0);
         auto *button=visual(window->contentItem(),"translateAiButton");QVERIFY(button);QVERIFY(QMetaObject::invokeMethod(button,"click"));
         auto *dialog=window->findChild<QObject *>("translationConsent");QVERIFY(dialog);QTRY_VERIFY(dialog->property("visible").toBool());
@@ -70,8 +70,8 @@ private slots:
     void importVisibleProgressAndDeferredClose(){
         Fixture f;QVERIFY(f.ok);const auto folder=f.dir.filePath("新 歌曲");QVERIFY(QDir().mkpath(folder));
         for(int i=0;i<80;++i)QVERIFY(import_fixture::midi(folder+QString("/%1.mid").arg(i),i));
-        f.shell->appBridge()->navigate(3);auto *window=f.shell->window();auto *settings=visual(window->contentItem(),"settingsPage");QVERIFY(settings);settings->setProperty("section",1);
-        const auto queue=f.shell->facade()->queue().items;auto *importPage=visual(window->contentItem(),"importPage");QVERIFY(importPage);QVariant started;
+        auto *window=f.shell->window();
+        const auto queue=f.shell->facade()->queue().items;auto *importPage=window->findChild<QObject *>("importDialog");QVERIFY(importPage);QVariant started;
         QTRY_VERIFY(f.shell->facade()->position()>500);const auto beforeImport=f.shell->facade()->position();
         const auto single=f.dir.filePath("single.mid");QVERIFY(import_fixture::midi(single,9999));const QVariant singleUrl=QVariant::fromValue(QList<QUrl>{QUrl::fromLocalFile(single)});
         QVERIFY(QMetaObject::invokeMethod(importPage,"submitFiles",Q_RETURN_ARG(QVariant,started),Q_ARG(QVariant,singleUrl)));QVERIFY(started.toBool());
