@@ -4,7 +4,7 @@ import "../theme"
 TabButton {
     id: control
     implicitHeight: 40; padding: 10
-    contentItem: Text {
+    contentItem: UiText {
         text: control.text; textFormat: Text.PlainText
         color: control.checked ? Theme.accent : Theme.text
         horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter

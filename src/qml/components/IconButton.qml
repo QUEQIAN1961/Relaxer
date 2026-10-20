@@ -27,7 +27,8 @@ Button {
         border.width: control.activeFocus ? 1 : 0
         border.color: Theme.accent
     }
-    ToolTip.visible: (showTooltip || tip.length > 0) && hovered && (tip.length > 0 || text.length > 0)
-    ToolTip.text: tip.length ? tip : text
-    ToolTip.delay: 600
+    HintBubble {
+        visible: control.showTooltip && control.hovered && text.length > 0
+        text: control.tip.length ? control.tip : control.text
+    }
 }

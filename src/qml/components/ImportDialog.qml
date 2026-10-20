@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import "../theme"
-Popup{
+Popup { popupType: Popup.Item;
     id:dialog
     objectName:"importDialog"
     width:240;padding:8

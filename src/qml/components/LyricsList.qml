@@ -21,10 +21,10 @@ Item {
         RowLayout {
             visible: lyricsModel.preview || panel.manualScroll || lyricsModel.loading || lyricsModel.error.length > 0
             Layout.fillWidth: true
-            Text { Layout.fillWidth: true; text: lyricsModel.status; wrapMode: Text.Wrap; color: lyricsModel.preview ? Theme.accent : Theme.secondary; font.pixelSize: 12; textFormat: Text.PlainText }
+            UiText { Layout.fillWidth: true; text: lyricsModel.status; wrapMode: Text.Wrap; color: lyricsModel.preview ? Theme.accent : Theme.secondary; font.pixelSize: 14; textFormat: Text.PlainText }
             ShellButton { objectName: "lyricsReturnCurrent"; visible: panel.manualScroll && lyricsModel.timed; text: "回到当前歌词"; onClicked: { panel.manualScroll = false; panel.centerCurrent() } }
         }
-        Text { Layout.fillWidth: true; visible: lyricsModel.error.length > 0; text: lyricsModel.error; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.accent }
+        UiText { Layout.fillWidth: true; visible: lyricsModel.error.length > 0; text: lyricsModel.error; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.accent }
         Item {
           Layout.fillWidth: true; Layout.fillHeight: true
           ListView {
@@ -60,13 +60,13 @@ Item {
                     opacity: row.current ? 1 : row.played ? 0.62 : 0.4
                     Behavior on scale { NumberAnimation { duration: panel.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
                     Behavior on opacity { NumberAnimation { duration: panel.reduceMotion ? 0 : 180 } }
-                    Text {
+                    UiText {
                         width: parent.width; text: row.original; textFormat: Text.PlainText
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
                         font.pixelSize: 22; font.family: { const f=settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("lyrics") || "Microsoft YaHei UI" } font.weight: Font.DemiBold
                         color: settingsBridge.values.lyricColor.length > 0 ? settingsBridge.values.lyricColor : Theme.text
                     }
-                    Text {
+                    UiText {
                         width: parent.width; text: row.translation; textFormat: Text.PlainText
                         visible: settingsBridge.values.showLyricTranslation && text.length > 0
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter

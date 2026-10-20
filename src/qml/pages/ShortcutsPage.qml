@@ -30,22 +30,22 @@ Rectangle {
         id: content
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
         spacing: 12
-        Text { text: "快捷键"; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold }
-        Text {
+        UiText { text: "快捷键"; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold }
+        UiText {
             Layout.fillWidth: true
             text: "应用内：播放器窗口激活时生效。全局：切换应用或最小化后也能使用。音量每次调整 5%。"
             wrapMode: Text.Wrap
             color: Theme.secondary
-            font.pixelSize: 12
+            font.pixelSize: 14
         }
         GridLayout {
             Layout.fillWidth: true
             columns: 3
             columnSpacing: 18
             rowSpacing: 9
-            Text { text: "功能"; color: Theme.secondary; font.pixelSize: 12 }
-            Text { text: "应用内"; color: Theme.secondary; font.pixelSize: 12 }
-            Text { text: "全局"; color: Theme.secondary; font.pixelSize: 12 }
+            UiText { text: "功能"; color: Theme.secondary; font.pixelSize: 14 }
+            UiText { text: "应用内"; color: Theme.secondary; font.pixelSize: 14 }
+            UiText { text: "全局"; color: Theme.secondary; font.pixelSize: 14 }
             Repeater {
                 model: settingsBridge.shortcutActions
                 delegate: RowLayout {
@@ -54,7 +54,7 @@ Rectangle {
                     Layout.columnSpan: 3
                     Layout.fillWidth: true
                     spacing: 18
-                    Text { text: modelData.name; Layout.preferredWidth: 100; color: Theme.text }
+                    UiText { text: modelData.name; Layout.preferredWidth: 100; color: Theme.text }
                     Repeater {
                         model: ["app", "global"]
                         delegate: RowLayout {
@@ -88,8 +88,8 @@ Rectangle {
                 }
             }
         }
-        Text { Layout.fillWidth: true; text: uiIntegration.shortcutStatus; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12 }
-        Text { Layout.fillWidth: true; text: "录入后点击保存；输入文字时不触发应用内播放快捷键。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12 }
+        UiText { Layout.fillWidth: true; text: uiIntegration.shortcutStatus; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
+        UiText { Layout.fillWidth: true; text: "录入后点击保存；输入文字时不触发应用内播放快捷键。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
         Flow {
             Layout.fillWidth: true
             spacing: 8

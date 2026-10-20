@@ -48,14 +48,14 @@ Item {
                     opacity:page.artworkTravelling?0:1
                 }
                 Item{height:22;width:1}
-                Text{
+                UiText {
                     id:largeTitle
                     width:parent.width-40;anchors.horizontalCenter:parent.horizontalCenter;text:playbackBridge.hasTrack?playbackBridge.title:"还没有音乐正在播放";textFormat:Text.PlainText
                     wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter
                     font.pixelSize:27;font.weight:Font.DemiBold;color:Theme.text;opacity:page.metadataTravelling?0:page.detailsOpacity
                 }
                 Item{height:8;width:1}
-                Text{id:largeArtist;width:parent.width-40;anchors.horizontalCenter:parent.horizontalCenter;text:playbackBridge.hasTrack?playbackBridge.artist:"选一首喜欢的歌，慢慢听。";textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter;font.pixelSize:16;color:Theme.secondary;opacity:page.metadataTravelling?0:page.detailsOpacity}
+                UiText {id:largeArtist;width:parent.width-40;anchors.horizontalCenter:parent.horizontalCenter;text:playbackBridge.hasTrack?playbackBridge.artist:"选一首喜欢的歌，慢慢听。";textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter;font.pixelSize:16;color:Theme.secondary;opacity:page.metadataTravelling?0:page.detailsOpacity}
             }
         }
         Item{
@@ -64,13 +64,13 @@ Item {
             HoverHandler{onPointChanged:{page.toolsVisible=true;idle.restart()} onHoveredChanged:if(hovered){page.toolsVisible=true;idle.restart()}}
             ToolButton{
                 id:question;objectName:"lyricToolsQuestion";width:20;height:20;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.rightMargin:26;anchors.bottomMargin:6
-                text:"?";font.pixelSize:12;opacity:page.toolsVisible||tools.opened?1:0;enabled:opacity>0
+                text:"?";font.pixelSize: 14;opacity:page.toolsVisible||tools.opened?1:0;enabled:opacity>0
                 background:Rectangle{radius:10;color:Theme.hover;border.color:Theme.border}
                 onClicked:{if(tools.opened)tools.close();else{page.delayOpen=false;tools.open()}}
                 Behavior on opacity{NumberAnimation{duration:settingsBridge.values.reduceMotion?0:140}}
             }
             Timer{id:idle;interval:3000;onTriggered:if(!page.delayOpen&&!tools.hovered){page.toolsVisible=false;tools.close()}}
-            Popup{
+            Popup { popupType: Popup.Item;
                 id:tools;objectName:"lyricToolsMenu";property bool hovered:false
                 x:Math.max(0,lyricSide.width-width-28);y:Math.max(0,lyricSide.height-height-30)
                 width:page.delayOpen?320:210;padding:12
@@ -86,7 +86,7 @@ Item {
                     ShellButton{visible:page.delayOpen;text:"‹ 返回";onClicked:page.delayOpen=false}
                     RowLayout{
                         visible:page.delayOpen
-                        Text{text:"歌词延时";color:Theme.secondary}
+                        UiText {text:"歌词延时";color:Theme.secondary}
                         EntryField {
                             id:offset;objectName:"lyricsOffset";Layout.fillWidth:true;text:(lyricsModel.offsetMs/1000).toFixed(2)+" s";enabled:lyricsModel.timed
                             onEditingFinished:{const v=Number(text.replace("s","").trim());if(!isNaN(v))lyricsModel.setOffsetMs(Math.max(-5000,Math.min(5000,Math.round(v*1000))));text=(lyricsModel.offsetMs/1000).toFixed(2)+" s"}

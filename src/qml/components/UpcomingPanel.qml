@@ -7,6 +7,7 @@ Item {
     property bool expandedPlayer: false
     property bool panelExpanded: false
     property bool initialized: false
+    property bool relocating: false
     readonly property int headerHeight: 34
     readonly property int rowHeight: panelExpanded ? (expandedPlayer ? 46 : 38) : 56
     readonly property int coverSize: panelExpanded ? (expandedPlayer ? 36 : 26) : 40
@@ -17,10 +18,10 @@ Item {
     width: implicitWidth
     height: implicitHeight
     clip: true
-    Behavior on height { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 300; easing.type: Easing.OutCubic } }
-    TextMetrics { id: titleMetrics; text: "歌歌歌歌歌歌歌歌"; font.pixelSize: 13 }
-    TextMetrics { id: artistMetrics; text: "歌歌歌歌歌"; font.pixelSize: 13 }
-    TextMetrics { id: dashMetrics; text: "—"; font.pixelSize: 13 }
+    Behavior on height { enabled: !panel.relocating; NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 300; easing.type: Easing.OutCubic } }
+    TextMetrics { id: titleMetrics; text: "歌歌歌歌歌歌歌歌"; font.pixelSize: 15 }
+    TextMetrics { id: artistMetrics; text: "歌歌歌歌歌"; font.pixelSize: 15 }
+    TextMetrics { id: dashMetrics; text: "—"; font.pixelSize: 15 }
     function coverItem(index) {
         if (!expandedPlayer && !panelExpanded && index === 0) return compactArt
         const row = rows.itemAtIndex(index)
@@ -49,20 +50,20 @@ Item {
             width: parent.width - arrow.width; height: parent.height - 2; radius: 7
             color: headerMouse.containsMouse ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.08) : "transparent"
         }
-        Text {
+        UiText {
             x: panel.expandedPlayer ? 12 : panel.panelExpanded ? 38 : 30
-            height: parent.height; text: "下一首"; font.pixelSize: 13; color: Theme.text; verticalAlignment: Text.AlignVCenter
+            height: parent.height; text: "下一首"; font.pixelSize: 15; color: Theme.text; verticalAlignment: Text.AlignVCenter
         }
         Artwork {
             id: compactArt; visible: !panel.expandedPlayer && !panel.panelExpanded && upcomingModel.count > 0
             x: 80; y: 5; width: 24; height: 24; radius: 5; resolution: 80; animated: false
             file: upcomingModel.firstCoverUrl; seed: upcomingModel.firstTitle; revision: upcomingModel.firstCoverRevision
         }
-        Text {
+        UiText {
             visible: !panel.expandedPlayer && !panel.panelExpanded
             x: upcomingModel.count ? 112 : 80; width: Math.max(0, parent.width - x - 12); height: parent.height
             text: upcomingModel.count ? upcomingModel.firstTitle : "暂无待播放歌曲"
-            textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 13; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
+            textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 15; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
         }
         MouseArea {
             id: headerMouse
@@ -76,7 +77,7 @@ Item {
             width: !panel.expandedPlayer && !panel.panelExpanded ? 28 : 34
             height: parent.height
             Rectangle { anchors.fill: parent; anchors.margins: 1; radius: 7; color: arrowMouse.containsMouse ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.08) : "transparent" }
-            Text { anchors.centerIn: parent; text: panel.panelExpanded ? "⌄" : "⌃"; color: Theme.text; font.pixelSize: 15 }
+            UiText { anchors.centerIn: parent; text: panel.panelExpanded ? "⌄" : "⌃"; color: Theme.text; font.pixelSize: 15 }
             MouseArea { id: arrowMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: panel.panelExpanded = !panel.panelExpanded }
         }
     }
@@ -104,23 +105,23 @@ Item {
                 color: rowMouse.containsMouse ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.08) : "transparent"
                 border.width: rowMouse.containsMouse ? 1 : 0; border.color: Theme.accent
             }
-            Text { x: 8; width: 20; height: parent.height; text: row.index + 1; color: Theme.text; font.pixelSize: 13; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+            UiText { x: 8; width: 20; height: parent.height; text: row.index + 1; color: Theme.text; font.pixelSize: 15; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
             Artwork {
                 id: rowArt; x: 32; anchors.verticalCenter: parent.verticalCenter; width: panel.coverSize; height: width; radius: 5
                 file: row.coverUrl; seed: row.title; revision: row.coverRevision; resolution: 100; animated: false
             }
-            Text {
+            UiText {
                 id: rowTitle; x: rowArt.x + rowArt.width + 8; width: titleMetrics.advanceWidth; height: parent.height
-                text: row.title; textFormat: Text.PlainText; font.pixelSize: 13; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
+                text: row.title; textFormat: Text.PlainText; font.pixelSize: 15; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
             }
-            Text { id: dash; x: rowTitle.x + rowTitle.width; width: dashMetrics.advanceWidth; height: parent.height; text: "—"; font.pixelSize: 13; color: Theme.text; verticalAlignment: Text.AlignVCenter }
-            Text {
+            UiText { id: dash; x: rowTitle.x + rowTitle.width; width: dashMetrics.advanceWidth; height: parent.height; text: "—"; font.pixelSize: 15; color: Theme.text; verticalAlignment: Text.AlignVCenter }
+            UiText {
                 x: dash.x + dash.width; width: Math.min(artistMetrics.advanceWidth, Math.max(0, parent.width - x - 12)); height: parent.height
-                text: row.artist; textFormat: Text.PlainText; font.pixelSize: 13; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
+                text: row.artist; textFormat: Text.PlainText; font.pixelSize: 15; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
             }
             MouseArea { id: rowMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: panel.activate(row.index) }
         }
-        Text { visible: upcomingModel.count === 0; x: 12; y: 0; width: rows.width - 24; height: rows.height; text: "暂无待播放歌曲"; color: Theme.text; font.pixelSize: 13; verticalAlignment: Text.AlignVCenter }
+        UiText { visible: upcomingModel.count === 0; x: 12; y: 0; width: rows.width - 24; height: rows.height; text: "暂无待播放歌曲"; color: Theme.text; font.pixelSize: 15; verticalAlignment: Text.AlignVCenter }
         ScrollBar.vertical: ScrollBar { width: 5; policy: panel.panelExpanded && upcomingModel.count > 5 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
         WheelHandler {
             target: null

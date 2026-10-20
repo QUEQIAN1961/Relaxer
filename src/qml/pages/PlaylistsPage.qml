@@ -19,8 +19,8 @@ Item {
             Layout.fillWidth: true; spacing: 20
             ColumnLayout {
                 Layout.fillWidth: true; spacing: 16
-                Text { text: "歌单"; color: Theme.text; font.pixelSize: 28; font.weight: Font.DemiBold }
-                Text { text: "给不同的心情，留一张歌单。"; color: Theme.secondary; font.pixelSize: 12 }
+                UiText { text: "歌单"; color: Theme.text; font.pixelSize: 28; font.weight: Font.DemiBold }
+                UiText { text: "给不同的心情，留一张歌单。"; color: Theme.secondary; font.pixelSize: 14 }
             }
             ShellButton { objectName: "createPlaylistButton"; text: "创建歌单"; primary: true; onClicked: page.createRequested() }
         }
@@ -42,8 +42,8 @@ Item {
                 width: grid.cellWidth; height: grid.cellHeight
                 Rectangle { x: 0; y: 0; width: 190; height: 222; radius: 12; color: cardMouse.containsMouse ? Theme.hover : "transparent" }
                 Artwork { x: 7; y: 7; width: 170; height: 170; radius: 12; file: card.cover; seed: card.name; resolution: 350; animated: false }
-                Text { x: 7; y: 187; width: 177; text: card.name; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 13; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                Text { x: 7; y: 208; width: 177; text: card.trackCount + " 首歌曲"; color: Theme.secondary; font.pixelSize: 11; elide: Text.ElideRight }
+                UiText { x: 7; y: 187; width: 177; text: card.name; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 15; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                UiText { x: 7; y: 208; width: 177; text: card.trackCount + " 首歌曲"; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
                 MouseArea {
                     id: cardMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton | Qt.RightButton; cursorShape: Qt.PointingHandCursor
                     onClicked: mouse => {
@@ -52,15 +52,15 @@ Item {
                     }
                 }
             }
-            Text { anchors.centerIn: parent; width: Math.min(400, parent.width - 40); visible: playlistModel.count === 0; text: "还没有歌单。\n创建一个，收集喜欢的音乐。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14; lineHeight: 1.6 }
+            UiText { anchors.centerIn: parent; width: Math.min(400, parent.width - 40); visible: playlistModel.count === 0; text: "还没有歌单。\n创建一个，收集喜欢的音乐。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14; lineHeight: 1.6 }
         }
     }
-    Menu {
+    RoundMenu {
         id: playlistMenu
-        MenuItem { text: "打开歌单"; onTriggered: page.openRequested(page.contextKey) }
-        MenuItem { text: "编辑歌单…"; onTriggered: page.editRequested(page.contextKey, page.contextName) }
+        RoundMenuItem { text: "打开歌单"; onTriggered: page.openRequested(page.contextKey) }
+        RoundMenuItem { text: "编辑歌单…"; onTriggered: page.editRequested(page.contextKey, page.contextName) }
         MenuSeparator {}
-        MenuItem { text: "删除歌单…"; onTriggered: { deletion.listKey = page.contextKey; deletion.listName = page.contextName; deletion.open() } }
+        RoundMenuItem { text: "删除歌单…"; onTriggered: { deletion.listKey = page.contextKey; deletion.listName = page.contextName; deletion.open() } }
     }
     ConfirmDialog {
         id: deletion; parent: page.Overlay.overlay; property string listKey: "0"; property string listName: ""

@@ -9,8 +9,8 @@ ScrollView {
     contentWidth: availableWidth
     ColumnLayout {
         width: page.availableWidth; spacing: 16
-        Text { Layout.fillWidth: true; text: "歌词与翻译 · " + playbackBridge.title; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 24; elide: Text.ElideRight }
-        Text { Layout.fillWidth: true; text: "本地原文和已保存译文直接显示。联网检索、浏览器翻译和可能付费的 AI 翻译均需手动启动。"; color: Theme.secondary; wrapMode: Text.Wrap }
+        UiText { Layout.fillWidth: true; text: "歌词与翻译 · " + playbackBridge.title; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 24; elide: Text.ElideRight }
+        UiText { Layout.fillWidth: true; text: "本地原文和已保存译文直接显示。联网检索、浏览器翻译和可能付费的 AI 翻译均需手动启动。"; color: Theme.secondary; wrapMode: Text.Wrap }
         Flow {
             Layout.fillWidth: true; spacing: 8
             ShellButton { text: "需要翻译"; primary: translationBridge.classification === 1; enabled: playbackBridge.hasTrack; onClicked: translationBridge.classify(1) }
@@ -25,19 +25,19 @@ ScrollView {
             ChoiceBox { id: language; model: ["en", "ja", "auto"] }
             ShellButton { text: "浏览器翻译"; enabled: playbackBridge.hasTrack && !translationBridge.pending && !translationBridge.preview; onClicked: { const task = translationBridge.prepareBrowser(provider.currentText, language.currentText); if (task.length) { consent.exactTask = task; consent.browser = true; consent.open() } } }
         }
-        Text { Layout.fillWidth: true; text: translationBridge.status + (translationBridge.details.length ? "\n" + translationBridge.details : ""); textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap }
+        UiText { Layout.fillWidth: true; text: translationBridge.status + (translationBridge.details.length ? "\n" + translationBridge.details : ""); textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap }
         RowLayout {
             visible: translationBridge.preview; Layout.fillWidth: true
             ShellButton { objectName: "saveTranslationButton"; text: "保存双语歌词"; primary: true; onClicked: translationBridge.save() }
             ShellButton { objectName: "discardTranslationButton"; text: "放弃预览"; onClicked: discardConsent.open() }
-            Text { Layout.fillWidth: true; text: "未保存预览保留在当前会话，切回该歌曲可继续处理。"; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 12 }
+            UiText { Layout.fillWidth: true; text: "未保存预览保留在当前会话，切回该歌曲可继续处理。"; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 14 }
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
         RowLayout {
             ShellButton { objectName: "searchLyricsButton"; text: "联网检索当前歌曲歌词"; enabled: playbackBridge.hasTrack && !lyricsSearchBridge.busy; onClicked: searchConsent.open() }
             ShellButton { text: "停止检索"; enabled: lyricsSearchBridge.busy; onClicked: lyricsSearchBridge.stop() }
         }
-        Text { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.secondary }
+        UiText { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.secondary }
         ListView {
             Layout.fillWidth: true; Layout.preferredHeight: count ? 180 : 36; clip: true; model: lyricsSearchBridge
             delegate: ItemDelegate {
@@ -45,7 +45,7 @@ ScrollView {
                 width: ListView.view.width; text: title + " · " + artist + " · " + source + (timed ? " · 时间轴" : " · 文本")
                 onClicked: lyricsSearchBridge.select(index)
             }
-            Text { anchors.centerIn: parent; visible: parent.count === 0; text: "暂无候选版本"; color: Theme.secondary }
+            UiText { anchors.centerIn: parent; visible: parent.count === 0; text: "暂无候选版本"; color: Theme.secondary }
         }
         TextArea { Layout.fillWidth: true; Layout.preferredHeight: 140; readOnly: true; text: lyricsSearchBridge.previewText; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; selectByMouse: true; placeholderText: "选择候选版本查看原文" }
         ShellButton { text: "保存所选歌词版本"; enabled: lyricsSearchBridge.selectedKey.length > 0; onClicked: { replaceConsent.exactKey = lyricsSearchBridge.selectedKey; replaceConsent.open() } }
@@ -58,8 +58,8 @@ ScrollView {
         anchors.centerIn: parent; width: Math.max(300, Math.min(480, page.width - 20)); modal: true
         title: browser ? "使用既有浏览器翻译流程" : "发送整首歌词至 DeepSeek"
         footer: DialogButtonBox {
-            Button { objectName: "consentDeclineButton"; text: "不发送"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
-            Button { objectName: "consentAcceptButton"; text: consent.browser ? "开始浏览器翻译" : "发送一次整首歌词"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
+            ShellButton { objectName: "consentDeclineButton"; text: "不发送"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
+            ShellButton { objectName: "consentAcceptButton"; text: consent.browser ? "开始浏览器翻译" : "发送一次整首歌词"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
             onAccepted: consent.accept()
             onRejected: consent.reject()
         }

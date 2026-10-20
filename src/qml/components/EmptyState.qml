@@ -9,9 +9,9 @@ ColumnLayout {
         Layout.alignment: Qt.AlignHCenter
         width: 64; height: 64; radius: 20
         color: Theme.selected
-        Text { anchors.centerIn: parent; text: "♪"; font.pixelSize: 32; color: Theme.accent }
+        UiText { anchors.centerIn: parent; text: "♪"; font.pixelSize: 32; color: Theme.accent }
     }
-    Text {
+    UiText {
         Layout.fillWidth: true
         text: heading
         color: Theme.text
@@ -20,7 +20,7 @@ ColumnLayout {
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
     }
-    Text {
+    UiText {
         Layout.fillWidth: true
         text: description
         color: Theme.secondary

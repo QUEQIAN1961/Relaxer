@@ -38,7 +38,7 @@ ColumnLayout {
 
     RowLayout {
         Layout.fillWidth: true
-        Text {
+        UiText {
             Layout.fillWidth: true
             text: page.subpage === "translation" ? "歌词翻译" : "AI 服务"
             color: Theme.text
@@ -67,10 +67,10 @@ ColumnLayout {
                 id: providerContent
                 anchors { left: parent.left; right: parent.right; top: parent.top; margins: 18 }
                 spacing: 12
-                Text { text: "供应商管理"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
+                UiText { text: "供应商管理"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "供应商"; Layout.preferredWidth: 74; color: Theme.secondary }
+                    UiText { text: "供应商"; Layout.preferredWidth: 74; color: Theme.secondary }
                     ChoiceBox {
                         objectName: "aiProviderSelection"
                         Layout.fillWidth: true
@@ -81,7 +81,7 @@ ColumnLayout {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "API Key"; Layout.preferredWidth: 74; color: Theme.secondary }
+                    UiText { text: "API Key"; Layout.preferredWidth: 74; color: Theme.secondary }
                     EntryField {
                         id: key
                         objectName: "apiKeyInput"
@@ -109,13 +109,13 @@ ColumnLayout {
                     }
                     ShellButton { text: "检查本地凭据"; enabled: aiBridge.draft.providerId === "deepseek"; onClicked: aiBridge.checkCredential() }
                 }
-                Text {
+                UiText {
                     objectName: "aiCredentialStatus"
                     Layout.fillWidth: true
                     text: aiBridge.credentialStatus
                     wrapMode: Text.Wrap
                     color: Theme.secondary
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                 }
                 Flow {
                     Layout.fillWidth: true
@@ -133,12 +133,12 @@ ColumnLayout {
                         onClicked: aiBridge.refreshModels(true)
                     }
                 }
-                Text {
+                UiText {
                     Layout.fillWidth: true
                     text: "连接验证只读取模型列表，不会请求翻译。"
                     wrapMode: Text.Wrap
                     color: Theme.secondary
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                 }
             }
         }
@@ -153,10 +153,10 @@ ColumnLayout {
                 id: modelContent
                 anchors { left: parent.left; right: parent.right; top: parent.top; margins: 18 }
                 spacing: 12
-                Text { text: "默认模型配置"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
+                UiText { text: "默认模型配置"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "模型"; Layout.preferredWidth: 74; color: Theme.secondary }
+                    UiText { text: "模型"; Layout.preferredWidth: 74; color: Theme.secondary }
                     ChoiceBox {
                         objectName: "aiDefaultModel"
                         Layout.fillWidth: true
@@ -166,13 +166,13 @@ ColumnLayout {
                         currentIndex: indexOfValue(aiBridge.draft.modelId)
                         enabled: aiBridge.draft.providerId.length > 0
                         onActivated: page.saveField("modelId", currentValue)
-                        ToolTip.visible: hovered
-                        ToolTip.text: aiBridge.draft.modelId
+
+
                     }
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "思考模式"; Layout.preferredWidth: 74; color: Theme.secondary }
+                    UiText { text: "思考模式"; Layout.preferredWidth: 74; color: Theme.secondary }
                     ChoiceBox {
                         objectName: "aiDefaultThinking"
                         Layout.fillWidth: true
@@ -184,13 +184,13 @@ ColumnLayout {
                         onActivated: aiBridge.setThinkingEffort(false, currentValue)
                     }
                 }
-                Text {
+                UiText {
                     objectName: "aiDefaultModelCapabilities"
                     Layout.fillWidth: true
                     text: aiBridge.defaultModelCapabilities
                     wrapMode: Text.Wrap
                     color: Theme.secondary
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                 }
             }
         }
@@ -205,14 +205,14 @@ ColumnLayout {
                 id: featuresContent
                 anchors { left: parent.left; right: parent.right; top: parent.top; margins: 18 }
                 spacing: 12
-                Text { text: "AI 功能"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
+                UiText { text: "AI 功能"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
                 ShellButton { objectName: "aiLyricsTranslationSettings"; text: "歌词翻译设置"; onClicked: page.openTranslation() }
-                Text {
+                UiText {
                     Layout.fillWidth: true
                     text: "歌词翻译可使用全局默认配置或单独配置，请求完成后先预览再保存。"
                     wrapMode: Text.Wrap
                     color: Theme.secondary
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                 }
             }
         }
@@ -232,7 +232,7 @@ ColumnLayout {
                 id: translationContent
                 anchors { left: parent.left; right: parent.right; top: parent.top; margins: 18 }
                 spacing: 12
-                Text { text: "歌词翻译配置"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
+                UiText { text: "歌词翻译配置"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
                 CheckBox {
                     objectName: "aiTranslationUseGlobal"
                     text: "使用全局默认配置"
@@ -241,7 +241,7 @@ ColumnLayout {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "供应商覆盖"; Layout.preferredWidth: 88; color: Theme.secondary }
+                    UiText { text: "供应商覆盖"; Layout.preferredWidth: 88; color: Theme.secondary }
                     ChoiceBox {
                         objectName: "aiTranslationProvider"
                         Layout.fillWidth: true
@@ -253,7 +253,7 @@ ColumnLayout {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "模型覆盖"; Layout.preferredWidth: 88; color: Theme.secondary }
+                    UiText { text: "模型覆盖"; Layout.preferredWidth: 88; color: Theme.secondary }
                     ChoiceBox {
                         objectName: "aiTranslationModel"
                         Layout.fillWidth: true
@@ -267,7 +267,7 @@ ColumnLayout {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "思考模式覆盖"; Layout.preferredWidth: 88; color: Theme.secondary }
+                    UiText { text: "思考模式覆盖"; Layout.preferredWidth: 88; color: Theme.secondary }
                     ChoiceBox {
                         objectName: "aiTranslationThinking"
                         Layout.fillWidth: true
@@ -281,7 +281,7 @@ ColumnLayout {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: "目标语言"; Layout.preferredWidth: 88; color: Theme.secondary }
+                    UiText { text: "目标语言"; Layout.preferredWidth: 88; color: Theme.secondary }
                     ChoiceBox {
                         objectName: "aiTranslationLanguage"
                         Layout.fillWidth: true
@@ -303,13 +303,13 @@ ColumnLayout {
                 id: styleContent
                 anchors { left: parent.left; right: parent.right; top: parent.top; margins: 18 }
                 spacing: 12
-                Text { text: "翻译风格"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
-                Text {
+                UiText { text: "翻译风格"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
+                UiText {
                     Layout.fillWidth: true
                     text: "此处只调整表达风格。行 ID、行数、时间轴与返回格式由程序校验。"
                     wrapMode: Text.Wrap
                     color: Theme.secondary
-                    font.pixelSize: 12
+                    font.pixelSize: 14
                 }
                 TextArea {
                     id: style
@@ -334,23 +334,23 @@ ColumnLayout {
                 }
             }
         }
-        Text {
+        UiText {
             Layout.fillWidth: true
             text: aiBridge.configurationStatus
             wrapMode: Text.Wrap
             color: Theme.secondary
-            font.pixelSize: 12
+            font.pixelSize: 14
         }
-        Text {
+        UiText {
             Layout.fillWidth: true
             text: "启动 AI 翻译后，整首歌词、歌曲名和歌手将发送至选定供应商，可能产生费用。每次发送前会单独确认。"
             wrapMode: Text.Wrap
             color: Theme.secondary
-            font.pixelSize: 12
+            font.pixelSize: 14
         }
     }
 
-    Text {
+    UiText {
         objectName: "aiProviderStatus"
         Layout.fillWidth: true
         text: aiBridge.status

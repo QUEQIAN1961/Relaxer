@@ -55,7 +55,7 @@ Item {
                 delegate:Item{
                     required property int index;required property string modelData
                     width:table.columnWidths[index];height:38
-                    Text{anchors.fill:parent;anchors.leftMargin:8;text:table.bulkMode&&index===0?"选择":modelData;color:Theme.secondary;font.pixelSize:11;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
+                    UiText {anchors.fill:parent;anchors.leftMargin:8;text:table.bulkMode&&index===0?"选择":modelData;color:Theme.secondary;font.pixelSize: 13;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
                     MouseArea{anchors.fill:parent;onClicked:{if(index===0&&table.bulkMode){const all=[];for(let i=0;i<table.trackModel.count;i++)all.push(table.trackModel.idAt(i));table.checkedKeys=table.checkedKeys.length===all.length?[]:all;table.bulkChanged(true,table.checkedKeys)}else table.sortColumn(index)}}
                     MouseArea{
                         visible:index>=2;anchors.right:parent.right;width:6;height:parent.height;cursorShape:Qt.SplitHCursor
@@ -106,21 +106,21 @@ Item {
                     Item{
                         width:table.columnWidths[0];height:parent.height
                         CheckBox{visible:table.bulkMode;anchors.centerIn:parent;checked:table.checkedKeys.indexOf(row.trackKey)>=0;onClicked:table.toggleKey(row.trackKey)}
-                        Text{visible:!table.bulkMode&&!hover.containsMouse&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize:11}
+                        UiText {visible:!table.bulkMode&&!hover.containsMouse&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
                         IconButton{visible:!table.bulkMode&&(hover.containsMouse||table.currentKey===row.trackKey);anchors.centerIn:parent;width:28;height:28;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"volumeMedium":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:table.playRequested(row.trackKey)}
                     }
                     Item{width:table.columnWidths[1];height:parent.height;IconButton{anchors.centerIn:parent;width:28;height:28;symbol:row.favorite?"liked":"heart";tint:row.favorite?Theme.accent:Theme.secondary;onClicked:if(!table.bulkMode)table.favoriteRequested(row.trackKey)}}
                     Item{
                         width:table.columnWidths[2];height:parent.height
                         Artwork{x:6;anchors.verticalCenter:parent.verticalCenter;width:40;height:40;file:row.rowCover;seed:row.title;resolution:128;radius:6}
-                        Text{x:56;width:parent.width-62;anchors.verticalCenter:parent.verticalCenter;text:row.title;textFormat:Text.PlainText;color:table.currentKey===row.trackKey?Theme.accent:Theme.text;font.pixelSize:13;font.weight:Font.DemiBold;font.family:{const f=settingsBridge.values.uiFont;return settingsBridge.fontFamilyFor("songs")||"Microsoft YaHei UI"} elide:Text.ElideRight}
+                        UiText {x:56;width:parent.width-62;anchors.verticalCenter:parent.verticalCenter;text:row.title;textFormat:Text.PlainText;color:table.currentKey===row.trackKey?Theme.accent:Theme.text;font.pixelSize: 15;font.weight:Font.DemiBold;font.family:{const f=settingsBridge.values.uiFont;return settingsBridge.fontFamilyFor("songs")||"Microsoft YaHei UI"} elide:Text.ElideRight}
                     }
                     Repeater{
                         model:table.statisticsMode?4:5
                         delegate:Item{
                             required property int index
                             width:table.columnWidths[index+3];height:row.height
-                            Text{anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:8;text:index===0?row.artist:index===1?row.album:index===2?table.timeText(row.duration):index===3?table.statisticsMode?row.rowPlays:table.sizeText(row.rowSize):row.rowAdded.length?row.rowAdded.slice(0,10):"—";textFormat:Text.PlainText;color:Theme.secondary;font.pixelSize:12;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
+                            UiText {anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:8;text:index===0?row.artist:index===1?row.album:index===2?table.timeText(row.duration):index===3?table.statisticsMode?row.rowPlays:table.sizeText(row.rowSize):row.rowAdded.length?row.rowAdded.slice(0,10):"—";textFormat:Text.PlainText;color:Theme.secondary;font.pixelSize: 14;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
                         }
                     }
                 }
@@ -128,34 +128,34 @@ Item {
             EmptyState{anchors.centerIn:parent;width:Math.min(parent.width-40,440);visible:list.count===0;heading:table.emptyHeading;description:table.emptyDescription}
         }
     }
-    Menu{
+    RoundMenu {
         id:context;parent:table.Overlay.overlay;property var keys:[];property string targetKey:"0"
-        MenuItem{text:"多选";onTriggered:table.beginBulk()}
-        MenuItem{objectName:"findLyrics";text:"查找歌词…";onTriggered:table.lyricsRequested(context.keys)}
+        RoundMenuItem {text:"多选";onTriggered:table.beginBulk()}
+        RoundMenuItem {objectName:"findLyrics";text:"查找歌词…";onTriggered:table.lyricsRequested(context.keys)}
         MenuSeparator{}
-        MenuItem{text:"播放";onTriggered:table.playRequested(context.targetKey)}
-        MenuItem{text:"收藏所选歌曲";onTriggered:libraryBridge.applyFavorite(context.keys,true)}
-        MenuItem{text:"取消收藏";onTriggered:libraryBridge.applyFavorite(context.keys,false)}
-        Menu{
+        RoundMenuItem {text:"播放";onTriggered:table.playRequested(context.targetKey)}
+        RoundMenuItem {text:"收藏所选歌曲";onTriggered:libraryBridge.applyFavorite(context.keys,true)}
+        RoundMenuItem {text:"取消收藏";onTriggered:libraryBridge.applyFavorite(context.keys,false)}
+        RoundMenu {
             id:addMenu;title:"加入歌单"
             Instantiator{
                 model:playlistModel
-                delegate:MenuItem{required property string name;required property string playlistKey;text:name;onTriggered:libraryBridge.addTracksToPlaylist(playlistKey,context.keys)}
+                delegate:RoundMenuItem {required property string name;required property string playlistKey;text:name;onTriggered:libraryBridge.addTracksToPlaylist(playlistKey,context.keys)}
                 onObjectAdded:(index,object)=>addMenu.insertItem(index,object)
                 onObjectRemoved:(index,object)=>addMenu.removeItem(object)
             }
             MenuSeparator{}
-            MenuItem{text:"创建新歌单并加入…";onTriggered:newList.open()}
+            RoundMenuItem {text:"创建新歌单并加入…";onTriggered:newList.open()}
         }
         MenuSeparator{}
-        MenuItem{text:"设置歌曲封面…";visible:context.keys.length===1;onTriggered:coverPicker.open()}
-        MenuItem{text:"导入本地歌词…";visible:context.keys.length===1;onTriggered:lyricsPicker.open()}
-        MenuItem{text:"打开音乐所在目录";visible:context.keys.length===1;onTriggered:libraryBridge.openTrackFolder(context.targetKey)}
+        RoundMenuItem {text:"设置歌曲封面…";visible:context.keys.length===1;onTriggered:coverPicker.open()}
+        RoundMenuItem {text:"导入本地歌词…";visible:context.keys.length===1;onTriggered:lyricsPicker.open()}
+        RoundMenuItem {text:"打开音乐所在目录";visible:context.keys.length===1;onTriggered:libraryBridge.openTrackFolder(context.targetKey)}
         MenuSeparator{}
-        MenuItem{text:"在歌单中上移";visible:Number(libraryBridge.playlistId)>0;onTriggered:libraryBridge.moveTracksInPlaylist(context.keys,-1)}
-        MenuItem{text:"在歌单中下移";visible:Number(libraryBridge.playlistId)>0;onTriggered:libraryBridge.moveTracksInPlaylist(context.keys,1)}
-        MenuItem{text:"从此歌单移除";visible:Number(libraryBridge.playlistId)>0;onTriggered:libraryBridge.removeTracksFromPlaylist(context.keys)}
-        MenuItem{text:"从资料库移除…";onTriggered:removal.open()}
+        RoundMenuItem {text:"在歌单中上移";visible:Number(libraryBridge.playlistId)>0;onTriggered:libraryBridge.moveTracksInPlaylist(context.keys,-1)}
+        RoundMenuItem {text:"在歌单中下移";visible:Number(libraryBridge.playlistId)>0;onTriggered:libraryBridge.moveTracksInPlaylist(context.keys,1)}
+        RoundMenuItem {text:"从此歌单移除";visible:Number(libraryBridge.playlistId)>0;onTriggered:libraryBridge.removeTracksFromPlaylist(context.keys)}
+        RoundMenuItem {text:"从资料库移除…";onTriggered:removal.open()}
     }
     ConfirmDialog{
         id:removal;parent:table.Overlay.overlay;width:430;anchors.centerIn:parent;modal:true;title:"从资料库移除";standardButtons:Dialog.Ok|Dialog.Cancel

@@ -63,7 +63,10 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(button,"click"));QTRY_VERIFY(dialog->property("visible").toBool());auto *accept=visual(window->contentItem(),"consentAcceptButton");QVERIFY(accept);
         QVERIFY(QMetaObject::invokeMethod(accept,"click"));QTRY_VERIFY(f.shell->translationBridge()->preview());QCOMPARE(f.http.requestCount(),1);
         QCOMPARE(LyricsDocumentReader::readFile(f.library.absolute(f.library.track(f.a.id).lyrics)).bytes,f.source);
-        auto *save=visual(window->contentItem(),"saveTranslationButton");QVERIFY(save);QVERIFY(QMetaObject::invokeMethod(save,"click"));
+        auto *save=visual(window->contentItem(),"saveTranslationButton");QVERIFY(save);
+        // Preview completion may precede the modal exit transition on native Windows.
+        QTRY_VERIFY(!dialog->property("visible").toBool());QTRY_VERIFY(save->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(save,"click"));
         QTRY_COMPARE(f.shell->translationBridge()->state(),QString("Saved"));QVERIFY(LyricsDocumentReader::readFile(f.library.absolute(f.library.track(f.a.id).lyrics)).bytes.contains("relaxer-bilingual"));
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }

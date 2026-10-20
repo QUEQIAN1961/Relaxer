@@ -1,5 +1,5 @@
 <RCC><qresource prefix="/qml">
-  <file>Main.qml</file>
+  <file>Main.qml</file><file>components/HintBubble.qml</file><file>components/RoundMenuItem.qml</file><file>components/RoundMenu.qml</file><file>components/UiText.qml</file>
   <file>theme/qmldir</file><file>theme/Theme.qml</file>
   <file>components/ShellButton.qml</file><file>components/NavigationButton.qml</file>
   <file>components/EmptyState.qml</file><file>components/PlayerBar.qml</file>

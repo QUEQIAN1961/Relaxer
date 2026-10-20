@@ -205,6 +205,7 @@ private slots:
         auto *list = visual(panel, "upcomingRows"); QVERIFY(list);
         QQuickItem *first = nullptr;
         QTRY_VERIFY(([&] { for (auto *item : namedVisuals(list, "upcomingDelegate")) if (item->property("index").toInt() == 0) { first = item; return true; } return false; })());
+        QTRY_VERIFY_WITH_TIMEOUT(panel->isEnabled(),800);
         QVERIFY(click(window, first));
         QTRY_COMPARE(f.shell->facade()->current().id, expandedExpected.first());
         QCOMPARE(f.shell->facade()->queue().items, queue);

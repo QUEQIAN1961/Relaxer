@@ -40,7 +40,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         ShellButton { objectName: "appearanceBack"; text: "返回设置"; onClicked: page.requestBack() }
-        Text { Layout.fillWidth: true; text: "自定义外观"; color: Theme.text; font.pixelSize: 25; font.weight: Font.DemiBold }
+        UiText { Layout.fillWidth: true; text: "自定义外观"; color: Theme.text; font.pixelSize: 25; font.weight: Font.DemiBold }
     }
     Flow {
         Layout.fillWidth: true
@@ -143,7 +143,7 @@ ColumnLayout {
                         }
                     }
                 }
-                Text { Layout.fillWidth: true; text: "同时用于歌曲进度条和音量条；未勾选时使用推荐颜色。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12 }
+                UiText { Layout.fillWidth: true; text: "同时用于歌曲进度条和音量条；未勾选时使用推荐颜色。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
                 CheckBox {
                     visible: settingsBridge.appearanceMode === 3
                     objectName: "appearanceCustomFooter"
@@ -173,7 +173,7 @@ ColumnLayout {
                             required property var modelData
                             Layout.fillWidth: true
                             visible: modelData.key !== "sourceRight" || !settingsBridge.appearanceDraft.shareLR
-                            Text { text: modelData.name; Layout.preferredWidth: 72; color: Theme.secondary }
+                            UiText { text: modelData.name; Layout.preferredWidth: 72; color: Theme.secondary }
                             EntryField { Layout.fillWidth: true; readOnly: true; selectByMouse: true; text: settingsBridge.appearanceDraft[modelData.key] || ""; placeholderText: "请选择背景图片" }
                             ShellButton { text: "选择图片"; onClicked: page.chooseImage(modelData.key) }
                         }
@@ -187,7 +187,7 @@ ColumnLayout {
                     RowLayout {
                         visible: !settingsBridge.appearanceDraft.shareFooter
                         Layout.fillWidth: true
-                        Text { text: "底栏图片"; Layout.preferredWidth: 72; color: Theme.secondary }
+                        UiText { text: "底栏图片"; Layout.preferredWidth: 72; color: Theme.secondary }
                         EntryField { Layout.fillWidth: true; readOnly: true; selectByMouse: true; text: settingsBridge.appearanceDraft.sourceFooter || "" }
                         ShellButton { text: "选择图片"; onClicked: page.chooseImage("sourceFooter") }
                     }
@@ -198,19 +198,19 @@ ColumnLayout {
                         required property var modelData
                         Layout.fillWidth: true
                         visible: settingsBridge.appearanceMode === 4 || modelData.key === "blurExpanded"
-                        Text { text: modelData.name; Layout.preferredWidth: 140; color: Theme.secondary }
+                        UiText { text: modelData.name; Layout.preferredWidth: 140; color: Theme.secondary }
                         Slider {
                             Layout.fillWidth: true
                             from: 0; to: 50; stepSize: 0.1
                             value: settingsBridge.appearanceDraft[modelData.key] || 0
                             onMoved: settingsBridge.editAppearance(modelData.key, value)
                         }
-                        Text { text: Number(settingsBridge.appearanceDraft[modelData.key] || 0).toFixed(1); Layout.preferredWidth: 35; color: Theme.text }
+                        UiText { text: Number(settingsBridge.appearanceDraft[modelData.key] || 0).toFixed(1); Layout.preferredWidth: 35; color: Theme.text }
                     }
                 }
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
-            Text { text: "已保存的外观"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
+            UiText { text: "已保存的外观"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
             Repeater {
                 model: settingsBridge.appearances
                 delegate: Rectangle {
@@ -227,7 +227,7 @@ ColumnLayout {
                         spacing: 8
                         RowLayout {
                             Layout.fillWidth: true
-                            Text {
+                            UiText {
                                 Layout.fillWidth: true
                                 text: history.modelData.name + (history.modelData.mode === "image" ? " · 图片" : " · 调色盘") + (history.modelData.active ? " · 正在使用" : "")
                                 elide: Text.ElideRight
@@ -265,7 +265,7 @@ ColumnLayout {
                     }
                 }
             }
-            Text { Layout.fillWidth: true; text: settingsBridge.status; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.accent }
+            UiText { Layout.fillWidth: true; text: settingsBridge.status; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.accent }
             Item { Layout.preferredHeight: 16 }
         }
     }

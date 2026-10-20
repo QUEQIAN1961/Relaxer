@@ -22,6 +22,8 @@ QtObject {
     readonly property color progressTrack: custom.progressTrack || (dark ? "#45414a" : "#e6e1e7")
     readonly property int radius: 10
     readonly property int spacing: 16
-    readonly property int fontSize: 13
+    readonly property int fontSize: 15
+    readonly property int controlHeight: 36
+    property string fontFamily: "Microsoft YaHei UI"
     readonly property int headingSize: 28
 }

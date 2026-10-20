@@ -15,10 +15,11 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     title: appBridge.windowTitle + " · QML"
     color: Theme.background
-    readonly property string restFontFamily: { const saved = settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("rest") || "Segoe UI" }
+    readonly property string restFontFamily: { const saved = settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("rest") || "Microsoft YaHei UI" }
     readonly property string footerFontFamily: { const saved = settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("footer") || root.restFontFamily }
     font.family: restFontFamily
     font.pixelSize: Theme.fontSize
+    font.weight: Font.Medium
     palette.window: Theme.background; palette.base: Theme.background
     palette.windowText: Theme.text; palette.text: Theme.text; palette.buttonText: Theme.text
     palette.placeholderText: Theme.secondary; palette.button: Theme.card
@@ -36,7 +37,9 @@ ApplicationWindow {
     property bool awaitingImportClose: false
     readonly property Item popupLayer: contentItem.Overlay.overlay
     property real playerProgress: 0
-    readonly property real playerReveal: 1 - Math.pow(1-playerProgress,3)
+    readonly property real playerReveal: playerProgress
+    property bool upcomingAtLeft: false
+    property real upcomingTravel: 0
     property var coverFrom: ({x:0,y:0,width:62,height:62})
     property var coverTo: ({x:0,y:0,width:62,height:62})
     property bool coverTravelling: false
@@ -101,8 +104,15 @@ ApplicationWindow {
         if (settingsBridge.values.reduceMotion) { playerProgress = open ? 1 : 0; coverTravelling = false; metadataTravelling = false; return }
         coverProgress = 0; coverTravelling = true; metadataTravelling = true
         playerMotion.from = playerProgress; playerMotion.to = open ? 1 : 0
-        playerMotion.duration = Math.max(150,420*Math.abs(playerMotion.to-playerProgress)); playerMotion.restart(); coverMotion.restart()
+        playerMotion.duration = 420; coverMotion.duration=420; playerMotion.restart(); coverMotion.restart()
     }
+    function relocateUpcoming(left) {
+        upcomingOut.stop(); upcomingIn.stop()
+        if (settingsBridge.values.reduceMotion) { upcomingAtLeft=left; upcomingTravel=0; return }
+        if (upcomingAtLeft===left) { upcomingIn.from=upcomingTravel; upcomingIn.restart() }
+        else { upcomingOut.from=upcomingTravel; upcomingOut.restart() }
+    }
+    onLyricsOpenChanged: relocateUpcoming(lyricsOpen)
     function showLyrics() { animatePlayer(true) }
     function closeLyrics() { if (fullScreenMode) toggleFullscreen(); animatePlayer(false) }
     function toggleFullscreen() {
@@ -148,7 +158,7 @@ ApplicationWindow {
         lyricsWorkspace.open()
     }
     function backgroundUrl(file,blur){return String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
-    function applySettings() { Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}) }
+    function applySettings() { Theme.fontFamily=root.restFontFamily; if(settingsBridge.values.reduceMotion)relocateUpcoming(lyricsOpen); Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}) }
     Component.onCompleted: { width=settingsBridge.windowBounds.width;height=settingsBridge.windowBounds.height;applySettings(); if(settingsBridge.windowBounds.maximized)showMaximized() }
     Connections { target: settingsBridge; function onSettingsChanged(){root.applySettings()} }
     Connections { target: importBridge; function onReadyToClose(){if(root.awaitingImportClose){root.allowClose=true;Qt.callLater(root.close)}} }
@@ -190,11 +200,11 @@ ApplicationWindow {
                 Item {
                     Layout.fillWidth: true; Layout.preferredHeight: 32
                     Image { x:8; width:30; height:30; source:"qrc:/icon.svg" }
-                    Text { x:49; anchors.verticalCenter:parent.verticalCenter; text:"Relaxer"; font.pixelSize:23; font.weight:Font.DemiBold; color:Theme.text }
+                    UiText { x:49; anchors.verticalCenter:parent.verticalCenter; text:"Relaxer"; font.pixelSize:23; font.weight:Font.DemiBold; color:Theme.text }
                     MouseArea { anchors.fill:parent; onPressed:root.startSystemMove() }
                 }
                 Item { Layout.preferredHeight: 2 }
-                Text { text:"音乐资料库"; color:Theme.text; font.pixelSize:12;font.weight:Font.DemiBold }
+                UiText { text:"音乐资料库"; color:Theme.text; font.pixelSize: 14;font.weight:Font.DemiBold }
                 Column {
                     Layout.fillWidth:true; spacing:8
                     Repeater {
@@ -210,7 +220,7 @@ ApplicationWindow {
                 }
                 RowLayout {
                     Layout.fillWidth:true
-                    Text { text:"我的歌单"; color:Theme.text; font.pixelSize:12;font.weight:Font.DemiBold; Layout.fillWidth:true }
+                    UiText { text:"我的歌单"; color:Theme.text; font.pixelSize: 14;font.weight:Font.DemiBold; Layout.fillWidth:true }
                     IconButton { width:26;height:26; symbol:"plus"; tip:"创建歌单"; onClicked:playlistEditor.create() }
                 }
                 ListView {
@@ -221,7 +231,7 @@ ApplicationWindow {
                         required property string playlistKey; required property string name
                         width:sidebarLists.width; height:34; hoverEnabled:true
                         background:Rectangle{radius:7;color:!root.lyricsOpen&&appBridge.page===0&&libraryBridge.playlistId===playlistKey?Theme.selected:parent.hovered?Theme.hover:"transparent"}
-                        contentItem:Text{text:name;color:Theme.text;font.pixelSize:13;elide:Text.ElideRight;verticalAlignment:Text.AlignVCenter;leftPadding:12}
+                        contentItem:UiText {text:name;color:Theme.text;font.pixelSize: 15;elide:Text.ElideRight;verticalAlignment:Text.AlignVCenter;leftPadding:12}
                         onClicked:root.openPlaylist(playlistKey)
                         TapHandler{acceptedButtons:Qt.RightButton;onTapped:{playlistEditor.edit(parent.playlistKey,parent.name)}}
                     }
@@ -254,7 +264,7 @@ ApplicationWindow {
             Image { id:oldPage;anchors.fill:parent;visible:false;fillMode:Image.Stretch }
         }
         Item {
-            id: playerClip
+            id: playerClip;objectName:"playerBackdropClip"
             x:0;y:contentHost.height*(1-root.playerReveal);width:contentHost.width;height:contentHost.height*root.playerReveal
             clip:true;visible:root.playerProgress>0
             LyricsPage {
@@ -279,7 +289,7 @@ ApplicationWindow {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;anchors.topMargin:10;anchors.bottomMargin:10;spacing:4
             RowLayout {
                 Layout.fillWidth:true
-                Text{objectName:"bulkCount";text:"已选 "+root.bulkKeys.length+" 首歌曲";color:Theme.text;font.pixelSize:13}
+                UiText {objectName:"bulkCount";text:"已选 "+root.bulkKeys.length+" 首歌曲";color:Theme.text;font.pixelSize: 15}
                 ShellButton{objectName:"bulkSelectAll";text:"全选";flat:true;onClicked:root.selectBulk(true)}
                 ShellButton{objectName:"bulkClear";text:"取消选择";flat:true;onClicked:root.selectBulk(false)}
                 Item{Layout.fillWidth:true}
@@ -298,23 +308,23 @@ ApplicationWindow {
             }
         }
     }
-    Menu {
+    RoundMenu {
         id:bulkAddMenu;parent:root.popupLayer
         Instantiator {
             model:playlistModel
-            delegate:MenuItem{required property string name;required property string playlistKey;text:name;onTriggered:libraryBridge.addTracksToPlaylist(playlistKey,root.bulkKeys)}
+            delegate:RoundMenuItem {required property string name;required property string playlistKey;text:name;onTriggered:libraryBridge.addTracksToPlaylist(playlistKey,root.bulkKeys)}
             onObjectAdded:(index,object)=>bulkAddMenu.insertItem(index,object)
             onObjectRemoved:(index,object)=>bulkAddMenu.removeItem(object)
         }
     }
     ConfirmDialog{id:bulkDelete;parent:root.popupLayer;anchors.centerIn:parent;title:"从曲库移除";width:460;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:Label{text:"移除所选歌曲及歌单关联和统计，保留音乐文件。"} onAccepted:{libraryBridge.removeTracks(root.bulkActionKeys,false);root.clearBulk()}}
-    Dialog{id:bulkNew;parent:root.popupLayer;anchors.centerIn:parent;title:"新建歌单并加入";width:420;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:EntryField {id:bulkName;placeholderText:"歌单名称"} onAccepted:{const id=libraryBridge.createPlaylist(bulkName.text);if(id!=="0")libraryBridge.addTracksToPlaylist(id,root.bulkActionKeys)}}
+    ConfirmDialog {id:bulkNew;parent:root.popupLayer;anchors.centerIn:parent;title:"新建歌单并加入";width:420;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:EntryField {id:bulkName;placeholderText:"歌单名称"} onAccepted:{const id=libraryBridge.createPlaylist(bulkName.text);if(id!=="0")libraryBridge.addTracksToPlaylist(id,root.bulkActionKeys)}}
     Rectangle {
         id:importPanel;objectName:"importPanel";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:playerBar.top
         visible:importBridge.busy;height:36;color:Theme.panel
         RowLayout {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;spacing:16
-            Text{Layout.fillWidth:true;text:importBridge.status;color:Theme.secondary;font.pixelSize:12;elide:Text.ElideRight}
+            UiText {Layout.fillWidth:true;text:importBridge.status;color:Theme.secondary;font.pixelSize: 14;elide:Text.ElideRight}
             ProgressBar{objectName:"importProgress";Layout.preferredWidth:230;from:0;to:Math.max(1,importBridge.total);value:importBridge.current;indeterminate:importBridge.total===0}
             ShellButton{text:"取消导入";implicitHeight:28;onClicked:importBridge.cancel()}
         }
@@ -323,13 +333,22 @@ ApplicationWindow {
         gesturePolicy:TapHandler.DragThreshold
         onPressedChanged:if(pressed&&upcoming.panelExpanded&&!upcoming.contains(upcoming.mapFromItem(root.contentItem,point.position.x,point.position.y)))upcoming.panelExpanded=false
     }
-    UpcomingPanel {
-        id:upcoming;objectName:"nextQueuePanel";z:2
-        expandedPlayer:root.lyricsOpen;x:root.lyricsOpen?8:root.width-8-width
-        y:root.height-4-height
-        visible:!root.bulkActive
-        Behavior on x{NumberAnimation{duration:settingsBridge.values.reduceMotion?0:300;easing.type:Easing.OutCubic}}
+    Item {
+        objectName:"upcomingWindowClip";anchors.fill:parent;clip:true;z:2
+        UpcomingPanel {
+            id:upcoming;objectName:"nextQueuePanel"
+            expandedPlayer:root.upcomingAtLeft;x:root.upcomingAtLeft?8:root.width-8-width
+            y:root.height-4-height+(height+4)*root.upcomingTravel
+            relocating:upcomingOut.running||upcomingIn.running
+            enabled:!relocating
+            visible:!root.bulkActive
+        }
     }
+    NumberAnimation {
+        id:upcomingOut;target:root;property:"upcomingTravel";to:1;duration:210;easing.type:Easing.OutCubic
+        onFinished:{root.upcomingAtLeft=root.lyricsOpen;upcomingIn.from=1;upcomingIn.restart()}
+    }
+    NumberAnimation {id:upcomingIn;target:root;property:"upcomingTravel";to:0;duration:210;easing.type:Easing.OutCubic}
     Artwork {
         id:flight;objectName:"sharedArtworkFlight";z:4;visible:root.coverTravelling
         file:root.flightFile;seed:root.flightSeed;resolution:768
@@ -339,7 +358,7 @@ ApplicationWindow {
         height:root.coverFrom.height+(root.coverTo.height-root.coverFrom.height)*root.coverProgress
     }
 
-    Text {
+    UiText {
         id:titleFlight;objectName:"sharedTitleFlight";z:4;visible:root.metadataTravelling
         text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideRight;color:Theme.text
         x:root.titleFrom.x+(root.titleTo.x-root.titleFrom.x)*root.coverProgress
@@ -349,7 +368,7 @@ ApplicationWindow {
         font.pixelSize:root.titleFrom.pixelSize+(root.titleTo.pixelSize-root.titleFrom.pixelSize)*root.coverProgress
         font.family:root.titleTo.family;font.weight:root.titleTo.weight
     }
-    Text {
+    UiText {
         id:artistFlight;objectName:"sharedArtistFlight";z:4;visible:root.metadataTravelling
         text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideRight;color:Theme.secondary
         x:root.artistFrom.x+(root.artistTo.x-root.artistFrom.x)*root.coverProgress
@@ -384,12 +403,12 @@ ApplicationWindow {
                 required property int index;required property string modelData
                 width:42;height:32;hoverEnabled:true
                 background:Rectangle{color:parent.hovered?(index===2?Theme.accent:Theme.hover):"transparent"}
-                contentItem:Text{text:modelData;color:parent.hovered&&index===2?"white":Theme.secondary;font.pixelSize:17;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
+                contentItem:UiText {text:modelData;color:parent.hovered&&index===2?"white":Theme.secondary;font.pixelSize:17;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
                 onClicked:{if(index===0)root.showMinimized();else if(index===1){if(root.visibility===Window.Maximized)root.showNormal();else root.showMaximized()}else root.close()}
             }
         }
     }
-    NumberAnimation { id:playerMotion;target:root;property:"playerProgress";duration:420 }
+    NumberAnimation { id:playerMotion;target:root;property:"playerProgress";duration:420;easing.type:Easing.OutCubic }
     NumberAnimation { id:coverMotion;target:root;property:"coverProgress";from:0;to:1;duration:420;easing.type:Easing.OutCubic;onFinished:{root.coverTravelling=false;root.metadataTravelling=false;duration=420} }
     ParallelAnimation {
         id:pageOut

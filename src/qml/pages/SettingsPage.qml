@@ -19,7 +19,7 @@ ColumnLayout {
     Layout.minimumHeight: 0
     spacing: 16
 
-    Text { text: "设置"; color: Theme.text; font.pixelSize: 30; font.weight: Font.DemiBold }
+    UiText { text: "设置"; color: Theme.text; font.pixelSize: 30; font.weight: Font.DemiBold }
     Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
     ScrollView {
         id: scroll
@@ -45,9 +45,9 @@ ColumnLayout {
                         columns: 3
                         columnSpacing: 18
                         rowSpacing: 8
-                        Text { text: "外观"; color: Theme.secondary; font.pixelSize: 12 }
-                        Text { text: "有效播放比例"; color: Theme.secondary; font.pixelSize: 12 }
-                        Text { text: "关闭窗口时"; color: Theme.secondary; font.pixelSize: 12 }
+                        UiText { text: "外观"; color: Theme.secondary; font.pixelSize: 14 }
+                        UiText { text: "有效播放比例"; color: Theme.secondary; font.pixelSize: 14 }
+                        UiText { text: "关闭窗口时"; color: Theme.secondary; font.pixelSize: 14 }
                         RowLayout {
                             Layout.fillWidth: true
                             ChoiceBox {
@@ -78,8 +78,10 @@ ColumnLayout {
                             textFromValue: function(value) { return value + " %" }
                             valueFromText: function(text) { return Number(text.replace("%", "").trim()) }
                             onValueModified: settingsBridge.setPreference("threshold", value)
-                            ToolTip.visible: hovered
-                            ToolTip.text: "整轮没有手动跳转，实际播放达到指定比例才计一次。暂停不累计，比例从下一轮生效。"
+                            HintBubble {
+                                visible: parent.hovered
+                                text: "整轮没有手动跳转，实际播放达到指定比例才计一次。暂停不累计，比例从下一轮生效。"
+                            }
                         }
                         ChoiceBox {
                             objectName: "closeSetting"
@@ -92,7 +94,7 @@ ColumnLayout {
                     Flow {
                         Layout.fillWidth: true
                         spacing: 8
-                        Text { text: "歌词颜色"; height: 42; verticalAlignment: Text.AlignVCenter; color: Theme.secondary }
+                        UiText { text: "歌词颜色"; height: 42; verticalAlignment: Text.AlignVCenter; color: Theme.secondary }
                         ShellButton {
                             objectName: "lyricColorSetting"
                             text: "选择颜色"
@@ -109,13 +111,13 @@ ColumnLayout {
                     }
                     RowLayout {
                         Layout.fillWidth: true
-                        Text {
+                        UiText {
                             Layout.fillWidth: true
                             text: settingsBridge.dataRoot
                             textFormat: Text.PlainText
                             wrapMode: Text.Wrap
                             color: Theme.secondary
-                            font.pixelSize: 12
+                            font.pixelSize: 14
                         }
                         ShellButton { objectName: "openDataRoot"; text: "打开音乐资料目录"; onClicked: settingsBridge.openDataRoot() }
                     }
@@ -132,10 +134,10 @@ ColumnLayout {
                     spacing: 8
                     RowLayout {
                         Layout.fillWidth: true
-                        Text { Layout.fillWidth: true; text: "AI 服务"; font.pixelSize: 22; font.weight: Font.DemiBold; color: Theme.text }
+                        UiText { Layout.fillWidth: true; text: "AI 服务"; font.pixelSize: 22; font.weight: Font.DemiBold; color: Theme.text }
                         ShellButton { objectName: "openAiServiceSettings"; text: "管理 AI 服务"; onClicked: page.aiRequested() }
                     }
-                    Text { Layout.fillWidth: true; text: "配置 DeepSeek 凭据、模型和歌词翻译。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12 }
+                    UiText { Layout.fillWidth: true; text: "配置 DeepSeek 凭据、模型和歌词翻译。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
                 }
             }
             ShortcutsPage { Layout.fillWidth: true }
@@ -148,9 +150,9 @@ ColumnLayout {
                     id: about
                     anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
                     spacing: 8
-                    RowLayout{Layout.fillWidth:true;Text { text: appBridge.version; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold;Layout.fillWidth:true } ShellButton{text:"版本日志";flat:true;onClicked:page.versionLogRequested()}}
-                    Text { text: "为本地音乐留一个安静的位置。"; color: Theme.secondary; font.pixelSize: 12 }
-                    Text { text: "本地音乐播放器 · 支持联网查找歌词"; color: Theme.secondary; font.pixelSize: 12 }
+                    RowLayout{Layout.fillWidth:true;UiText { text: appBridge.version; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold;Layout.fillWidth:true } ShellButton{text:"版本日志";flat:true;onClicked:page.versionLogRequested()}}
+                    UiText { text: "为本地音乐留一个安静的位置。"; color: Theme.secondary; font.pixelSize: 14 }
+                    UiText { text: "本地音乐播放器 · 支持联网查找歌词"; color: Theme.secondary; font.pixelSize: 14 }
                     CheckBox {
                         objectName: "reduceMotionSetting"
                         text: "减少动画"
@@ -159,7 +161,7 @@ ColumnLayout {
                     }
                 }
             }
-            Text { Layout.fillWidth: true; text: settingsBridge.status; wrapMode: Text.Wrap; color: Theme.accent; textFormat: Text.PlainText }
+            UiText { Layout.fillWidth: true; text: settingsBridge.status; wrapMode: Text.Wrap; color: Theme.accent; textFormat: Text.PlainText }
             Item { Layout.preferredHeight: 12 }
         }
     }

@@ -11,7 +11,7 @@ ConfirmDialog{
     title:listKey==="0"?"创建歌单":"编辑歌单"
     standardButtons:Dialog.Save|Dialog.Cancel
     contentItem:ColumnLayout{
-        Text{text:"歌单名称";color:Theme.secondary}
+        UiText {text:"歌单名称";color:Theme.secondary}
         EntryField {id:nameInput;Layout.fillWidth:true;maximumLength:120;selectByMouse:true}
         ShellButton{text:"删除此歌单…";visible:dialog.listKey!=="0";onClicked:deletion.open()}
     }

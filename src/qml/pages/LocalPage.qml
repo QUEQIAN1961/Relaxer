@@ -23,7 +23,7 @@ Item {
         spacing:16
         RowLayout {
             Layout.fillWidth:true;spacing:16
-            Text { text:libraryBridge.playlistName;font.pixelSize:28;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true;elide:Text.ElideRight }
+            UiText { text:libraryBridge.playlistName;font.pixelSize:28;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true;elide:Text.ElideRight }
             EntryField {
                 id:search;objectName:"librarySearch";Layout.preferredWidth:255;implicitHeight:36
                 placeholderText:"搜索歌曲、歌手、专辑";text:libraryModel.filterText
@@ -40,16 +40,16 @@ Item {
             }
             ColumnLayout {
                 Layout.fillWidth:true;spacing:12
-                Text{text:libraryBridge.playlistName;font.pixelSize:24;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true;elide:Text.ElideRight}
-                Text{text:(page.details.tags||[]).join(" / ");font.pixelSize:12;color:Theme.secondary;Layout.fillWidth:true;elide:Text.ElideRight}
-                Text{text:page.details.description||"还没有歌单简介";font.pixelSize:13;color:Theme.secondary;wrapMode:Text.Wrap;maximumLineCount:3;Layout.fillWidth:true}
+                UiText {text:libraryBridge.playlistName;font.pixelSize:24;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true;elide:Text.ElideRight}
+                UiText {text:(page.details.tags||[]).join(" / ");font.pixelSize: 14;color:Theme.secondary;Layout.fillWidth:true;elide:Text.ElideRight}
+                UiText {text:page.details.description||"还没有歌单简介";font.pixelSize: 15;color:Theme.secondary;wrapMode:Text.Wrap;maximumLineCount:3;Layout.fillWidth:true}
                 ShellButton{text:"编辑歌单信息";flat:true;onClicked:{description.text=page.details.description||"";tagText.text=(page.details.tags||[]).join(" / ");metadata.open()}}
             }
         }
-        Text {
+        UiText {
             objectName:"librarySummary";Layout.fillWidth:true
             text:libraryModel.count+" 首歌曲 · "+page.sizeText(libraryModel.totalFileSize)+(page.isPlaylist?" · "+(page.details.plays||0)+" 次播放":" · 本地音乐资料库")
-            color:Theme.secondary;font.pixelSize:12
+            color:Theme.secondary;font.pixelSize: 14
         }
         RowLayout {
             Layout.fillWidth:true;spacing:8
@@ -86,12 +86,12 @@ Item {
         }
     }
     FileDialog{id:coverPicker;title:"设置歌单封面";nameFilters:["图片 (*.png *.jpg *.jpeg *.webp *.bmp)"];onAccepted:libraryBridge.setPlaylistCover(libraryBridge.playlistId,selectedFile)}
-    Dialog {
+    ConfirmDialog {
         id:metadata;parent:page.Overlay.overlay;anchors.centerIn:parent;width:460;modal:true;title:"编辑歌单信息";standardButtons:Dialog.Ok|Dialog.Cancel
         contentItem:ColumnLayout {
-            Text{text:"标签（用 / 分隔）";color:Theme.secondary}
+            UiText {text:"标签（用 / 分隔）";color:Theme.secondary}
             EntryField {id:tagText;Layout.fillWidth:true}
-            Text{text:"歌单简介";color:Theme.secondary}
+            UiText {text:"歌单简介";color:Theme.secondary}
             TextArea{id:description;Layout.fillWidth:true;Layout.preferredHeight:100;wrapMode:Text.Wrap}
         }
         onAccepted:{libraryBridge.setPlaylistTags(libraryBridge.playlistId,tagText.text.split("/").map(t=>t.trim()).filter(t=>t.length));libraryBridge.setPlaylistDescription(libraryBridge.playlistId,description.text)}

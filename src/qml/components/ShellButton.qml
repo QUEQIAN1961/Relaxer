@@ -1,12 +1,17 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import "../theme"
 Button {
     id: control
     property bool primary: false
     flat: false
     property string symbol: ""
-    implicitHeight: 36
+    implicitHeight: Theme.controlHeight
+    Layout.minimumHeight: implicitHeight
+    Layout.preferredHeight: implicitHeight
+    Layout.maximumHeight: implicitHeight
+    Layout.alignment: Qt.AlignVCenter
     implicitWidth: contentItem.implicitWidth + 30
     leftPadding: 15
     rightPadding: 15
@@ -14,7 +19,7 @@ Button {
     bottomPadding: 8
     hoverEnabled: true
     font.pixelSize: Theme.fontSize
-    font.weight: Font.Medium
+    font.weight: Font.DemiBold
     Accessible.name: text
     contentItem: Item {
         implicitWidth: caption.implicitWidth + (control.symbol.length ? 28 : 0)
@@ -26,7 +31,7 @@ Button {
             name: control.symbol
             color: !control.enabled ? Theme.disabled : control.primary ? Theme.accentText : Theme.text
         }
-        Text {
+        UiText {
             id: caption; anchors.verticalCenter: parent.verticalCenter
             x: Math.max(0, (parent.width - parent.implicitWidth) / 2) + (control.symbol.length ? 28 : 0)
             width: Math.max(0, Math.min(implicitWidth, parent.width - x))
@@ -40,7 +45,7 @@ Button {
         color: !control.enabled ? Theme.background
              : control.primary ? (control.down ? Qt.darker(Theme.accent, 1.2) : control.hovered ? Qt.lighter(Theme.accent, 1.1) : Theme.accent)
              : control.down ? Theme.pressed : control.hovered ? Theme.hover : control.flat ? "transparent" : Theme.card
-        border.color: control.activeFocus || (control.hovered && !control.flat) ? Theme.accent : control.primary || control.flat ? "transparent" : Theme.border
+        border.color: control.activeFocus ? Theme.accent : control.primary ? Theme.accent : Theme.border
         border.width: 1
     }
 }

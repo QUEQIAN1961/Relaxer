@@ -30,7 +30,7 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: 34; anchors.topMargin: 28; anchors.rightMargin: 34; anchors.bottomMargin: 16
         spacing: 20
-        Text { text: "个人"; color: Theme.text; font.pixelSize: 28; font.weight: Font.DemiBold }
+        UiText { text: "个人"; color: Theme.text; font.pixelSize: 28; font.weight: Font.DemiBold }
         Item {
             id: profileHeader
             objectName: "profileHeader"
@@ -42,23 +42,22 @@ Item {
                 TapHandler { onTapped: avatarPicker.open() }
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
             }
-            Text {
+            UiText {
                 objectName: "profileName"; x: 96; y: 4
                 width: Math.max(120, profileHeader.width - 96 - editProfile.width - 18 - 238 * page.collapseProgress)
                 text: libraryBridge.profile.nickname || "Relaxer Listener"; textFormat: Text.PlainText
                 font.pixelSize: 22; font.weight: Font.DemiBold; color: Theme.text; elide: Text.ElideRight
             }
-            Text {
+            UiText {
                 id: biography; objectName: "profileDescription"; x: 96; y: 48
                 width: Math.min(325, Math.max(120, profileHeader.width - 96 - editProfile.width - 18 - 238 * page.collapseProgress))
                 text: libraryBridge.profile.description || ""; textFormat: Text.PlainText
-                font.pixelSize: 12; color: Theme.secondary; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                font.pixelSize: 14; color: Theme.secondary; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
                 HoverHandler { id: bioHover }
-                ToolTip.visible: bioHover.hovered && biography.truncated
-                ToolTip.text: text
+                HintBubble {visible: bioHover.hovered && biography.truncated;text: biography.text}
             }
             ShellButton {
-                id: editProfile; objectName: "profileEdit"; anchors.right: parent.right; y: 18; implicitHeight: 38
+                id: editProfile; objectName: "profileEdit"; anchors.right: parent.right; y: 18; implicitHeight: Theme.controlHeight
                 text: "编辑资料"
                 onClicked: { nickname.text = libraryBridge.profile.nickname || ""; description.text = libraryBridge.profile.description || ""; editError.text = ""; profileEditor.open() }
             }
@@ -78,12 +77,12 @@ Item {
                     width: expandedWidth * (1 - progress) + 220 * progress
                     height: 96 * (1 - progress) + 22 * progress
                     Rectangle { anchors.fill: parent; radius: 14; color: Theme.card; opacity: 1 - parent.progress }
-                    Text {
+                    UiText {
                         x: 22 * (1 - parent.progress); y: 60 * (1 - parent.progress)
                         text: modelData.caption + (parent.progress > .5 ? "：" : "")
-                        color: Theme.secondary; font.pixelSize: 12
+                        color: Theme.secondary; font.pixelSize: 14
                     }
-                    Text {
+                    UiText {
                         objectName: "profileStatistic"; x: 22 * (1 - parent.progress) + 108 * parent.progress; y: 18 * (1 - parent.progress)
                         width: parent.width - x - 10; text: modelData.value; textFormat: Text.PlainText
                         color: Theme.text; font.pixelSize: 28 - 16 * parent.progress; font.weight: parent.progress < .5 ? Font.Bold : Font.Normal
@@ -126,12 +125,12 @@ Item {
             EntryField { id: nickname; objectName: "profileNicknameEdit"; Layout.fillWidth: true; maximumLength: 60; selectByMouse: true }
             Label { text: "个人简介"; color: Theme.secondary }
             ScrollView { Layout.fillWidth: true; Layout.preferredHeight: 150; TextArea { id: description; objectName: "profileDescriptionEdit"; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; selectByMouse: true } }
-            Label { text: "简介最多 1000 字"; color: Theme.secondary; font.pixelSize: 11 }
+            Label { text: "简介最多 1000 字"; color: Theme.secondary; font.pixelSize: 13 }
             Label { id: editError; Layout.fillWidth: true; visible: text.length > 0; color: Theme.accent; wrapMode: Text.Wrap }
         }
         footer: DialogButtonBox {
             standardButtons: Dialog.Cancel
-            Button { text: "保存"; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: { if (libraryBridge.saveProfile(nickname.text, description.text)) profileEditor.accept(); else editError.text = libraryBridge.error } }
+            ShellButton { text: "保存"; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: { if (libraryBridge.saveProfile(nickname.text, description.text)) profileEditor.accept(); else editError.text = libraryBridge.error } }
             onRejected: profileEditor.reject()
         }
     }

@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import "../theme"
 
-Dialog {
+ConfirmDialog {
     id: workspace
     objectName: "lyricsWorkspace"
     modal: true
@@ -75,7 +75,7 @@ Dialog {
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 12
             Label { text: "查找歌词"; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
-            ToolButton { objectName: "lyricsWorkspaceClose"; text: "×"; font.pixelSize: 24; Accessible.name: "关闭查找歌词"; onClicked: workspace.requestClose() }
+            ToolButton {implicitWidth:36;implicitHeight:36;background:Rectangle{radius:8;color:parent.hovered?Theme.hover:"transparent"} objectName: "lyricsWorkspaceClose"; text: "×"; font.pixelSize: 24; Accessible.name: "关闭查找歌词"; onClicked: workspace.requestClose() }
         }
     }
     contentItem: RowLayout {
@@ -100,9 +100,9 @@ Dialog {
                         background: Rectangle { radius: 7; color: parent.highlighted ? Theme.selected : parent.hovered ? Theme.hover : "transparent" }
                         contentItem: Column {
                             spacing: 4
-                            Text { width: parent.width; text: modelData.title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                            Text { width: parent.width; text: modelData.artist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 11; elide: Text.ElideRight }
-                            Text { width: parent.width; text: modelData.status || (modelData.lyricsAvailable ? "已有本地歌词" : "缺失歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 11; elide: Text.ElideRight }
+                            UiText { width: parent.width; text: modelData.title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                            UiText { width: parent.width; text: modelData.artist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                            UiText { width: parent.width; text: modelData.status || (modelData.lyricsAvailable ? "已有本地歌词" : "缺失歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
                         }
                         onClicked: workspace.chooseTarget(modelData.trackKey)
                     }
@@ -114,7 +114,7 @@ Dialog {
                     enabled: workspace.hasTarget && !workspace.taskNeedsAction
                     onClicked: { if (lyricsSearchBridge.busy) lyricsSearchBridge.stop(); else lyricsSearchBridge.searchTargets(true) }
                 }
-                Label { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 11; maximumLineCount: 4; elide: Text.ElideRight }
+                Label { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: 4; elide: Text.ElideRight }
             }
         }
         ColumnLayout {
@@ -130,12 +130,12 @@ Dialog {
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
                 ShellButton { objectName: "searchLyricsButton"; text: lyricsSearchBridge.busy ? "查找中…" : "手动搜索"; primary: true; implicitHeight: workspace.compact ? 30 : 34; Layout.fillWidth: true; enabled: workspace.sourceActionsEnabled && !lyricsSearchBridge.busy; onClicked: workspace.startSearch() }
-                ToolButton { text: "更多操作 ⌄"; enabled: workspace.sourceActionsEnabled; onClicked: moreMenu.popup() }
+                ShellButton { implicitHeight: workspace.compact ? 30 : 34;text: "更多操作 ⌄"; enabled: workspace.sourceActionsEnabled; onClicked: moreMenu.popup() }
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
-                CheckBox { id: syncedOnly; objectName: "lyricsSyncedOnly"; text: "只看滚动歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 12 }
-                CheckBox { id: replaceExisting; objectName: "lyricsReplace"; text: "替换已有歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 12 }
+                CheckBox { id: syncedOnly; objectName: "lyricsSyncedOnly"; text: "只看滚动歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
+                CheckBox { id: replaceExisting; objectName: "lyricsReplace"; text: "替换已有歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
             }
             Label { text: "候选版本"; color: Theme.text; font.weight: Font.DemiBold }
             Rectangle {
@@ -159,13 +159,13 @@ Dialog {
                         background: Rectangle { radius: 7; color: parent.highlighted ? Theme.selected : parent.hovered ? Theme.hover : "transparent" }
                         contentItem: Column {
                             spacing: 5
-                            Text { width: parent.width; text: title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                            Text { width: parent.width; text: artist + (album.length ? " · " + album : ""); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 11; elide: Text.ElideRight }
-                            Text { width: parent.width; text: source + (timed ? " · 滚动歌词" : " · 普通歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 11; elide: Text.ElideRight }
+                            UiText { width: parent.width; text: title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                            UiText { width: parent.width; text: artist + (album.length ? " · " + album : ""); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                            UiText { width: parent.width; text: source + (timed ? " · 滚动歌词" : " · 普通歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
                         }
                         onClicked: { lyricsSearchBridge.select(index); previewTabs.currentIndex = 0 }
                     }
-                    Label { anchors.centerIn: parent; width: parent.width - 24; visible: candidates.count === 0; text: lyricsSearchBridge.busy ? "正在查找候选版本…" : "暂无候选版本\n可修改歌名或歌手后搜索，也可以导入或粘贴本地歌词。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12 }
+                    Label { anchors.centerIn: parent; width: parent.width - 24; visible: candidates.count === 0; text: lyricsSearchBridge.busy ? "正在查找候选版本…" : "暂无候选版本\n可修改歌名或歌手后搜索，也可以导入或粘贴本地歌词。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
                 }
             }
             ShellButton {
@@ -181,11 +181,12 @@ Dialog {
                 Layout.fillWidth: true; spacing: 2
                 Repeater {
                     model: ["待判断", "需要翻译", "无需翻译"]
-                    delegate: ToolButton {
+                    delegate: ShellButton {
                         required property int index; required property string modelData
                         Layout.fillWidth: true; text: modelData; checkable: true
                         implicitHeight: workspace.compact ? 30 : 36
                         checked: translationBridge.classification === index
+                        primary: checked
                         enabled: workspace.hasTarget && !translationBridge.pending && !translationBridge.preview
                         onClicked: translationBridge.classify(index)
                     }
@@ -194,31 +195,31 @@ Dialog {
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
                 ShellButton { objectName: "translateAiButton"; Layout.fillWidth: true; implicitHeight: 34; text: "AI 翻译整首"; primary: true; enabled: workspace.hasTarget && translationBridge.classification === 1 && !workspace.taskNeedsAction; onClicked: workspace.prepareTranslation("") }
-                ToolButton { text: "浏览器 ⌄"; enabled: workspace.hasTarget && !workspace.taskNeedsAction; onClicked: browserMenu.popup() }
+                ShellButton { implicitHeight:34;text: "浏览器 ⌄"; enabled: workspace.hasTarget && !workspace.taskNeedsAction; onClicked: browserMenu.popup() }
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
-                Label { text: "原文语言"; color: Theme.secondary; font.pixelSize: 11 }
-                ChoiceBox { id: sourceLanguage; objectName: "lyricsSourceLanguage"; Layout.fillWidth: true; implicitHeight: 30; model: ["自动识别", "英语", "日语"]; font.pixelSize: 11 }
-                ToolButton { text: "取消任务"; visible: translationBridge.pending; onClicked: translationBridge.cancel() }
+                Label { text: "原文语言"; color: Theme.secondary; font.pixelSize: 13 }
+                ChoiceBox { id: sourceLanguage; objectName: "lyricsSourceLanguage"; Layout.fillWidth: true; implicitHeight: 30; model: ["自动识别", "英语", "日语"]; font.pixelSize: 13 }
+                ShellButton { implicitHeight:30;text: "取消任务"; visible: translationBridge.pending; onClicked: translationBridge.cancel() }
             }
             RowLayout {
                 Layout.fillWidth: true; visible: translationBridge.pending
                 ProgressBar { Layout.fillWidth: true; from: 0; to: Math.max(1, translationBridge.totalLines); value: translationBridge.completedLines; indeterminate: translationBridge.completedLines === 0 }
-                Label { text: translationBridge.completedLines + " / " + translationBridge.totalLines; color: Theme.secondary; font.pixelSize: 11 }
+                Label { text: translationBridge.completedLines + " / " + translationBridge.totalLines; color: Theme.secondary; font.pixelSize: 13 }
             }
             ShellButton { Layout.fillWidth: true; implicitHeight: 32; text: "继续人工验证"; visible: translationBridge.state === "NeedsAttention"; onClicked: translationBridge.resume() }
-            Label { Layout.fillWidth: true; text: translationBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 11; maximumLineCount: workspace.compact ? 2 : 3; elide: Text.ElideRight }
+            Label { Layout.fillWidth: true; text: translationBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: workspace.compact ? 2 : 3; elide: Text.ElideRight }
             TabBar {
                 id: previewTabs; objectName: "lyricsPreviewTabs"; Layout.fillWidth: true; implicitHeight: 34
-                TabButton { text: "歌词原文"; implicitHeight: 34 }
-                TabButton { text: "双语预览"; implicitHeight: 34 }
+                SettingsTabButton { text: "歌词原文"; implicitHeight: 34 }
+                SettingsTabButton { text: "双语预览"; implicitHeight: 34 }
             }
             ScrollView {
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 80; clip: true
                 TextArea {
                     objectName: "lyricsWorkspacePreview"; readOnly: true; selectByMouse: true
-                    textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; font.pixelSize: 12
+                    textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; font.pixelSize: 14
                     color: Theme.text; background: Rectangle { radius: 8; color: Theme.panel; border.color: Theme.border }
                     text: previewTabs.currentIndex === 1 ? translationBridge.previewText : lyricsSearchBridge.previewText.length ? lyricsSearchBridge.previewText : lyricsSearchBridge.sourceText
                     placeholderText: previewTabs.currentIndex === 1 ? "译文完成后在这里预览，确认保存后才会写入本地歌词。" : "选中候选版本查看原文，或查看已有的本地歌词。"
@@ -227,7 +228,7 @@ Dialog {
             RowLayout {
                 Layout.fillWidth: true
                 ShellButton { objectName: "saveTranslationButton"; Layout.fillWidth: true; implicitHeight: 34; text: "保存 AI 翻译"; primary: true; enabled: translationBridge.preview; onClicked: translationBridge.save() }
-                ToolButton { objectName: "discardTranslationButton"; text: "放弃预览"; enabled: translationBridge.preview; onClicked: discardConfirm.open() }
+                ShellButton {implicitHeight:34;objectName: "discardTranslationButton"; text: "放弃预览"; enabled: translationBridge.preview; onClicked: discardConfirm.open() }
             }
         }
     }
@@ -235,20 +236,20 @@ Dialog {
         implicitHeight: 45
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 18
-            Label { Layout.fillWidth: true; text: workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 11; wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 13; wrapMode: Text.Wrap }
             ShellButton { objectName: "lyricsSaveClose"; implicitHeight: 34; text: "关闭"; onClicked: workspace.requestClose() }
         }
     }
-    Menu {
+    RoundMenu {
         id: moreMenu
-        MenuItem { text: "导入本地歌词…"; onTriggered: { workspace.fileTargetKey = lyricsSearchBridge.targetTrackKey; localLyrics.open() } }
-        MenuItem { text: "粘贴歌词…"; onTriggered: { pasteDialog.exactTarget = lyricsSearchBridge.targetTrackKey; pasted.text = ""; pasteDialog.open() } }
-        MenuItem { text: "标记为纯音乐…"; onTriggered: { instrumentalConfirm.exactTarget = lyricsSearchBridge.targetTrackKey; instrumentalConfirm.open() } }
+        RoundMenuItem { text: "导入本地歌词…"; onTriggered: { workspace.fileTargetKey = lyricsSearchBridge.targetTrackKey; localLyrics.open() } }
+        RoundMenuItem { text: "粘贴歌词…"; onTriggered: { pasteDialog.exactTarget = lyricsSearchBridge.targetTrackKey; pasted.text = ""; pasteDialog.open() } }
+        RoundMenuItem { text: "标记为纯音乐…"; onTriggered: { instrumentalConfirm.exactTarget = lyricsSearchBridge.targetTrackKey; instrumentalConfirm.open() } }
     }
-    Menu {
+    RoundMenu {
         id: browserMenu
-        MenuItem { text: "必应翻译"; onTriggered: workspace.prepareTranslation("bing") }
-        MenuItem { text: "百度翻译"; onTriggered: workspace.prepareTranslation("baidu") }
+        RoundMenuItem { text: "必应翻译"; onTriggered: workspace.prepareTranslation("bing") }
+        RoundMenuItem { text: "百度翻译"; onTriggered: workspace.prepareTranslation("baidu") }
     }
     FileDialog {
         id: localLyrics; objectName: "lyricsImportDialog"; title: "导入本地歌词"; fileMode: FileDialog.OpenFile; nameFilters: ["歌词 (*.lrc *.txt)"]
@@ -264,8 +265,8 @@ Dialog {
         title: browser ? "开始浏览器翻译？" : "发送整首歌词至 DeepSeek？"
         contentItem: Label { wrapMode: Text.Wrap; text: consent.browser ? "将向所选翻译网站提交歌词。遇到登录或验证时，请在打开的浏览器中操作。返回结果先保留为未保存预览。" : "将把这首歌的歌词、目标语言和翻译风格发送至 DeepSeek 官方服务，可能产生费用。不会上传音频、封面或本地路径。本次仅发送一次请求；译文需要你确认保存。" }
         footer: DialogButtonBox {
-            Button { objectName: "consentDeclineButton"; text: "不发送"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
-            Button { objectName: "consentAcceptButton"; text: consent.browser ? "开始浏览器翻译" : "发送一次整首歌词"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
+            ShellButton { objectName: "consentDeclineButton"; text: "不发送"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
+            ShellButton { objectName: "consentAcceptButton"; text: consent.browser ? "开始浏览器翻译" : "发送一次整首歌词"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
             onAccepted: consent.accept(); onRejected: consent.reject()
         }
         onAccepted: if (exactTarget === translationBridge.targetTrackKey) translationBridge.start(exactTask)

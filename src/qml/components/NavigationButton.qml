@@ -23,7 +23,7 @@ Button {
             name: control.marker
             color: !control.enabled ? Theme.disabled : control.selected ? Theme.accent : Theme.text
         }
-        Text {
+        UiText {
             id: caption; x: 30; width: Math.max(0, parent.width - x); anchors.verticalCenter: parent.verticalCenter
             text: control.text; textFormat: Text.PlainText; elide: Text.ElideRight
             font: control.font

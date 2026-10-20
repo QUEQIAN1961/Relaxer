@@ -108,12 +108,12 @@ def main():
         license_root = prefix / "share/licenses"
         if license_root.exists(): shutil.copytree(license_root, dest / "third-party-licenses", dirs_exist_ok=True)
     (dest / "RelaxerQml.cmd").write_text('@echo off\r\nsetlocal\r\n"%~dp0runtime\\Relaxer.exe" --ui=qml %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
-    (dest / "UI-REPAIR-READ-ME-FIRST.md").write_text('# Relaxer V0.2.1-dev-c4c5-ui1\n\n基于 C4+C5 的 v0.2.0 界面与交互恢复版，等待独立验收。\n\n运行 RelaxerQml.cmd 打开本次修复的 QML 界面。RelaxerStart.exe 沿用原 Widgets 入口。两种界面共享资料路径与锁，请先关闭另一种界面。首次验证建议使用独立资料目录：\nruntime/Relaxer.exe --ui=qml --data <测试目录>\n\n原侧栏恢复本地音乐、歌单、个人、设置、我喜欢与我的歌单。左下角封面或标题展开播放页，保留底部播放栏。恢复切页过渡、封面飞行动画、切歌动画及下一首浮层。\n查找歌词位于歌曲右键菜单、批量操作栏及“查找缺失歌词”；设置仅保留 AI 服务配置。选中歌曲查歌词和预览翻译不改变当前播放。\n修复加载模型后无法选择、刷新丢失配置等问题；模型选择立即保存。AI 联网验证使用回环 Mock，未访问用户 Key，未进行真实付费调用。\n字体、外观编辑、快捷键、托盘、导入、个人资料及歌单卡片已接回 QML。保留文件的删除和从歌单移除沿用原核心。\n本次为开发修复包，不是正式版本。数据和数据库格式未改变；旧交付包保留。\n', encoding="utf-8")
+    (dest / "UI-REPAIR-READ-ME-FIRST.md").write_text('# Relaxer V0.2.1-dev-c4c5-ui2\n\n基于 C4+C5 的 v0.2.0 界面与交互恢复版，等待独立验收。\n\n运行 RelaxerQml.cmd 打开本次修复的 QML 界面。RelaxerStart.exe 沿用原 Widgets 入口。两种界面共享资料路径与锁，请先关闭另一种界面。首次验证建议使用独立资料目录：\nruntime/Relaxer.exe --ui=qml --data <测试目录>\n\n原侧栏恢复本地音乐、歌单、个人、设置、我喜欢与我的歌单。左下角封面或标题展开播放页，保留底部播放栏。恢复切页过渡、封面飞行动画、切歌动画及下一首浮层。\n查找歌词位于歌曲右键菜单、批量操作栏及“查找缺失歌词”；设置仅保留 AI 服务配置。选中歌曲查歌词和预览翻译不改变当前播放。\n修复加载模型后无法选择、刷新丢失配置等问题；模型选择立即保存。顶部操作控件统一为 36px，补齐按钮边框；正文字号和字重适度提高；清理重复悬停提示，列表与菜单统一圆角。背景展开与收起使用一致缓动；下一首先向下离开窗口，再从另一侧底边垂直升起。AI 联网验证使用回环 Mock，未访问用户 Key，未进行真实付费调用。\n字体、外观编辑、快捷键、托盘、导入、个人资料及歌单卡片已接回 QML。保留文件的删除和从歌单移除沿用原核心。\n本次为开发修复包，不是正式版本。数据和数据库格式未改变；旧交付包保留。\n', encoding="utf-8")
     if verified:
-        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": "1.5.0", "displayVersion": "V0.2.1-dev-c4c5-ui1",
+        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": "1.5.0", "displayVersion": "V0.2.1-dev-c4c5-ui2",
             "windows_only_path": True, "audio_decode": True, "qml_window": True,
             "audio_device_required": False, "media_clock": False}), encoding="utf-8")
-    proof = {"version": "0.2.1-dev-c4c5-ui1", "qmlImports": imports, "copiedDependencies": sorted(copied),
+    proof = {"version": "0.2.1-dev-c4c5-ui2", "qmlImports": imports, "copiedDependencies": sorted(copied),
              "binarySHA256": binary_hashes, "stagingPolicy": "fresh-build-inputs-only",
              "verified": verified, "note": "Native proof from separate candidate" if verified else "Candidate collection only; do not package before native QA"}
     (dest / "deployment.json").write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding="utf-8")
