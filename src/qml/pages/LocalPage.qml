@@ -8,7 +8,7 @@ Item {
     id: page
     objectName: "localPage"
     signal lyricsRequested(var keys, bool missingOnly)
-    signal importRequested()
+    signal importRequested(var anchor)
     signal bulkChanged(bool active, var keys)
     readonly property bool isPlaylist: Number(libraryBridge.playlistId)>0
     readonly property var details: libraryBridge.playlistDetails
@@ -30,7 +30,7 @@ Item {
                 onTextEdited:{page.clearBulk();libraryModel.filterText=text}
                 selectByMouse:true;Accessible.name:"搜索音乐库"
             }
-            ShellButton { objectName:"importMusicButton";text:"导入音乐";symbol:"plus";onClicked:page.importRequested() }
+            ShellButton { objectName:"importMusicButton";text:"导入音乐";symbol:"plus";onClicked:page.importRequested(this) }
         }
         RowLayout {
             visible:page.isPlaylist;Layout.fillWidth:true;spacing:22

@@ -245,8 +245,8 @@ ApplicationWindow {
             Item {
                 id: pageSurface;objectName:"pageSurface";width:parent.width;height:parent.height
                 StackLayout {
-                    id: pages;objectName:"pageStack";anchors.fill:parent;currentIndex:appBridge.page
-                    LocalPage { id:localPage;onBulkChanged:(active,keys)=>root.updateBulk(localPage,active,keys);onLyricsRequested:(keys,missing)=>root.openLyricsTools(keys,missing);onImportRequested:importDialog.openMenu() }
+                    id: pages;objectName:"pageStack";anchors.fill:parent;anchors.topMargin:Theme.pageContentOffset;currentIndex:appBridge.page
+                    LocalPage { id:localPage;onBulkChanged:(active,keys)=>root.updateBulk(localPage,active,keys);onLyricsRequested:(keys,missing)=>root.openLyricsTools(keys,missing);onImportRequested:anchor=>importDialog.openMenu(anchor) }
                     PlaylistsPage { onOpenRequested:key=>root.openPlaylist(key);onEditRequested:(key,name)=>playlistEditor.edit(key,name);onCreateRequested:playlistEditor.create() }
                     ProfilePage { id:profilePage;onBulkChanged:(active,keys)=>root.updateBulk(profilePage,active,keys);onLyricsRequested:keys=>root.openLyricsTools(keys,false) }
                     Item {

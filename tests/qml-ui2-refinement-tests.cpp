@@ -39,7 +39,18 @@ private slots:
             }
             auto *search=visual(root,"librarySearch");QVERIFY(search);QCOMPARE(search->height(),36.);
             auto *import=visual(root,"importMusicButton");QCOMPARE(bounds(import).center().y(),bounds(search).center().y());
+            auto *stack=visual(root,"pageStack");QVERIFY(stack);QCOMPARE(bounds(stack).top(),22.);
             shot(w,size.width()==1240?"01-library":"02-compact-library");
+            QVERIFY(click(w,import));
+            auto *menu=w->findChild<QObject *>("importDialog");QVERIFY(menu);
+            QTRY_VERIFY(menu->property("opened").toBool());
+            auto *surface=qvariant_cast<QQuickItem *>(menu->property("contentItem"));QVERIFY(surface);
+            const auto menuTop=bounds(surface).top()-menu->property("topPadding").toReal();
+            QVERIFY(qAbs(menuTop-bounds(import).bottom()-6)<1);
+            QVERIFY(bounds(surface).right()<=bounds(import).right()+1);
+            shot(w,size.width()==1240?"07-import-menu-normal":"08-import-menu-compact");
+            QVERIFY(QMetaObject::invokeMethod(menu,"close"));
+            QTRY_VERIFY(!menu->property("visible").toBool());
         }
         QVERIFY(click(w,visual(root,"navigation1")));QTRY_COMPARE(f.shell->appBridge()->page(),1);QTest::qWait(260);
         auto *create=visual(root,"createPlaylistButton");QVERIFY(create);QCOMPARE(create->height(),36.);shot(w,"03-playlists-header");

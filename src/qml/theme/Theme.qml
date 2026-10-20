@@ -24,6 +24,7 @@ QtObject {
     readonly property int spacing: 16
     readonly property int fontSize: 15
     readonly property int controlHeight: 36
+    readonly property int pageContentOffset: Math.round(controlHeight * 0.6)
     property string fontFamily: "Microsoft YaHei UI"
     readonly property int headingSize: 28
 }

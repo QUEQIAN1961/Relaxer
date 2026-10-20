@@ -6,10 +6,16 @@ import "../theme"
 Popup { popupType: Popup.Item;
     id:dialog
     objectName:"importDialog"
-    width:240;padding:8
+    width:240;padding:8;margins:8
     function chooseFiles(){files.open()}
     function chooseFolder(){folder.open()}
-    function openMenu(){x=Math.max(0,parent.width-width-34);y=110;open()}
+    function openMenu(anchor){
+        if (!anchor) return
+        const edge = anchor.mapToItem(parent, anchor.width, anchor.height)
+        x = Math.max(8, Math.min(parent.width - width - 8, edge.x - width))
+        y = edge.y + 6
+        open()
+    }
     function submitFiles(urls){return importBridge.start(urls,Number(libraryBridge.playlistId)>0?libraryBridge.playlistId:"0")}
     background:Rectangle{color:Theme.background;radius:10;border.color:Theme.border}
     contentItem:ColumnLayout{
