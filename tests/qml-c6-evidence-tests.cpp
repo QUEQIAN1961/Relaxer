@@ -253,6 +253,45 @@ private slots:
         QTest::qWait(1500);QVERIFY(menu->property("visible").toBool());QTRY_VERIFY_WITH_TIMEOUT(!menu->property("visible").toBool(),2500);
         record("question-menu-idle",{{"staysWhileQuestionHovered",true},{"staysWhileMenuHovered",true},{"closedAfterLeavingBoth",true}});
     }
+    void userReviewPageInteriorNeverFlashesBlack_data(){
+        QTest::addColumn<bool>("reduced");
+        QTest::newRow("reduced-animation")<<true;
+        QTest::newRow("normal-animation")<<false;
+    }
+    void userReviewPageInteriorNeverFlashesBlack(){
+        QFETCH(bool,reduced);
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();
+        QVERIFY(f.shell->settingsBridge()->setTheme(0));
+        QVERIFY(f.shell->settingsBridge()->setPreference("reduceMotion",reduced));
+        auto *paper=visual(w->contentItem(),"paperSurface");QVERIFY(paper);
+        auto *surface=visual(w->contentItem(),"pageSurface");QVERIFY(surface);
+        for(int destination:{1,3,0}){
+            auto *button=visual(w->contentItem(),"navigation"+QString::number(destination));QVERIFY(button);
+            QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(button).center().toPoint());
+            QElapsedTimer timer;timer.start();QJsonArray frames;double minimumMean=255,maximumDark=0;QImage worst;
+            while(timer.elapsed()<400){
+                const auto image=w->grabWindow();QVERIFY(!image.isNull());const auto area=rect(paper);const auto dpr=image.devicePixelRatio();
+                int sum=0,dark=0,count=0;
+                // Interior pixels matter: a shrunken black snapshot can leave
+                // the outer padding white while obscuring the entire page.
+                for(double y=.05;y<.96;y+=.05)for(double x=.05;x<.96;x+=.05){
+                    const int value=qGray(image.pixelColor(qRound((area.x()+area.width()*x)*dpr),qRound((area.y()+area.height()*y)*dpr)).rgb());
+                    sum+=value;dark+=value<60;++count;
+                }
+                const double mean=double(sum)/count,ratio=double(dark)/count;
+                if(mean<minimumMean){minimumMean=mean;worst=image;}
+                maximumDark=qMax(maximumDark,ratio);
+                frames.append(QJsonObject{{"ms",double(timer.elapsed())},{"mean",mean},{"darkRatio",ratio},{"surfaceOpacity",surface->opacity()}});
+                QTest::qWait(7);
+            }
+            const auto path=QDir(output).filePath(QString("%1-page-interior-%2-%3.png").arg(++serial,4,10,QChar('0')).arg(reduced).arg(destination));
+            QVERIFY(worst.save(path));
+            record("sidebar-page-interior",{{"reduced",reduced},{"destination",destination},{"minimumMean",minimumMean},{"maximumDarkRatio",maximumDark},{"frames",frames}});
+            QCOMPARE(f.shell->appBridge()->page(),destination);
+            QVERIFY2(minimumMean>190&&maximumDark<.15,"Light-theme page interior flashed dark during navigation");
+        }
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void userReviewPageFramesAndSettingsLayout(){
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();QVERIFY(f.shell->settingsBridge()->setTheme(0));
         auto *paper=visual(w->contentItem(),"paperSurface");QVERIFY(paper);

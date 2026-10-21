@@ -136,7 +136,10 @@ ApplicationWindow {
         pageOut.stop(); pageIn.stop(); pageSurface.opacity=1; pageSurface.y=0
         if (lyricsOpen) animatePlayer(false)
         if (settingsBridge.values.reduceMotion || !pageSurface.visible) { root.clearBulk();action(); return }
-        pageSurface.grabToImage(function(grab) {
+        // Capture the painted background as well as the controls. Capturing
+        // only the transparent pageSurface produces a black backdrop when
+        // its snapshot is composited by the software renderer.
+        paper.grabToImage(function(grab) {
             if (revision!==navigationRevision) return
             pageGrab=grab; snapshotRevision=revision; navigationAction=action
             oldPage.opacity=.001; oldPage.scale=1; oldPage.source=grab.url
