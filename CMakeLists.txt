@@ -410,6 +410,13 @@ if(RELAXER_ENABLE_QML)
   relaxer_add_qt_test(relaxer_qml_c6_evidence relaxer_qml_c6_evidence_tests)
   relaxer_qml_test_environment(relaxer_qml_c6_evidence)
   set_tests_properties(relaxer_qml_c6_evidence PROPERTIES TIMEOUT 240)
+  if(WIN32)
+    # Pixel/hover evidence must exercise the native window backend. Offscreen
+    # has no real cursor/window activation and can return black grab buffers.
+    # Keep all assertions and configure this per test, never in the user's shell.
+    set_property(TEST relaxer_qml_c6_evidence APPEND PROPERTY ENVIRONMENT_MODIFICATION
+      "QT_QPA_PLATFORM=set:windows")
+  endif()
   add_executable(relaxer_qml_tests tests/qml-foundation-tests.cpp)
   target_link_libraries(relaxer_qml_tests PRIVATE relaxer_qml Qt6::Test)
   add_dependencies(relaxer_qml_tests Relaxer)
