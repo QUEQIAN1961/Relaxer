@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QSignalSpy>
+#include <QSettings>
 #include <QtTest>
 #include <memory>
 
@@ -82,6 +83,20 @@ private slots:
         QTest::addColumn<bool>("systemDark");
         QTest::newRow("light-system") << false;
         QTest::newRow("dark-system") << true;
+    }
+    void nativeDefaultThemeUsesReadonlySystemPreference() {
+        Fixture f; QVERIFY(f.ok);
+        QCOMPARE(f.library.setting("theme").toInt(),2);
+#ifdef Q_OS_WIN
+        QSettings preference("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",QSettings::NativeFormat);
+        const bool dark=preference.value("AppsUseLightTheme",1).toInt()==0;
+#else
+        const bool dark=QGuiApplication::palette().color(QPalette::Window).lightness()<110;
+#endif
+        const auto actual=f.bridge->palette().value("background").toString();
+        QCOMPARE(actual,QString(dark?"#19191e":"#ffffff"));
+        qInfo().noquote()<<"NATIVE_THEME_EVIDENCE"<<QJsonDocument(QJsonObject{{"source","native readonly system preference; no injection"},
+            {"currentHostDark",dark},{"actualBackground",actual},{"status","PASS; opposite real host theme NOT VERIFIED"}}).toJson(QJsonDocument::Compact);
     }
     void builtinAndCustomPaletteUseOriginalLeftRightAndFooterRoles() {
         QFETCH(bool, systemDark);

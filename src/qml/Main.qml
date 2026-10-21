@@ -335,12 +335,26 @@ ApplicationWindow {
     ConfirmDialog {id:bulkNew;parent:root.popupLayer;anchors.centerIn:parent;title:"新建歌单并加入";width:420;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:EntryField {id:bulkName;placeholderText:"歌单名称"} onAccepted:{const id=libraryBridge.createPlaylist(bulkName.text);if(id!=="0")libraryBridge.addTracksToPlaylist(id,root.bulkActionKeys)}}
     Rectangle {
         id:importPanel;objectName:"importPanel";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:playerBar.top
-        visible:importBridge.busy;height:36;color:Theme.panel
+        property bool observedTask:false
+        property bool completionVisible:false
+        property string completionText:""
+        readonly property string shownStatus:importBridge.busy?importBridge.status:completionText
+        visible:importBridge.busy||completionVisible
+        height:Math.min(144,Math.max(44,importStatus.implicitHeight+16));color:Theme.panel;clip:true;z:3
+        function updateTask(){
+            if(importBridge.busy){
+                observedTask=true;completionTimer.stop();completionVisible=false;completionText=""
+            }else if(observedTask&&Object.keys(importBridge.result).length>0){
+                observedTask=false;completionText=importBridge.status;completionVisible=true;completionTimer.restart()
+            }
+        }
+        Connections{target:importBridge;function onChanged(){importPanel.updateTask()}}
+        Timer{id:completionTimer;objectName:"importCompletionTimer";interval:4000;onTriggered:importPanel.completionVisible=false}
         RowLayout {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;spacing:16
-            UiText {Layout.fillWidth:true;text:importBridge.status;color:Theme.secondary;font.pixelSize: 14;elide:Text.ElideRight}
-            ProgressBar{objectName:"importProgress";Layout.preferredWidth:230;from:0;to:Math.max(1,importBridge.total);value:importBridge.current;indeterminate:importBridge.total===0}
-            ShellButton{text:"取消导入";implicitHeight:28;onClicked:importBridge.cancel()}
+            UiText {id:importStatus;objectName:"importStatusText";Layout.fillWidth:true;text:importPanel.shownStatus;color:Theme.secondary;font.pixelSize:14;textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:5;elide:Text.ElideRight}
+            ProgressBar{objectName:"importProgress";visible:importBridge.busy;Layout.preferredWidth:Math.min(230,root.width*.22);from:0;to:Math.max(1,importBridge.total);value:importBridge.current;indeterminate:importBridge.total===0}
+            ShellButton{visible:importBridge.busy;text:"取消导入";implicitHeight:28;onClicked:importBridge.cancel()}
         }
     }
     TapHandler {

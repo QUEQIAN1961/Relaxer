@@ -188,6 +188,96 @@ private slots:
         }
         Library reopened(data);QVERIFY(reopened.open());QCOMPARE(reopened.trackCount(),count);record("import-reopened",{{"tracks",double(reopened.trackCount())},{"connections",QSqlDatabase::connectionNames().size()}});
     }
+    void importCompletionRenderedInMainWindow_data(){
+        QTest::addColumn<int>("theme");QTest::newRow("light")<<0;QTest::newRow("dark")<<1;
+    }
+    void importCompletionRenderedInMainWindow(){
+        QFETCH(int,theme);
+        QTemporaryDir dir(QDir::tempPath()+"/Fix2 中文 spaces-XXXXXX");QVERIFY(dir.isValid());
+        Library lib(dir.filePath("资料 data"));QVERIFY(lib.open());const auto schema=import_fixture::schema(lib);
+        QmlShell shell(&lib,nullptr,true);QVERIFY(shell.settingsBridge()->setTheme(theme));QVERIFY(shell.load());
+        auto *w=shell.window();w->showNormal();w->setGeometry(40,45,1240,790);QVERIFY(QTest::qWaitForWindowExposed(w));
+        auto *panel=visual(w->contentItem(),"importPanel"),*label=visual(w->contentItem(),"importStatusText");QVERIFY(panel&&label);
+        auto *dialog=w->findChild<QObject *>("importDialog");QVERIFY(dialog);
+        auto *bridge=shell.importBridge();QSignalSpy frames(w,&QQuickWindow::frameSwapped);
+        auto writeWave=[&](const QString &path,int variation){
+            QFile file(path);if(!file.open(QIODevice::WriteOnly))return false;
+            QDataStream data(&file);data.setByteOrder(QDataStream::LittleEndian);
+            data.writeRawData("RIFF",4);data<<quint32(32036);data.writeRawData("WAVEfmt ",8);
+            data<<quint32(16)<<quint16(1)<<quint16(1)<<quint32(8000)<<quint32(16000)<<quint16(2)<<quint16(16);
+            data.writeRawData("data",4);data<<quint32(32000);
+            for(int index=0;index<16000;++index)data<<qint16(((index*variation)%127-63)*100);
+            return data.status()==QDataStream::Ok&&file.flush()&&file.size()==32044;
+        };
+        const auto a=dir.filePath("第一首 song.wav"),b=dir.filePath("第二首 song.wav"),c=dir.filePath("第三首 song.wav"),d=dir.filePath("第四首 song.wav");
+        QVERIFY(writeWave(a,1));QVERIFY(writeWave(b,2));QVERIFY(writeWave(c,3));QVERIFY(writeWave(d,4));
+        const auto missing=dir.filePath("不存在的 目录"),empty=dir.filePath("正常 空目录");QVERIFY(QDir().mkpath(empty));
+        const auto broken=dir.filePath("损坏 音频.wav");QFile bad(broken);QVERIFY(bad.open(QIODevice::WriteOnly));QCOMPARE(bad.write("bad WAV"),qint64(7));bad.close();
+        QJsonArray allSamples;QJsonArray matrix;int busyRendered=0;
+        auto submit=[&](const QStringList &paths){
+            QVariantList urls;for(const auto &path:paths)urls.append(QUrl::fromLocalFile(path));
+            QVariant accepted;const bool called=QMetaObject::invokeMethod(dialog,"submitFiles",Q_RETURN_ARG(QVariant,accepted),Q_ARG(QVariant,QVariant(urls)));
+            return called&&accepted.toBool();
+        };
+        auto sample=[&](const QString &scenario,qint64 ms,bool screenshot){
+            const int before=frames.size();w->requestUpdate();const auto image=w->grabWindow();
+            int ink=0;const auto region=rect(label);const double scale=image.width()/double(w->width());
+            const auto pixels=QRect(qRound(region.x()*scale),qRound(region.y()*scale),qRound(region.width()*scale),qRound(region.height()*scale)).intersected(image.rect());
+            const QColor background=w->property("designTokens").value<QObject *>()->property("panel").value<QColor>();
+            for(int y=pixels.top();y<=pixels.bottom();y+=2)for(int x=pixels.left();x<=pixels.right();x+=2){
+                const auto color=image.pixelColor(x,y);if(qMax(qAbs(color.red()-background.red()),qMax(qAbs(color.green()-background.green()),qAbs(color.blue()-background.blue())))>25)++ink;
+            }
+            const bool visible=panel->isVisible()&&label->isVisible()&&!image.isNull()&&ink>8;
+            if(bridge->busy()&&visible)++busyRendered;
+            allSamples.append(QJsonObject{{"scenario",scenario},{"ms",double(ms)},{"busy",bridge->busy()},{"panelVisible",panel->isVisible()},
+                {"labelVisible",label->isVisible()},{"text",label->property("text").toString()},{"inkPixels",ink},
+                {"rendered",visible},{"frameSwapsBefore",before},{"frameSwapsAfter",frames.size()},
+                {"panelY",panel->y()},{"panelHeight",panel->height()},{"windowWidth",w->width()},{"windowHeight",w->height()}});
+            if(screenshot){const auto path=QDir(output).filePath(QString("%1-import-%2-%3-%4.png").arg(++serial,4,10,QChar('0')).arg(theme).arg(scenario).arg(ms));QVERIFY(image.save(path));}
+        };
+        qint64 tracks=0;
+        auto execute=[&](const QString &name,const QStringList &paths,int added,int duplicates,int failed,int ignored,bool waitExpiry){
+            QVERIFY(submit(paths));QVERIFY(bridge->busy());QVERIFY(panel->isVisible());
+            QVERIFY(!panel->property("completionVisible").toBool());sample(name+"-busy",0,true);
+            QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);
+            QCOMPARE(bridge->result()["added"].toInt(),added);QCOMPARE(bridge->result()["duplicates"].toInt(),duplicates);
+            QCOMPARE(bridge->result()["failed"].toInt(),failed);QCOMPARE(bridge->result()["ignoredPaths"].toInt(),ignored);
+            tracks+=added;QTRY_COMPARE(shell.libraryModel()->count(),tracks);QCOMPARE(lib.trackCount(),tracks);
+            QVERIFY(panel->isVisible());QCOMPARE(label->property("text").toString(),bridge->status());
+            if(name=="missing")QVERIFY(label->property("text").toString().contains("未找到可导入的音频文件"));
+            QElapsedTimer timer;timer.start();int rendered=0;const int start=allSamples.size();
+            do{
+                if(name=="missing"&&timer.elapsed()>250&&timer.elapsed()<400){
+                    QVERIFY(shell.appBridge()->navigate(3));w->resize(1000,660);
+                    QVERIFY(QMetaObject::invokeMethod(dialog,"open"));QVERIFY(QMetaObject::invokeMethod(dialog,"close"));
+                }
+                sample(name,timer.elapsed(),rendered==0||timer.elapsed()>3700&&timer.elapsed()<3850);
+                const auto row=allSamples.last().toObject();if(row["rendered"].toBool()&&!row["busy"].toBool())++rendered;
+                QVERIFY(panel->x()>=0&&panel->width()<=w->width());QVERIFY(panel->y()>=0&&panel->y()+panel->height()<=w->height());
+                QTest::qWait(60);
+            }while(waitExpiry?panel->isVisible()&&timer.elapsed()<5200:timer.elapsed()<180);
+            QVERIFY(rendered>0);
+            if(waitExpiry){QVERIFY(!panel->isVisible());QVERIFY(timer.elapsed()>=3500&&timer.elapsed()<5200);}
+            matrix.append(QJsonObject{{"scenario",name},{"theme",theme},{"result",QJsonObject::fromVariantMap(bridge->result())},
+                {"finalText",bridge->status()},{"visibleRenderedSamples",rendered},{"sampleStart",start},{"observedMs",double(timer.elapsed())},{"autoHidden",!panel->isVisible()}});
+        };
+        execute("missing",{missing},0,0,0,1,true);QVERIFY(!QTest::currentTestFailed());
+        execute("empty",{empty},0,0,0,0,false);QVERIFY(!QTest::currentTestFailed());
+        execute("success",{a,b},2,0,0,0,false);QVERIFY(!QTest::currentTestFailed());
+        execute("duplicate",{a},0,1,0,0,false);QVERIFY(!QTest::currentTestFailed());
+        execute("mixed-ignored",{c,missing},1,0,0,1,false);QVERIFY(!QTest::currentTestFailed());
+        execute("partial-failure",{d,broken},1,0,1,0,true);QVERIFY(!QTest::currentTestFailed());
+        QStringList cancelFiles;for(int index=10;index<58;++index){const auto path=dir.filePath(QString("取消 %1.wav").arg(index));QVERIFY(writeWave(path,index));cancelFiles.append(path);}
+        QVERIFY(submit(cancelFiles));QVERIFY(bridge->busy());QVERIFY(panel->isVisible());QVERIFY(bridge->cancel());
+        QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);QVERIFY(bridge->result()["cancelled"].toBool());
+        QVERIFY(panel->isVisible());QCOMPARE(label->property("text").toString(),bridge->status());QVERIFY(bridge->status().startsWith("已取消"));sample("cancelled",0,true);
+        tracks+=bridge->result()["added"].toInt();QTRY_COMPARE(shell.libraryModel()->count(),tracks);QCOMPARE(lib.trackCount(),tracks);
+        matrix.append(QJsonObject{{"scenario","cancelled"},{"result",QJsonObject::fromVariantMap(bridge->result())},{"finalText",bridge->status()}});
+        QVERIFY(busyRendered>0);QCOMPARE(import_fixture::schema(lib),schema);QCOMPARE(QSqlDatabase::connectionNames().size(),1);
+        record("import-main-gui",{{"theme",theme},{"source","real Main.qml ImportDialog.submitFiles; native Qt synthetic events, no physical mouse"},
+            {"matrix",matrix},{"samples",allSamples},{"busyRenderedSamples",busyRendered},{"frameSwaps",frames.size()},{"schemaUnchanged",true}});
+        QVERIFY(shell.warnings().isEmpty());QVERIFY(shell.shutdown());
+    }
     void userReviewExitWarnsAndOnlyConfirmationStopsSearch(){
         QTest::failOnWarning(QRegularExpression("QProcess: Destroyed while process.*"));
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();
