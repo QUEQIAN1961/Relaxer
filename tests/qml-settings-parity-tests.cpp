@@ -1,6 +1,7 @@
 #include "ui-bridge/settings-bridge.h"
 #include "storage/appearance-store.h"
 #include "shortcuts.h"
+#include "system-theme-fixture.h"
 #include <QApplication>
 #include <QTemporaryDir>
 #include <QImage>
@@ -77,8 +78,19 @@ private slots:
         QCOMPARE(f.library.setting("windowWidth").toInt(), 1280);
         QVERIFY(f.library.setting("windowMaximized").toBool());
     }
+    void builtinAndCustomPaletteUseOriginalLeftRightAndFooterRoles_data() {
+        QTest::addColumn<bool>("systemDark");
+        QTest::newRow("light-system") << false;
+        QTest::newRow("dark-system") << true;
+    }
     void builtinAndCustomPaletteUseOriginalLeftRightAndFooterRoles() {
+        QFETCH(bool, systemDark);
+        SystemThemeFixture systemTheme(systemDark); QVERIFY(systemTheme.ok());
         Fixture f; QVERIFY(f.ok);
+        QCOMPARE(f.library.setting("theme").toInt(), 2);
+        QCOMPARE(f.bridge->palette().value("background").toString(),
+                 QString(systemDark ? "#19191e" : "#ffffff"));
+        QVERIFY(f.bridge->setTheme(0));
         auto palette = f.bridge->palette();
         QCOMPARE(palette.value("background").toString(), QString("#ffffff"));
         QCOMPARE(palette.value("panel").toString(), QString("#f5f5f7"));
@@ -104,6 +116,9 @@ private slots:
         QCOMPARE(f.library.setting("theme").toInt(), 1);
         f.bridge->discardAppearance();
         QCOMPARE(f.bridge->palette().value("background").toString(), QString("#19191e"));
+        SettingsBridge reopened(&f.library);
+        QCOMPARE(reopened.values().value("theme").toInt(), 1);
+        QCOMPARE(reopened.palette().value("background").toString(), QString("#19191e"));
     }
     void authoringPreviewSaveRenameOverwriteUseAndDeleteReuseAppearanceStore() {
         Fixture f; QVERIFY(f.ok);

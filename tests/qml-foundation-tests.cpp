@@ -1,5 +1,6 @@
 #include "ui-bridge/qml-shell.h"
 #include "phase-c-version.h"
+#include "system-theme-fixture.h"
 #include <QGuiApplication>
 #include <QDataStream>
 #include <QDirIterator>
@@ -75,7 +76,14 @@ class QmlFoundationTests final : public QObject {
         QVERIFY(shell.warnings().isEmpty());
         QVERIFY(shell.shutdown());
     }
+    void navigationAndComponents_data() {
+        QTest::addColumn<bool>("systemDark");
+        QTest::newRow("light-system") << false;
+        QTest::newRow("dark-system") << true;
+    }
     void navigationAndComponents() {
+        QFETCH(bool, systemDark);
+        SystemThemeFixture systemTheme(systemDark); QVERIFY(systemTheme.ok());
         QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open());
         QmlShell shell(&library, nullptr, true); QVERIFY(shell.load());
         auto *root = shell.window()->contentItem();
@@ -96,10 +104,21 @@ class QmlFoundationTests final : public QObject {
         QCOMPARE(shell.appBridge()->page(), 3);
         auto *theme = visualChild(root, "qmlThemeSetting"); QVERIFY(theme);
         auto *tokens=shell.window()->property("designTokens").value<QObject *>();QVERIFY(tokens);
+        QCOMPARE(library.setting("theme").toInt(), 2);
+        QTRY_COMPARE(tokens->property("background").value<QColor>(),
+                     QColor(systemDark ? "#19191e" : "#ffffff"));
+        QVERIFY(theme->setProperty("currentIndex",0));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,0)));
+        QTRY_COMPARE(tokens->property("background").value<QColor>(), QColor("#ffffff"));
         const auto background=tokens->property("background");
         QVERIFY(theme->setProperty("currentIndex",1));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,1)));
         QTRY_VERIFY(tokens->property("background")!=background);
+        QTRY_COMPARE(tokens->property("background").value<QColor>(), QColor("#19191e"));
+        QCOMPARE(library.setting("theme").toInt(), 1);
         QVERIFY(theme->setProperty("currentIndex",0));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,0)));
+        QTRY_COMPARE(tokens->property("background").value<QColor>(), QColor("#ffffff"));
+        QCOMPARE(library.setting("theme").toInt(), 0);
+        SettingsBridge reopened(&library);
+        QCOMPARE(reopened.palette().value("background").toString(), QString("#ffffff"));
         QTest::qWait(20); QVERIFY(shell.warnings().isEmpty());
     }
     void realLibraryNotificationsAreCoalesced() {
