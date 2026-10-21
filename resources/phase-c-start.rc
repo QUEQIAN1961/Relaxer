@@ -15,10 +15,10 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Relaxer\0"
       VALUE "FileDescription", "Relaxer native launcher\0"
-      VALUE "FileVersion", "0.2.1-rc1\0"
+      VALUE "FileVersion", "0.2.1-rc1-fix1\0"
       VALUE "OriginalFilename", "RelaxerStart.exe\0"
       VALUE "ProductName", "Relaxer\0"
-      VALUE "ProductVersion", "0.2.1-rc1\0"
+      VALUE "ProductVersion", "0.2.1-rc1-fix1\0"
     END
   END
   BLOCK "VarFileInfo"

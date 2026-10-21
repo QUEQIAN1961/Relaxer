@@ -13,6 +13,11 @@ ImportBridge::ImportBridge(Library *library,ImportCoordinator *coordinator,QObje
             {"cancelled",s.cancelled},{"partialSuccess",s.partialSuccess},{"unstarted",s.unstarted},
             {"errors",s.errors},{"fatalError",s.fatalError},{"playlistFailures",s.playlistFailures}};
         m_status=QString("%1 · 新增%2，重复%3，失败%4，未开始%5").arg(s.cancelled?"已取消":s.partialSuccess?"部分完成":"导入完成").arg(s.added).arg(s.duplicates).arg(s.failed).arg(s.unstarted);
+        if(s.ignoredPaths>0){
+            if(!s.cancelled&&s.fatalError.isEmpty()&&s.added+s.duplicates+s.failed==0)
+                m_status+=" · 未找到可导入的音频文件，部分路径可能不存在或已被忽略。";
+            else m_status+=QString(" · 已忽略%1个路径").arg(s.ignoredPaths);
+        }
         if(!s.fatalError.isEmpty())m_status+=" · "+s.fatalError;
         // The existing coordinator deliberately batches Library signals.
         // Notify projections once at its committed/thread-exit barrier.

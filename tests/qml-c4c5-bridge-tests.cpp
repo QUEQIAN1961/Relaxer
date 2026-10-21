@@ -93,6 +93,60 @@ private slots:
 #endif
         QCOMPARE(import_fixture::schema(library),schema);QCOMPARE(QSqlDatabase::connectionNames().size(),1);
     }
+    void ignoredAndEmptyImportSummaries_data(){
+        QTest::addColumn<QString>("scenario");
+        QTest::addColumn<int>("added");QTest::addColumn<int>("duplicates");
+        QTest::addColumn<int>("failed");QTest::addColumn<int>("ignored");
+        QTest::addColumn<bool>("noAudioHint");
+        QTest::newRow("missing-directory")<<QString("missing")<<0<<0<<0<<1<<true;
+        QTest::newRow("empty-directory")<<QString("empty")<<0<<0<<0<<0<<false;
+        QTest::newRow("unsupported-file")<<QString("unsupported")<<0<<0<<0<<1<<true;
+        QTest::newRow("missing-and-valid-chinese-spaced")<<QString("valid")<<1<<0<<0<<1<<false;
+        QTest::newRow("missing-and-corrupt-audio")<<QString("corrupt")<<0<<0<<1<<1<<false;
+        QTest::newRow("missing-and-duplicate")<<QString("duplicate")<<0<<1<<0<<1<<false;
+    }
+    void ignoredAndEmptyImportSummaries(){
+        QFETCH(QString,scenario);QFETCH(int,added);QFETCH(int,duplicates);
+        QFETCH(int,failed);QFETCH(int,ignored);QFETCH(bool,noAudioHint);
+        QTemporaryDir dir(QDir::tempPath()+"/Relaxer 中文 spaces-XXXXXX");QVERIFY(dir.isValid());
+        Library library(dir.filePath("资料 data"));QVERIFY(library.open());
+        const auto schema=import_fixture::schema(library);
+        ImportCoordinator service(&library);ImportBridge bridge(&library,&service);
+        const auto missing=dir.filePath("不存在的 音乐目录");QVERIFY(!QFileInfo::exists(missing));
+        QList<QUrl> sources;
+        if(scenario=="empty"){
+            const auto empty=dir.filePath("空 音乐目录");QVERIFY(QDir().mkpath(empty));sources<<QUrl::fromLocalFile(empty);
+        }else if(scenario=="unsupported"){
+            QFile text(dir.filePath("说明 文件.txt"));QVERIFY(text.open(QIODevice::WriteOnly));
+            QCOMPARE(text.write("not audio"),qint64(9));text.close();sources<<QUrl::fromLocalFile(text.fileName());
+        }else{
+            sources<<QUrl::fromLocalFile(missing);
+            if(scenario=="valid"||scenario=="duplicate"){
+                const auto midi=dir.filePath("测试 音乐.mid");QVERIFY(import_fixture::midi(midi,123));
+                if(scenario=="duplicate"){
+                    QVERIFY(bridge.start({QUrl::fromLocalFile(midi)}));QTRY_VERIFY_WITH_TIMEOUT(!bridge.busy(),30000);
+                    QCOMPARE(bridge.result()["added"].toInt(),1);
+                }
+                sources<<QUrl::fromLocalFile(midi);
+            }else if(scenario=="corrupt"){
+                QFile corrupt(dir.filePath("损坏 音乐.wav"));QVERIFY(corrupt.open(QIODevice::WriteOnly));
+                QVERIFY(corrupt.write("invalid audio fixture")>0);corrupt.close();sources<<QUrl::fromLocalFile(corrupt.fileName());
+            }
+        }
+        QVERIFY(bridge.start(sources));QTRY_VERIFY_WITH_TIMEOUT(!bridge.busy(),30000);
+        const auto result=bridge.result();
+        QCOMPARE(result["added"].toInt(),added);QCOMPARE(result["duplicates"].toInt(),duplicates);
+        QCOMPARE(result["failed"].toInt(),failed);QCOMPARE(result["ignoredPaths"].toInt(),ignored);
+        QCOMPARE(result["unstarted"].toInt(),0);QVERIFY(!result["cancelled"].toBool());
+        QVERIFY(result["fatalError"].toString().isEmpty());
+        QCOMPARE(result["errors"].toStringList().isEmpty(),failed==0);
+        QCOMPARE(bridge.status().contains("未找到可导入的音频文件"),noAudioHint);
+        QVERIFY(bridge.status().contains(QString("新增%1，重复%2，失败%3，未开始0").arg(added).arg(duplicates).arg(failed)));
+        if(ignored&&!noAudioHint)QVERIFY(bridge.status().contains("已忽略1个路径"));
+        QCOMPARE(library.trackCount(),qint64(added+duplicates));
+        QCOMPARE(import_fixture::schema(library),schema);
+        qInfo().noquote()<<scenario<<bridge.status()<<QJsonDocument(QJsonObject::fromVariantMap(result)).toJson(QJsonDocument::Compact);
+    }
     void importCancellationAndCloseBarrier(){
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());const auto folder=dir.filePath("many");QVERIFY(QDir().mkpath(folder));
         for(int i=0;i<60;++i)QVERIFY(import_fixture::midi(folder+QString("/%1.mid").arg(i),i));
