@@ -21,14 +21,16 @@
 #endif
 namespace relaxer {
 Playback::Playback(Library *l, QObject *p, bool decodeOnly)
-    : QObject(p), m_library(l), m_output(this), m_player(this), m_decodeOnly(decodeOnly) {
+    : QObject(p), m_library(l), m_player(this), m_decodeOnly(decodeOnly) {
     m_midiBackend = std::make_unique<MidiTransport>(l->root());
     // Headless self-tests must not initialize an arbitrary physical audio driver.
     // Real application launches do not set this variable and keep normal audio.
-    if (!qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS") &&
+    // QAudioOutput's constructor itself enumerates devices, so even an
+    // unattached value member would violate decode-only/headless isolation.
+    m_volume = decodeOnly ? 0 : qBound(0, l->setting("volume", 65).toInt(), 100);
+    if (!decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS") &&
         !QMediaDevices::defaultAudioOutput().isNull())
-        m_player.setAudioOutput(&m_output);
-    m_output.setVolume(decodeOnly ? 0 : float(l->setting("volume", 65).toInt()) / 100);
+        m_player.setAudioOutput(audioOutput());
     m_player.setLoops(1);
     m_queue.mode = static_cast<Mode>(qBound(0, l->setting("mode", 1).toInt(), 3));
     m_elapsed.start();
@@ -100,6 +102,13 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](auto, const QString &e) { onError(e); });
 }
 Playback::~Playback() { shutdown(); }
+QAudioOutput *Playback::audioOutput() {
+    if (!m_output) {
+        m_output = std::make_unique<QAudioOutput>(this);
+        m_output->setVolume(float(m_volume) / 100);
+    }
+    return m_output.get();
+}
 bool Playback::shutdown() {
     if (m_shutdown || m_shutdownInProgress) return m_shutdownSaved;
     m_shutdownInProgress = true;
@@ -152,8 +161,8 @@ void Playback::load(qint64 id, bool autoplay, bool resume) {
         emit error("未检测到音频输出设备，请连接耳机或音箱后再播放。");
     }
     if (!m_decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS") && !QMediaDevices::defaultAudioOutput().isNull()) {
-        m_output.setDevice(QMediaDevices::defaultAudioOutput());
-        m_player.setAudioOutput(&m_output);
+        audioOutput()->setDevice(QMediaDevices::defaultAudioOutput());
+        m_player.setAudioOutput(audioOutput());
     }
     m_loading = true;
     m_autoStart = autoplay;
@@ -183,7 +192,7 @@ void Playback::play(const QVector<qint64> &ids, qint64 id) {
         return;
     }
     if (!m_decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))
-        m_player.setAudioOutput(&m_output);
+        m_player.setAudioOutput(audioOutput());
     sample();
     finish();
     haltTransport();
@@ -217,7 +226,7 @@ void Playback::toggle() {
             return;
         }
         if (!m_decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))
-            m_player.setAudioOutput(&m_output);
+            m_player.setAudioOutput(audioOutput());
         if (m_midi) {
             if (!m_midiBackend->play()) { onError(m_midiBackend->error()); return; }
             m_midiPlaying = true;
@@ -305,7 +314,8 @@ void Playback::setMode(Mode m) {
 }
 void Playback::setVolume(int v) {
     if (m_shutdown) return;
-    m_output.setVolume(float(qBound(0, v, 100)) / 100);
+    m_volume = qBound(0, v, 100);
+    if (m_output) m_output->setVolume(float(m_volume) / 100);
     m_library->setSetting("volume", qBound(0, v, 100));
 }
 bool Playback::saveQueue() {

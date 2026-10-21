@@ -5,6 +5,8 @@ Temporary test EXEs/DLL are removed afterwards. Does not use real user data,
 credentials or paid APIs. The package must be a fresh staging directory.
 """
 import argparse
+import ctypes
+from ctypes import wintypes
 import json
 from pathlib import Path
 import re
@@ -42,6 +44,7 @@ def main():
             process = subprocess.run([str(exe), *map(str, arguments)], cwd=cwd or out, env=env,
                                      stdout=stdout, stderr=stderr, timeout=timeout, startupinfo=process_startup)
         results.append({"name": name, "exit": process.returncode, "seconds": time.perf_counter() - start})
+        (out / "program-results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
         assert process.returncode == 0, results[-1]
         print(json.dumps(results[-1]), flush=True)
 
@@ -111,11 +114,34 @@ def main():
             assert process.poll() is None, process.returncode
             time.sleep(.05)
         assert player, "Launcher did not show Widgets"
-        for hwnd in support["windows"](player): assert support["u"].PostMessageW(hwnd, 0x10, 0, 0)
-        assert process.wait(timeout=20) == 0
-        assert not (owned & support["processes"]().keys()), "Owned process survived normal close"
+        # The launcher deliberately detaches after its 2.5-second loader check.
+        # Its exit cannot establish that its GUI child has finished closing.
+        kernel = support["k"]
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        child = kernel.OpenProcess(0x100000 | 0x1000, False, player)
+        assert child, "Cannot monitor the launched GUI child"
+        closing = time.perf_counter()
+        try:
+            for hwnd in support["windows"](player): assert support["u"].PostMessageW(hwnd, 0x10, 0, 0)
+            launcher_code = process.wait(timeout=20)
+            child_wait = kernel.WaitForSingleObject(child, max(0, int((20 - (time.perf_counter() - closing)) * 1000)))
+            child_code = wintypes.DWORD()
+            assert kernel.GetExitCodeProcess(child, ctypes.byref(child_code))
+            remaining = sorted(owned & support["processes"]().keys())
+            launcher_result = {"launcherExit": launcher_code, "childWait": child_wait,
+                "childExit": child_code.value, "closeMs": (time.perf_counter() - closing) * 1000,
+                "remainingOwned": remaining}
+            (out / "launcher-result.json").write_text(json.dumps(launcher_result, indent=2), encoding="utf-8")
+            assert launcher_code == 0 and child_wait == 0 and child_code.value == 0, launcher_result
+            assert not remaining, "Owned process survived normal close"
+        finally:
+            kernel.CloseHandle(child)
     created_data = (package / "data").resolve()
     assert created_data.parent == package and created_data.name == "data"
+    assert not (created_data / "relaxer.lock").exists(), "Launcher child did not release its data lock"
     assert (runtime / "startup.log").is_file(), "First launcher run must log inside runtime"
     assert not (out / "startup.log").exists() and not (package / "startup.log").exists()
     proof = json.loads((package / "deployment.json").read_text(encoding="utf-8"))

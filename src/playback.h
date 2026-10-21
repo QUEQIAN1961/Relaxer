@@ -39,7 +39,7 @@ class Playback : public QObject {
     Mode mode() const { return m_queue.mode; }
     const Queue &queue() const { return m_queue; }
     QMediaPlayer *media() { return &m_player; }
-    int volume() const { return qRound(m_output.volume() * 100); }
+    int volume() const { return m_volume; }
     QString roundStatus() const;
   signals:
     void trackChanged();
@@ -51,7 +51,8 @@ class Playback : public QObject {
   private:
     friend class PlaybackDiagnostics; // Controlled clock samples in contract tests.
     Library *m_library;
-    QAudioOutput m_output;
+    std::unique_ptr<QAudioOutput> m_output;
+    int m_volume = 65;
     QMediaPlayer m_player;
     Queue m_queue;
     QTimer m_timer;
@@ -77,5 +78,6 @@ class Playback : public QObject {
     void stopMidi();
     bool startMidi(const QString &path, bool autoplay);
     bool ensurePlayable(const Track &track, bool autoplay);
+    QAudioOutput *audioOutput();
 };
 } // namespace relaxer

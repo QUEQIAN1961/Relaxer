@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QScopeGuard>
 #include <QSqlError>
 #include <QTemporaryDir>
 #include <QUuid>
@@ -372,6 +373,30 @@ class PlaybackFacadeTests : public QObject {
         QTRY_VERIFY(!facade.playing());
         QVERIFY(facade.backend()->media()->source().isEmpty());
         QVERIFY(!facade.backend()->media()->audioOutput());
+    }
+    void isolatedPlaybackDoesNotConstructPhysicalOutput() {
+        QTemporaryDir dir;
+        Library library(dir.filePath("data"));
+        QVERIFY(library.open());
+        const auto previous = qgetenv("RELAXER_SKIP_AUDIO_DEVICE_TESTS");
+        const bool wasSet = qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS");
+        const auto restore = qScopeGuard([&] {
+            if (wasSet) qputenv("RELAXER_SKIP_AUDIO_DEVICE_TESTS", previous);
+            else qunsetenv("RELAXER_SKIP_AUDIO_DEVICE_TESTS");
+        });
+        qputenv("RELAXER_SKIP_AUDIO_DEVICE_TESTS", "1");
+        PlaybackFacade facade(&library);
+        QVERIFY(facade.findChildren<QAudioOutput *>().isEmpty());
+        QVERIFY(!facade.backend()->media()->audioOutput());
+        facade.setVolume(37);
+        QCOMPARE(facade.volume(), 37);
+        QCOMPARE(library.setting("volume").toInt(), 37);
+        QVERIFY(facade.shutdown());
+        qunsetenv("RELAXER_SKIP_AUDIO_DEVICE_TESTS");
+        PlaybackFacade decodeOnly(&library, nullptr, true);
+        QVERIFY(decodeOnly.findChildren<QAudioOutput *>().isEmpty());
+        QVERIFY(!decodeOnly.backend()->media()->audioOutput());
+        QVERIFY(decodeOnly.shutdown());
     }
     void endOfMediaKeepsQueueRules_data() {
         QTest::addColumn<int>("mode");
