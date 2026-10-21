@@ -233,6 +233,7 @@ private slots:
                 {"labelVisible",label->isVisible()},{"text",label->property("text").toString()},{"inkPixels",ink},
                 {"rendered",visible},{"frameSwapsBefore",before},{"frameSwapsAfter",frames.size()},
                 {"panelY",panel->y()},{"panelHeight",panel->height()},{"windowWidth",w->width()},{"windowHeight",w->height()}});
+            record("import-main-frame",allSamples.last().toObject());
             if(screenshot){const auto path=QDir(output).filePath(QString("%1-import-%2-%3-%4.png").arg(++serial,4,10,QChar('0')).arg(theme).arg(scenario).arg(ms));QVERIFY(image.save(path));}
         };
         qint64 tracks=0;
@@ -250,6 +251,10 @@ private slots:
                 if(name=="missing"&&timer.elapsed()>250&&timer.elapsed()<400){
                     QVERIFY(shell.appBridge()->navigate(3));w->resize(1000,660);
                     QVERIFY(QMetaObject::invokeMethod(dialog,"open"));QVERIFY(QMetaObject::invokeMethod(dialog,"close"));
+                    // Native resize and QML anchor polish are asynchronous.
+                    // Observe the resized geometry before checking its bounds.
+                    QTRY_COMPARE(panel->width(),double(w->width()));
+                    QTRY_VERIFY(panel->y()+panel->height()<=w->height());
                 }
                 sample(name,timer.elapsed(),rendered==0||timer.elapsed()>3700&&timer.elapsed()<3850);
                 const auto row=allSamples.last().toObject();if(row["rendered"].toBool()&&!row["busy"].toBool())++rendered;
