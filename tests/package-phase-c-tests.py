@@ -37,7 +37,8 @@ class PackagingPolicy(unittest.TestCase):
     def test_reject_residue_before_creating_output(self):
         for name in ["runtime/startup.log", "runtime/qt.LOG", "data/keep.txt", "runtime/test.sqlite-wal",
                      "runtime/old.db-shm", "runtime/music.mp3", "runtime/test.mid", "runtime/.env",
-                     "runtime/private.key", "runtime/.cache/cache", "runtime/item.qmlc"]:
+                     "runtime/private.key", "runtime/.cache/cache", "runtime/item.qmlc",
+                     "runtime/relaxer_qml_c6_evidence_tests.exe", "runtime/Qt6Test.dll"]:
             with self.subTest(name=name):
                 file = self.stage / name
                 file.parent.mkdir(parents=True, exist_ok=True)

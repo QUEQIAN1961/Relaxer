@@ -21,6 +21,7 @@ def main():
     for name in ("source", "build", "qt-prefix", "quick-prefix", "destination"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--ffmpeg-bin", type=Path)
+    parser.add_argument("--git", default=shutil.which("git"), help="Git executable; pass explicitly in a sanitized tool PATH")
     parser.add_argument("--verification-proof", type=Path,
                         help="Native QA proof from a separate candidate; binds the three built binaries")
     args = parser.parse_args()
@@ -32,9 +33,10 @@ def main():
     version = re.search(r'Version\[\]\s*=\s*"([^"]+)"', header)[1]
     display = re.search(r'Display\[\]\s*=\s*"([^"]+)"', header)[1]
     fingerprint = (build / "relaxer-source-fingerprint.txt").read_text(encoding="utf-8").strip()
-    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
-    tree = subprocess.check_output(["git", "show", "-s", "--format=%T", "HEAD"], cwd=source, text=True).strip()
-    assert not subprocess.check_output(["git", "status", "--porcelain"], cwd=source, text=True).strip(), "Deploy from clean committed source"
+    if not args.git: parser.error("Git is unavailable; provide --git with its executable path")
+    commit = subprocess.check_output([args.git, "rev-parse", "HEAD"], cwd=source, text=True).strip()
+    tree = subprocess.check_output([args.git, "show", "-s", "--format=%T", "HEAD"], cwd=source, text=True).strip()
+    assert not subprocess.check_output([args.git, "status", "--porcelain"], cwd=source, text=True).strip(), "Deploy from clean committed source"
     binaries = ["Relaxer.exe", "RelaxerStart.exe", "RelaxerQmlUi.dll"]
     binary_hashes = {name: hashlib.sha256((build / name).read_bytes()).hexdigest() for name in binaries}
     verified = False
@@ -125,7 +127,7 @@ def main():
         "本包为开发方验证的候选构建，正式验收状态见随包交付报告。\n",
         encoding="utf-8")
     if verified:
-        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": version, "displayVersion": display,
+        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": "1.5.0", "displayVersion": display,
             "windows_only_path": True, "audio_decode": True, "qml_window": True,
             "audio_device_required": False, "media_clock": False}), encoding="utf-8")
     proof = {"version": version, "displayVersion": display, "sourceFingerprint": fingerprint, "sourceCommit": commit, "sourceTree": tree,

@@ -26,7 +26,7 @@ def inventory(stage):
         lower = relative.lower(); parts = lower.split("/"); name = parts[-1]
         forbidden = (file.suffix.lower() in media | {".log", ".tmp", ".dmp", ".pyc", ".qmlc", ".pem", ".pfx", ".key"}
             or ".sqlite" in name or name.endswith((".db", ".db-wal", ".db-shm"))
-            or name == ".env" or name.startswith(".env.")
+            or name == ".env" or name.startswith(".env.") or name.endswith("_tests.exe") or name == "qt6test.dll"
             or any(p in {"data", "__pycache__", ".git", ".cache", "cmakefiles", "browser-translation"} for p in parts))
         if forbidden: raise ValueError(f"Runtime residue or private input is forbidden: {relative}")
         entries[relative] = hashlib.sha256(file.read_bytes()).hexdigest()
