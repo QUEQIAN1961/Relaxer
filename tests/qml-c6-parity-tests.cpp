@@ -98,16 +98,33 @@ private slots:
         QWidget ownedForeground;ownedForeground.setWindowTitle("Relaxer owned shortcut test");ownedForeground.resize(260,90);
         ownedForeground.show();ownedForeground.raise();ownedForeground.activateWindow();
         QVERIFY(QTest::qWaitForWindowActive(&ownedForeground));
-        QCOMPARE(GetForegroundWindow(),reinterpret_cast<HWND>(ownedForeground.winId()));
-        QVERIFY(pressGlobal());QTRY_COMPARE(fixture.shell->playbackBridge()->volume(),50);
+        const bool interactive=GetForegroundWindow()!=nullptr;
+        UINT registeredId=0;
+        if(interactive){
+            QCOMPARE(GetForegroundWindow(),reinterpret_cast<HWND>(ownedForeground.winId()));
+            QVERIFY(pressGlobal());
+        }else{
+            // A service/isolated desktop can expose Qt windows but have no OS
+            // foreground window. Do not inject input into an unknown desktop
+            // or claim physical-key dispatch. Verify the registered native
+            // handler, then the real OS thread-message queue below.
+            MSG message{};message.message=WM_HOTKEY;qintptr result=0;
+            for(UINT id=1;id<0xbfff;++id){message.wParam=id;
+                if(integration->nativeEventFilter("windows_dispatcher_MSG",&message,&result)){registeredId=id;break;}}
+            QVERIFY(registeredId);
+        }
+        QTRY_COMPARE(fixture.shell->playbackBridge()->volume(),50);
         integration->setShortcutRecording(true);
         {Reservation released(VK_F24);QVERIFY(released.registered);}
         integration->setShortcutRecording(false);
-        QVERIFY(pressGlobal());QTRY_COMPARE(fixture.shell->playbackBridge()->volume(),55);
+        if(interactive)QVERIFY(pressGlobal());
+        else QVERIFY(PostThreadMessageW(GetCurrentThreadId(),WM_HOTKEY,registeredId,MAKELPARAM(MOD_CONTROL|MOD_ALT|MOD_SHIFT,VK_F24)));
+        QTRY_COMPARE(fixture.shell->playbackBridge()->volume(),55);
         fixture.shell.reset();
         {Reservation destroyed(VK_F24);QVERIFY(destroyed.registered);}
-        record("native-global-shortcuts",{{"osRegistration",true},{"conflictRollback",true},{"ownedOtherWindowForeground",true},
-            {"osSendInputDispatch",true},{"recordingReleasesAndRestores",true},{"destructionReleases",true},{"finalVolume",55}});
+        record("native-global-shortcuts",{{"osRegistration",true},{"conflictRollback",true},{"ownedOtherWindowForeground",interactive},
+            {"osSendInputDispatch",interactive},{"osKeyboardDispatchStatus",interactive?"EXECUTED":"NOT EXECUTED: OS foreground window unavailable"},
+            {"nativeThreadMessageDispatch",!interactive},{"recordingReleasesAndRestores",true},{"destructionReleases",true},{"finalVolume",55}});
 #else
         record("native-global-shortcuts",{{"status","NOT EXECUTED: Windows-only registration"}});
 #endif
