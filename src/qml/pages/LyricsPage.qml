@@ -61,22 +61,23 @@ Item {
         Item{
             id:lyricSide;Layout.fillWidth:true;Layout.fillHeight:true;Layout.preferredWidth:page.width/2;opacity:page.detailsOpacity
             LyricsList{id:lyrics;anchors.fill:parent}
-            HoverHandler{onPointChanged:{page.toolsVisible=true;idle.restart()} onHoveredChanged:if(hovered){page.toolsVisible=true;idle.restart()}}
+            HoverHandler{onPointChanged:{page.toolsVisible=true;if(!tools.opened)idle.restart()} onHoveredChanged:if(hovered){page.toolsVisible=true;if(!tools.opened)idle.restart()}}
             ToolButton{
                 id:question;objectName:"lyricToolsQuestion";width:20;height:20;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.rightMargin:26;anchors.bottomMargin:6
                 text:"?";font.pixelSize: 14;opacity:page.toolsVisible||tools.opened?1:0;enabled:opacity>0
                 background:Rectangle{radius:10;color:Theme.hover;border.color:Theme.border}
+                onHoveredChanged: { if(hovered) {page.toolsVisible=true;idle.stop()} else if(!tools.hovered) idle.restart() }
                 onClicked:{if(tools.opened)tools.close();else{page.delayOpen=false;tools.open()}}
                 Behavior on opacity{NumberAnimation{duration:settingsBridge.values.reduceMotion?0:140}}
             }
-            Timer{id:idle;interval:3000;onTriggered:if(!page.delayOpen&&!tools.hovered){page.toolsVisible=false;tools.close()}}
+            Timer{id:idle;interval:3000;onTriggered:if(!question.hovered&&!tools.hovered){page.toolsVisible=false;tools.close()}}
             Popup { popupType: Popup.Item;
                 id:tools;objectName:"lyricToolsMenu";property bool hovered:false
                 x:Math.max(0,lyricSide.width-width-28);y:Math.max(0,lyricSide.height-height-30)
                 width:page.delayOpen?320:210;padding:12
                 closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutside
                 background:Rectangle{radius:12;color:Theme.card;border.color:Theme.border}
-                HoverHandler{onHoveredChanged:{tools.hovered=hovered;if(hovered)idle.stop();else if(!page.delayOpen)idle.restart()}}
+                HoverHandler{onHoveredChanged:{tools.hovered=hovered;if(hovered)idle.stop();else if(!question.hovered)idle.restart()}}
                 onClosed:{page.delayOpen=false;idle.restart()}
                 contentItem:ColumnLayout{
                     spacing:8

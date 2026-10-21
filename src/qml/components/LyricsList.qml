@@ -7,14 +7,48 @@ Item {
     objectName: "lyricsPanel"
     property bool manualScroll: false
     property bool reduceMotion: settingsBridge.values.reduceMotion
-    function centerCurrent() {
-        if (!manualScroll && lyricsModel.currentIndex >= 0)
-            list.positionViewAtIndex(lyricsModel.currentIndex, ListView.Center)
+    readonly property int previewIndex: {
+        const center = list.contentY + list.mapFromItem(panel, 0, panel.height / 2).y
+        let nearest = -1, distance = Number.MAX_VALUE
+        const items = list.contentItem.children
+        for (let i = 0; i < items.length; ++i) {
+            const item = items[i]
+            if (item.objectName !== "lyricDelegate") continue
+            const delta = Math.abs(item.y + item.height / 2 - center)
+            if (delta < distance) { nearest = item.index; distance = delta }
+        }
+        return nearest
     }
+    function takeOver() {
+        followMotion.stop()
+        manualScroll = true
+        returnIdle.restart()
+    }
+    function returnCurrent() {
+        returnIdle.stop()
+        manualScroll = false
+        panel.centerCurrent()
+    }
+    function centerCurrent() {
+        if (manualScroll || lyricsModel.currentIndex < 0) return
+        followMotion.stop()
+        const before = list.contentY
+        list.forceLayout()
+        list.positionViewAtIndex(lyricsModel.currentIndex, ListView.Center)
+        const destination = list.contentY
+        list.contentY = before
+        if (Math.abs(destination - before) < 0.5) return
+        followMotion.from = before
+        followMotion.to = destination
+        followMotion.restart()
+    }
+    NumberAnimation { id: followMotion; objectName: "lyricsFollowMotion"; target: list; property: "contentY"; duration: 360; easing.type: Easing.OutCubic }
+    Timer { id: returnIdle; interval: 3000; onTriggered: { if (list.dragging || list.flicking || lyricBar.pressed) restart(); else panel.returnCurrent() } }
     Connections {
         target: lyricsModel
+        function onModelAboutToBeReset() { followMotion.stop(); list.cancelFlick() }
         function onCurrentIndexChanged() { panel.centerCurrent() }
-        function onDocumentChanged() { if (lyricsModel.trackKey !== list.documentKey) { list.documentKey = lyricsModel.trackKey; panel.manualScroll = false }; Qt.callLater(panel.centerCurrent) }
+        function onDocumentChanged() { if (lyricsModel.trackKey !== list.documentKey) { list.documentKey = lyricsModel.trackKey; panel.manualScroll = false; returnIdle.stop() }; Qt.callLater(panel.centerCurrent) }
     }
     ColumnLayout {
         anchors.fill: parent; spacing: 8
@@ -22,7 +56,7 @@ Item {
             visible: lyricsModel.preview || panel.manualScroll || lyricsModel.loading || lyricsModel.error.length > 0
             Layout.fillWidth: true
             UiText { Layout.fillWidth: true; text: lyricsModel.status; wrapMode: Text.Wrap; color: lyricsModel.preview ? Theme.accent : Theme.secondary; font.pixelSize: 14; textFormat: Text.PlainText }
-            ShellButton { objectName: "lyricsReturnCurrent"; visible: panel.manualScroll && lyricsModel.timed; text: "回到当前歌词"; onClicked: { panel.manualScroll = false; panel.centerCurrent() } }
+            ShellButton { objectName: "lyricsReturnCurrent"; visible: panel.manualScroll && lyricsModel.timed; text: "回到当前歌词"; onClicked: panel.returnCurrent() }
         }
         UiText { Layout.fillWidth: true; visible: lyricsModel.error.length > 0; text: lyricsModel.error; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.accent }
         Item {
@@ -36,8 +70,9 @@ Item {
             spacing: 4; boundsBehavior: Flickable.StopAtBounds
             header: Item { width: 1; height: list.height / 2 }
             footer: Item { width: 1; height: list.height / 2 }
-            onDraggingChanged: if (dragging) panel.manualScroll = true
-            ScrollBar.vertical: ScrollBar { onPressedChanged: if (pressed) panel.manualScroll = true }
+            onDraggingChanged: { if (dragging) panel.takeOver(); else if (panel.manualScroll) returnIdle.restart() }
+            onFlickingChanged: if (!flicking && panel.manualScroll) returnIdle.restart()
+            ScrollBar.vertical: ScrollBar { id: lyricBar; onPressedChanged: { if (pressed) panel.takeOver(); else if (panel.manualScroll) returnIdle.restart() } }
             delegate: Item {
                 id: row
                 objectName: "lyricDelegate"
@@ -73,12 +108,23 @@ Item {
                         color: Theme.secondary; font.pixelSize: 17
                     }
                 }
-                TapHandler { onTapped: { if (lyricsModel.seekRow(row.index)) { panel.manualScroll = false; panel.centerCurrent() } } }
+                TapHandler { onTapped: if (lyricsModel.seekRow(row.index)) panel.returnCurrent() }
             }
           }
           // A viewport sibling: ListView's contentItem may have zero width.
-          MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; onWheel: wheel => { panel.manualScroll = true; wheel.accepted = false } }
+          MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; onWheel: wheel => { panel.takeOver(); wheel.accepted = false } }
           EmptyState { anchors.centerIn: parent; width: Math.min(parent.width - 20, 420); visible: lyricsModel.count === 0; heading: lyricsModel.loading ? "正在读取" : "让音乐，留一点空白"; description: lyricsModel.status }
         }
+    }
+    ShellButton {
+        objectName: "lyricsPreviewTime"
+        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+        z: 3; visible: panel.manualScroll && lyricsModel.timed && panel.previewIndex >= 0
+        text: {
+            const ms = panel.previewIndex >= 0 ? Number(lyricsModel.timestampAt(panel.previewIndex)) : 0
+            return Math.floor(ms / 60000) + ":" + String(Math.floor(ms / 1000) % 60).padStart(2, "0") + "  ▶"
+        }
+        Accessible.name: "播放中线对应歌词 " + text
+        onClicked: { const index = panel.previewIndex; if (lyricsModel.seekRow(index)) panel.returnCurrent() }
     }
 }

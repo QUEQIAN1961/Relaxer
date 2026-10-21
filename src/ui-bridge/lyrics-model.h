@@ -37,6 +37,7 @@ public:
     QUrl cover() const {return m_cover;}
     Q_INVOKABLE bool setOffsetMs(int value);
     Q_INVOKABLE bool seekRow(int row);
+    Q_INVOKABLE qint64 timestampAt(int row) const { return row>=0&&row<m_rows.size()?m_rows[row].time:0; }
     Q_INVOKABLE void reload();
     Q_INVOKABLE bool importLocalLyrics(const QUrl &file);
     void presentTranslation(const TranslationSummary &summary);

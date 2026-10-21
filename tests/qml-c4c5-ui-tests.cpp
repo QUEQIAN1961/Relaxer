@@ -37,6 +37,10 @@ private slots:
         const auto y=list->property("contentY").toReal();facade->seek(12000);QTRY_COMPARE(f.shell->lyricsModel()->currentIndex(),12);
         QTest::qWait(60);QCOMPARE(list->property("contentY").toReal(),y);
         auto *back=visual(window->contentItem(),"lyricsReturnCurrent");QVERIFY(back);QVERIFY(QMetaObject::invokeMethod(back,"click"));QVERIFY(!panel->property("manualScroll").toBool());
+        // Returning is now deliberately animated. Wait for completion before
+        // clicking the final delegate; retain the original seek assertion.
+        auto *follow=window->findChild<QObject *>("lyricsFollowMotion");QVERIFY(follow);
+        QTRY_VERIFY(!follow->property("running").toBool());
         QQuickItem *target=nullptr;for(auto *row:delegates(list))if(row->property("index").toInt()==12)target=row;QVERIFY(target);
         const auto hit=target->mapToScene(QPointF(target->width()/2,target->height()/2)).toPoint();
         QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,hit);QTRY_VERIFY(qAbs(facade->position()-12000)<200);
