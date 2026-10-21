@@ -3,6 +3,7 @@
 #include "playback-facade.h"
 #include <QAbstractListModel>
 #include <QVariantList>
+#include <QSet>
 namespace relaxer {
 class LyricsSearchBridge final:public QAbstractListModel {
     Q_OBJECT
@@ -28,7 +29,7 @@ public:
     QString targetTitle()const;QString targetArtist()const;QString sourceText()const;
     QVariantList targetTracks()const;
     Q_INVOKABLE bool setTargetTrack(const QString &key);
-    Q_INVOKABLE bool setTargetTracks(const QStringList &keys,bool missingOnly=false);
+    Q_INVOKABLE bool setTargetTracks(const QStringList &keys,bool missingOnly=false,bool showCompleted=false);
     Q_INVOKABLE bool search(bool confirmed=false);
     Q_INVOKABLE bool searchTargets(bool confirmed=false);
     Q_INVOKABLE bool searchQuery(const QString &title,const QString &artist,const QString &fragment,bool confirmed=false,bool requireTimed=false);
@@ -48,6 +49,8 @@ private:
     QVector<qint64> m_targets;
     QHash<qint64,Track> m_targetRows;
     QHash<qint64,QString> m_trackStatus;
+    QHash<qint64,LyricsSearchState> m_trackState;
+    QSet<qint64> m_cachedChoices;
     bool m_missingOnly=false;
     qint64 targetId()const{return m_target?m_target:m_facade->current().id;}
     bool saveBytes(const QByteArray &bytes,bool confirmed);

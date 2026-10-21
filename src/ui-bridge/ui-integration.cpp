@@ -24,7 +24,7 @@ void UiIntegration::attach(QQuickWindow *window){
         connect(m_menu->addAction("播放 / 暂停"),&QAction::triggered,this,[this]{dispatch(0);});
         connect(m_menu->addAction("上一首"),&QAction::triggered,this,[this]{dispatch(1);});
         connect(m_menu->addAction("下一首"),&QAction::triggered,this,[this]{dispatch(2);});
-        m_menu->addSeparator();connect(m_menu->addAction("退出播放器"),&QAction::triggered,this,[this]{if(m_window){m_window->setProperty("allowClose",true);m_window->close();}});
+        m_menu->addSeparator();connect(m_menu->addAction("退出播放器"),&QAction::triggered,this,[this]{if(m_window)QMetaObject::invokeMethod(m_window,"requestQuit");});
         m_tray=std::make_unique<QSystemTrayIcon>(QIcon(":/icon.svg"));m_tray->setToolTip("Relaxer");m_tray->setContextMenu(m_menu.get());
         connect(m_tray.get(),&QSystemTrayIcon::activated,this,[this](auto reason){if(reason==QSystemTrayIcon::Trigger||reason==QSystemTrayIcon::DoubleClick){m_window->show();m_window->raise();m_window->requestActivate();}});
     }

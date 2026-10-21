@@ -183,6 +183,103 @@ private slots:
         }
         Library reopened(data);QVERIFY(reopened.open());QCOMPARE(reopened.trackCount(),count);record("import-reopened",{{"tracks",double(reopened.trackCount())},{"connections",QSqlDatabase::connectionNames().size()}});
     }
+    void userReviewExitWarnsAndOnlyConfirmationStopsSearch(){
+        QTest::failOnWarning(QRegularExpression("QProcess: Destroyed while process.*"));
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();
+        auto *service=f.shell->findChild<LyricsSearchCoordinator *>();QVERIFY(service);
+        Track missing;missing.title="Unfinished search";missing.hash="unfinished-search";missing.file="Music/unfinished-search.wav";missing.duration=60000;missing.id=f.library.insert(missing);QVERIFY(missing.id);QVERIFY(wave(f.library.absolute(missing.file)));
+        // All actions below occur before processing the queued search pump.
+        // This exercises the real start/close/cancel path without contacting a source.
+        auto *bridge=f.shell->lyricsSearchBridge();QVERIFY(bridge->setTargetTracks({QString::number(missing.id)},true));
+        QVERIFY(bridge->searchTargets(true));QVERIFY(bridge->busy());
+        QVERIFY(!w->close());auto *confirm=w->findChild<QObject *>("closeTasksConfirmation");QVERIFY(confirm);QVERIFY(confirm->property("visible").toBool());
+        auto *body=qvariant_cast<QQuickItem *>(confirm->property("contentItem"));QVERIFY(body);QVERIFY(body->property("text").toString().contains("还有歌词尚未查找完毕"));
+        QVERIFY(QMetaObject::invokeMethod(confirm,"reject"));QVERIFY(f.shell->lyricsSearchBridge()->busy());QVERIFY(w->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(w,"requestQuit"));QVERIFY(confirm->property("visible").toBool());QVERIFY(QMetaObject::invokeMethod(confirm,"accept"));
+        QVERIFY(!f.shell->lyricsSearchBridge()->busy());QCOMPARE(service->summary().requests,0);
+        record("unfinished-search-exit",{{"warningShown",true},{"rejectedExitKeptTask",true},{"confirmedExitStoppedTask",true},{"networkRequests",service->summary().requests}});
+        QVERIFY(f.shell->shutdown());
+    }
+    void userReviewCompletedWorkspaceCanAlwaysOpen(){
+        Fixture f(2);QVERIFY(prepare(f));auto *w=f.shell->window();
+        const QVariant keys=QStringList{QString::number(f.a.id),QString::number(f.b.id)};
+        QVERIFY(QMetaObject::invokeMethod(w,"openLyricsTools",Q_ARG(QVariant,keys),Q_ARG(QVariant,QVariant(true))));
+        auto *workspace=w->findChild<QObject *>("lyricsWorkspace");QVERIFY(workspace);QTRY_VERIFY(workspace->property("visible").toBool());
+        const auto rows=f.shell->lyricsSearchBridge()->targetTracks();QCOMPARE(rows.size(),2);
+        for(const auto &value:rows){const auto row=value.toMap();QCOMPARE(row["searchState"].toString(),QString("complete"));
+            auto *icon=visual(w->contentItem(),"lyricsStateIcon-"+row["trackKey"].toString());QVERIFY(icon);QCOMPARE(icon->property("text").toString(),QString("✓"));}
+        record("completed-search-workspace-reopened",{{"tracks",QJsonArray::fromVariantList(rows)}});shot(w,"completed-search-workspace");
+    }
+    void userReviewSmoothReturnAndFixedTimestamp(){
+        Fixture f(60);QVERIFY(prepare(f));auto *w=f.shell->window();auto *p=f.shell->facade();auto *m=f.shell->lyricsModel();
+        QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toDouble()>.999);QTRY_COMPARE(m->count(),60);QTRY_VERIFY(p->seekable());
+        auto *panel=visual(w->contentItem(),"lyricsPanel");auto *list=visual(w->contentItem(),"lyricsList");QVERIFY(panel&&list);
+        auto *follow=w->findChild<QObject *>("lyricsFollowMotion");QVERIFY(follow);
+        for(bool reduced:{false,true}){
+            QVERIFY(f.shell->settingsBridge()->setPreference("reduceMotion",reduced));
+            p->seek(reduced?4000:24000);QTRY_COMPARE(m->currentIndex(),reduced?4:24);
+            QJsonArray samples;QElapsedTimer timer;timer.start();QSet<int> positions;
+            while(timer.elapsed()<500){const auto y=list->property("contentY").toDouble();positions.insert(qRound(y));samples.append(QJsonObject{{"ms",double(timer.elapsed())},{"y",y},{"running",follow->property("running").toBool()}});QTest::qWait(20);}
+            record("smooth-scroll-with-reduce-motion",{{"reduceMotion",reduced},{"frames",samples},{"distinctPositions",positions.size()}});QVERIFY(positions.size()>3);
+        }
+        const auto point=list->mapToScene(QPointF(list->width()/2,list->height()/2));
+        auto wheel=[&]{QWheelEvent event(point,w->mapToGlobal(point.toPoint()),QPoint(),QPoint(0,-120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);event.setTimestamp(++QTest::lastMouseTimestamp);QCoreApplication::sendEvent(w,&event);};
+        wheel();QTRY_VERIFY(panel->property("manualScroll").toBool());QTest::qWait(80);QVERIFY(QMetaObject::invokeMethod(list,"cancelFlick"));
+        list->setProperty("contentY",list->property("contentY").toDouble()+800);QTest::qWait(70);
+        auto *stamp=visual(w->contentItem(),"lyricsPreviewTime");QVERIFY(stamp);QVERIFY(stamp->isVisible());
+        const auto fixedY=rect(stamp).center().y();QVERIFY(qAbs(fixedY-rect(panel).center().y())<1);
+        const auto selected=panel->property("previewIndex").toInt();QVERIFY(selected>=0);const auto time=m->timestampAt(selected);
+        record("fixed-preview-timestamp",{{"row",selected},{"ms",double(time)},{"label",stamp->property("text").toString()},{"fixedY",fixedY}});shot(w,"manual-scroll-timestamp");
+        QVERIFY(QMetaObject::invokeMethod(stamp,"click"));QTRY_VERIFY(qAbs(p->position()-time)<250);QTRY_VERIFY(!panel->property("manualScroll").toBool());QTRY_VERIFY(!follow->property("running").toBool());
+        wheel();QTest::qWait(2300);QVERIFY(panel->property("manualScroll").toBool());wheel();
+        QTest::mouseMove(w,point.toPoint());QTest::qWait(1000);QVERIFY(panel->property("manualScroll").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(!panel->property("manualScroll").toBool(),3500);
+        record("three-second-return",{{"resetBySecondWheel",true},{"hoverDidNotBlockReturn",true},{"manualScroll",panel->property("manualScroll").toBool()}});
+        QTRY_VERIFY(!follow->property("running").toBool());QVERIFY(!stamp->isVisible());
+    }
+    void userReviewToolsOnlyHideAfterLeavingQuestionAndMenu(){
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toDouble()>.999);
+        auto *panel=visual(w->contentItem(),"lyricsPanel");auto *question=visual(w->contentItem(),"lyricToolsQuestion");QVERIFY(panel&&question);
+        QTRY_VERIFY(!w->property("coverTravelling").toBool());
+        QTest::mouseMove(w,QPoint(30,40));QTest::qWait(60);
+        QTest::mouseMove(w,rect(panel).center().toPoint());QTest::qWait(200);
+        record("question-hover-initial",{{"opacity",question->opacity()},{"panelVisible",panel->isVisible()},{"panelX",rect(panel).x()},{"panelY",rect(panel).y()},{"panelWidth",panel->width()},{"panelHeight",panel->height()}});shot(w,"question-hover-initial");QTRY_VERIFY(question->opacity()>.99);
+        QTest::mouseMove(w,rect(question).center().toPoint());QTest::qWait(3150);QVERIFY(question->opacity()>.99);
+        QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(question).center().toPoint());
+        auto *menu=w->findChild<QObject *>("lyricToolsMenu");QVERIFY(menu);QTRY_VERIFY(menu->property("visible").toBool());
+        auto *body=qvariant_cast<QQuickItem *>(menu->property("contentItem"));QVERIFY(body);
+        QTest::mouseMove(w,rect(body).center().toPoint());QTest::qWait(3150);QVERIFY(menu->property("visible").toBool());
+        auto *art=visual(w->contentItem(),"currentArtwork");QVERIFY(art);QTest::mouseMove(w,rect(art).center().toPoint());
+        QTest::qWait(1500);QVERIFY(menu->property("visible").toBool());QTRY_VERIFY_WITH_TIMEOUT(!menu->property("visible").toBool(),2500);
+        record("question-menu-idle",{{"staysWhileQuestionHovered",true},{"staysWhileMenuHovered",true},{"closedAfterLeavingBoth",true}});
+    }
+    void userReviewPageFramesAndSettingsLayout(){
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();QVERIFY(f.shell->settingsBridge()->setTheme(0));
+        auto *paper=visual(w->contentItem(),"paperSurface");QVERIFY(paper);
+        for(int destination:{1,3,0}){
+            auto *button=visual(w->contentItem(),"navigation"+QString::number(destination));QVERIFY(button);
+            QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(button).center().toPoint());
+            QElapsedTimer timer;timer.start();QJsonArray frames;int darkest=255;
+            while(timer.elapsed()<500){
+                const auto image=w->grabWindow();QVERIFY(!image.isNull());const auto area=rect(paper);const auto dpr=image.devicePixelRatio();
+                int light=255;for(double fraction:{.2,.5,.8}){const auto c=image.pixelColor(qRound((area.x()+5)*dpr),qRound((area.y()+area.height()*fraction)*dpr));light=qMin(light,qGray(c.rgb()));}
+                darkest=qMin(darkest,light);frames.append(QJsonObject{{"ms",double(timer.elapsed())},{"edgeBrightness",light}});QTest::qWait(12);
+            }
+            record("sidebar-no-black-frame",{{"destination",destination},{"darkestPaddingPixel",darkest},{"frames",frames}});QVERIFY2(darkest>100,"Light-theme page padding flashed black");
+        }
+        f.shell->appBridge()->navigate(3);QTest::qWait(80);
+        auto *cover=visual(w->contentItem(),"playerCoverBackground");auto *reduce=visual(w->contentItem(),"reduceMotionSetting");QVERIFY(cover&&reduce);
+        QVERIFY(qAbs(rect(cover).center().y()-rect(reduce).center().y())<1);QVERIFY(rect(reduce).left()>rect(cover).left());
+        auto *settings=visual(w->contentItem(),"settingsScroll");QVERIFY(settings);auto *flick=qvariant_cast<QQuickItem *>(settings->property("contentItem"));QVERIFY(flick);QCOMPARE(flick->property("boundsBehavior").toInt(),0);
+        auto *shortcuts=visual(w->contentItem(),"shortcutsPage");auto *app=visual(w->contentItem(),"shortcut-app-toggle");auto *global=visual(w->contentItem(),"shortcut-global-toggle");QVERIFY(shortcuts&&app&&global);
+        const auto a=rect(app),g=rect(global);
+        record("settings-widths-raw",{{"appWidth",a.width()},{"globalWidth",g.width()},{"cardWidth",shortcuts->width()}});shot(w,"settings-widths-raw");
+        QVERIFY(qAbs(a.width()-g.width())<1);QVERIFY(a.width()>180);
+        QVERIFY(rect(shortcuts).right()-g.right()<65);
+        record("settings-review-layout",{{"appWidth",a.width()},{"globalWidth",g.width()},{"remainingRight",rect(shortcuts).right()-g.right()},{"boundsBehavior",flick->property("boundsBehavior").toInt()}});
+        flick->setProperty("contentY",qMax(0.,flick->property("contentHeight").toDouble()-flick->height()));shot(w,"settings-review-layout");
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
 };
 int main(int argc,char **argv){QApplication app(argc,argv);app.setStyle("Fusion");app.setQuitOnLastWindowClosed(false);C6EvidenceTests tests;return QTest::qExec(&tests,argc,argv);}
 #include "qml-c6-evidence-tests.moc"

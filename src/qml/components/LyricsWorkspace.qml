@@ -102,7 +102,12 @@ ConfirmDialog {
                             spacing: 4
                             UiText { width: parent.width; text: modelData.title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
                             UiText { width: parent.width; text: modelData.artist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
-                            UiText { width: parent.width; text: modelData.status || (modelData.lyricsAvailable ? "已有本地歌词" : "缺失歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                            RowLayout {
+                                width: parent.width; spacing: 5
+                                BusyIndicator { objectName: "lyricsStateSpinner-" + modelData.trackKey; Layout.preferredWidth: 18; Layout.preferredHeight: 18; visible: modelData.searchState === "searching"; running: visible }
+                                UiText { objectName: "lyricsStateIcon-" + modelData.trackKey; text: modelData.searchState === "complete" ? "✓" : modelData.searchState === "choice" ? "⚠" : ""; visible: text.length > 0; color: modelData.searchState === "complete" ? "#249c58" : "#d78816"; font.pixelSize: 17; font.bold: true }
+                                UiText { Layout.fillWidth: true; text: modelData.status || (modelData.lyricsAvailable ? "已有本地歌词" : "缺失歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                            }
                         }
                         onClicked: workspace.chooseTarget(modelData.trackKey)
                     }

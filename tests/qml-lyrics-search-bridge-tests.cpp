@@ -20,6 +20,27 @@ QJsonObject record(const Track &t){return {{"id",1234},{"trackName",t.title},{"a
 class QmlLyricsSearchBridgeTests:public QObject {
     Q_OBJECT
 private slots:
+    void reviewCompletedAndChoiceStatesSurviveBridgeRecreation(){
+        QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        const auto a=seed(lib,"Saved","saved"),b=seed(lib,"Choice","choice"),c=seed(lib,"Unfinished","unfinished");
+        QVERIFY(lib.saveLyrics(a.id,"[00:01.00]Saved lyrics\n"));QVERIFY(lib.saveLookupCache(b.id,QJsonArray{record(b)},false));
+        const QStringList keys{QString::number(a.id),QString::number(b.id),QString::number(c.id)};
+        FakeNetwork network;PlaybackFacade player(&lib,nullptr,true);
+        {
+            LyricsSearchCoordinator service(&lib,nullptr,QUrl("https://mock.invalid/api"),{},&network);LyricsSearchBridge model(&lib,&player,&service);
+            QVERIFY(model.setTargetTracks(keys,true,true));auto rows=model.targetTracks();QCOMPARE(rows.size(),3);
+            QCOMPARE(rows[0].toMap()["searchState"].toString(),QString("complete"));QCOMPARE(rows[1].toMap()["searchState"].toString(),QString("choice"));QCOMPARE(rows[2].toMap()["searchState"].toString(),QString("incomplete"));QCOMPARE(network.calls,0);
+            QVERIFY(model.setTargetTrack(QString::number(b.id)));QVERIFY(model.select(0));QVERIFY(model.saveSelected(model.selectedKey(),true));
+            QCOMPARE(model.targetTracks()[1].toMap()["searchState"].toString(),QString("complete"));service.shutdown();
+        }
+        {
+            LyricsSearchCoordinator service(&lib,nullptr,QUrl("https://mock.invalid/api"),{},&network);LyricsSearchBridge model(&lib,&player,&service);
+            QVERIFY(model.setTargetTracks(keys,true,true));QCOMPARE(model.targetTracks()[1].toMap()["searchState"].toString(),QString("complete"));QCOMPARE(network.calls,0);
+            bool searching=false;connect(&model,&LyricsSearchBridge::changed,this,[&]{for(const auto &row:model.targetTracks())searching|=row.toMap()["searchState"].toString()=="searching";});
+            QVERIFY(model.searchTargets(true));QTRY_VERIFY_WITH_TIMEOUT(searching,3000);model.stop();QVERIFY(!model.busy());service.shutdown();
+        }
+        QVERIFY(player.shutdown());QCOMPARE(QSqlDatabase::connectionNames().size(),1);
+    }
     void cachedCandidatesStayLocalAndRequireExactSaveConsent(){
         QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());const auto track=seed(lib,"Alpha","alpha");QVERIFY(wave(lib.absolute(track.file)));
         const QByteArray original="[00:01.00]Existing lyric\n";QVERIFY(lib.saveLyrics(track.id,original));QVERIFY(lib.saveLookupCache(track.id,QJsonArray{record(track)},false));

@@ -28,6 +28,9 @@ ColumnLayout {
         Layout.fillHeight: true
         contentWidth: availableWidth
         clip: true
+        function stopAtEdges() { if (contentItem && contentItem.boundsBehavior !== undefined) contentItem.boundsBehavior = Flickable.StopAtBounds }
+        Component.onCompleted: Qt.callLater(stopAtEdges)
+        onContentItemChanged: Qt.callLater(stopAtEdges)
         ColumnLayout {
             width: scroll.availableWidth
             spacing: 18
@@ -108,6 +111,12 @@ ColumnLayout {
                             checked: settingsBridge.values.playerCoverBackground
                             onClicked: settingsBridge.setPreference("playerCoverBackground", checked)
                         }
+                    CheckBox {
+                        objectName: "reduceMotionSetting"
+                        text: "减少动画"
+                        checked: settingsBridge.values.reduceMotion
+                        onClicked: settingsBridge.setPreference("reduceMotion", checked)
+                    }
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -153,12 +162,6 @@ ColumnLayout {
                     RowLayout{Layout.fillWidth:true;UiText { text: appBridge.version; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold;Layout.fillWidth:true } ShellButton{text:"版本日志";flat:true;onClicked:page.versionLogRequested()}}
                     UiText { text: "为本地音乐留一个安静的位置。"; color: Theme.secondary; font.pixelSize: 14 }
                     UiText { text: "本地音乐播放器 · 支持联网查找歌词"; color: Theme.secondary; font.pixelSize: 14 }
-                    CheckBox {
-                        objectName: "reduceMotionSetting"
-                        text: "减少动画"
-                        checked: settingsBridge.values.reduceMotion
-                        onClicked: settingsBridge.setPreference("reduceMotion", checked)
-                    }
                 }
             }
             UiText { Layout.fillWidth: true; text: settingsBridge.status; wrapMode: Text.Wrap; color: Theme.accent; textFormat: Text.PlainText }

@@ -369,6 +369,10 @@ void LyricsSearchCoordinator::detachRequests(const JobPtr &j) {
     if (j->probe) {
         j->probe->disconnect(this);
         j->probe->kill();
+        // kill() is asynchronous on Windows. Do not schedule QObject deletion
+        // while the native child is still running, especially during exit.
+        if (j->probe->state() != QProcess::NotRunning)
+            j->probe->waitForFinished(1000);
         j->probe->deleteLater();
         j->probe = nullptr;
     }

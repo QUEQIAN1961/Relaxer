@@ -38,39 +38,44 @@ Rectangle {
             color: Theme.secondary
             font.pixelSize: 14
         }
-        GridLayout {
+        ColumnLayout {
             Layout.fillWidth: true
-            columns: 3
-            columnSpacing: 18
-            rowSpacing: 9
-            UiText { text: "功能"; color: Theme.secondary; font.pixelSize: 14 }
-            UiText { text: "应用内"; color: Theme.secondary; font.pixelSize: 14 }
-            UiText { text: "全局"; color: Theme.secondary; font.pixelSize: 14 }
+            spacing: 9
+            RowLayout {
+                Layout.fillWidth: true; spacing: 18
+                UiText { text: "功能"; Layout.minimumWidth: 100; Layout.maximumWidth: 100; color: Theme.secondary; font.pixelSize: 14 }
+                UiText { text: "应用内"; Layout.fillWidth: true; Layout.preferredWidth: 1; color: Theme.secondary; font.pixelSize: 14 }
+                UiText { text: "全局"; Layout.fillWidth: true; Layout.preferredWidth: 1; color: Theme.secondary; font.pixelSize: 14 }
+            }
             Repeater {
                 model: settingsBridge.shortcutActions
-                delegate: RowLayout {
+                delegate: Row {
                     id: actionRow
                     required property var modelData
-                    Layout.columnSpan: 3
                     Layout.fillWidth: true
+                    Layout.preferredWidth: content.width
+                    Layout.preferredHeight: 42
+                    width: content.width
+                    height: 42
                     spacing: 18
-                    UiText { text: modelData.name; Layout.preferredWidth: 100; color: Theme.text }
+                    UiText { text: modelData.name; width: 100; height: 42; verticalAlignment: Text.AlignVCenter; color: Theme.text }
                     Repeater {
                         model: ["app", "global"]
-                        delegate: RowLayout {
+                        delegate: Row {
                             id: binding
                             required property string modelData
                             readonly property string scope: modelData
                             readonly property string action: actionRow.modelData.key
-                            Layout.fillWidth: true
-                            Layout.preferredWidth: Math.max(160,(page.width-180)/2)
+                            width: Math.max(0, (content.width - 136) / 2)
+                            height: 42
                             spacing: 4
                             EntryField {
                                 id: input
                                 objectName: "shortcut-" + binding.scope + "-" + binding.action
-                                Layout.fillWidth: true
-                                Layout.minimumWidth: 100
-                                Layout.preferredWidth: 180
+                                width: Math.max(0, binding.width - clearBinding.width - 4)
+                                height: 42
+                                horizontalAlignment: TextInput.AlignLeft
+                                onTextChanged: cursorPosition = 0
                                 readOnly: true
                                 placeholderText: "点击后按组合键"
                                 text: page.configuration[binding.scope][binding.action] || ""
@@ -82,7 +87,7 @@ Rectangle {
                                     page.setBinding(binding.scope, binding.action, settingsBridge.shortcutText(event.key, event.modifiers))
                                 }
                             }
-                            ToolButton { text: "×"; Accessible.name: "清除此快捷键"; onClicked: page.setBinding(binding.scope, binding.action, "") }
+                            ToolButton { id: clearBinding; width: 28; height: 42; text: "×"; Accessible.name: "清除此快捷键"; onClicked: page.setBinding(binding.scope, binding.action, "") }
                         }
                     }
                 }

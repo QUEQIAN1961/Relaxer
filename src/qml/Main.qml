@@ -34,6 +34,9 @@ ApplicationWindow {
     property bool wasMaximized: false
     property int fullscreenRevision: 0
     property bool allowClose: false
+    property bool exitRequested: false
+    property var navigationAction: null
+    property int snapshotRevision: 0
     property bool awaitingImportClose: false
     readonly property Item popupLayer: contentItem.Overlay.overlay
     property real playerProgress: 0
@@ -129,15 +132,23 @@ ApplicationWindow {
         }
         pendingPageAction = null
         const revision=++navigationRevision
+        snapshotWarmup.stop(); navigationAction=null; oldPage.visible=false
         pageOut.stop(); pageIn.stop(); pageSurface.opacity=1; pageSurface.y=0
         if (lyricsOpen) animatePlayer(false)
         if (settingsBridge.values.reduceMotion || !pageSurface.visible) { root.clearBulk();action(); return }
         pageSurface.grabToImage(function(grab) {
             if (revision!==navigationRevision) return
-            pageGrab=grab; oldPage.source=grab.url; oldPage.opacity=1; oldPage.scale=1; oldPage.visible=true
-            root.clearBulk(); action(); pageSurface.opacity=0; pageOut.restart()
+            pageGrab=grab; snapshotRevision=revision; navigationAction=action
+            oldPage.opacity=.001; oldPage.scale=1; oldPage.source=grab.url
+            if(oldPage.status===Image.Ready) warmSnapshot()
         })
     }
+    function warmSnapshot() {
+        if(snapshotRevision!==navigationRevision || !navigationAction)return
+        oldPage.visible=true
+        snapshotWarmup.restart()
+    }
+    function requestQuit() { exitRequested=true; root.close() }
     function navigateOriginal(index) {
         changePage(function() {
             settingsSection="settings"
@@ -151,7 +162,7 @@ ApplicationWindow {
     function openPlaylist(key) { changePage(function(){if(libraryBridge.openPlaylist(key))appBridge.navigate(0)}) }
     function openLyricsTools(keys,missingOnly) {
         if (!keys || !keys.length) return
-        if (!lyricsSearchBridge.setTargetTracks(keys,!!missingOnly)) { toast.show("没有需要处理的歌曲"); return }
+        if (!lyricsSearchBridge.setTargetTracks(keys,!!missingOnly,true)) { toast.show("没有需要处理的歌曲"); return }
         if (!lyricsSearchBridge.targetTracks.length) { toast.show("没有需要处理的歌曲"); return }
         const target=lyricsSearchBridge.targetTracks[0].trackKey
         lyricsSearchBridge.setTargetTrack(target); translationBridge.setTargetTrack(target)
@@ -181,8 +192,8 @@ ApplicationWindow {
     Shortcut {sequence:"Ctrl+F";onActivated:{root.navigateOriginal(0);searchFocus.restart()}}
     Timer{id:searchFocus;interval:260;onTriggered:localPage.focusSearch()}
     onClosing: close => {
-        if (!allowClose && (importBridge.busy || translationBridge.unfinished)) { close.accepted=false; closeConfirm.open() }
-        else if(!allowClose && settingsBridge.values.closeToTray && uiIntegration.trayAvailable){close.accepted=false;root.hide();uiIntegration.showTray()}
+        if (!allowClose && (importBridge.busy || translationBridge.unfinished || lyricsSearchBridge.busy)) { close.accepted=false; closeConfirm.open() }
+        else if(!allowClose && !exitRequested && settingsBridge.values.closeToTray && uiIntegration.trayAvailable){close.accepted=false;root.hide();uiIntegration.showTray()}
     }
     onWidthChanged: windowSave.restart()
     onHeightChanged: windowSave.restart()
@@ -261,7 +272,7 @@ ApplicationWindow {
                     }
                 }
             }
-            Image { id:oldPage;anchors.fill:parent;visible:false;fillMode:Image.Stretch }
+            Image { id:oldPage;anchors.fill:parent;visible:false;fillMode:Image.Stretch;cache:false;asynchronous:false;onStatusChanged:if(status===Image.Ready)root.warmSnapshot() }
         }
         Item {
             id: playerClip;objectName:"playerBackdropClip"
@@ -414,13 +425,23 @@ ApplicationWindow {
         id:pageOut
         NumberAnimation{target:oldPage;property:"opacity";to:0;duration:84;easing.type:Easing.OutCubic}
         NumberAnimation{target:oldPage;property:"scale";to:.99;duration:84;easing.type:Easing.OutCubic}
-        onFinished:{oldPage.visible=false;pageSurface.y=-7;pageIn.restart()}
+        onFinished:{oldPage.visible=false}
     }
     ParallelAnimation {
         id:pageIn
         NumberAnimation{target:pageSurface;property:"opacity";to:1;duration:136;easing.type:Easing.OutCubic}
         NumberAnimation{target:pageSurface;property:"y";to:0;duration:136;easing.type:Easing.OutCubic}
-        onFinished:{root.pageGrab=null;oldPage.source=""}
+        onFinished:{root.pageGrab=null;oldPage.visible=false;oldPage.source=""}
+    }
+    Timer {
+        id:snapshotWarmup;interval:32
+        onTriggered:{
+            if(root.snapshotRevision!==root.navigationRevision||!root.navigationAction)return
+            const action=root.navigationAction;root.navigationAction=null
+            oldPage.opacity=1;root.clearBulk();action()
+            pageSurface.opacity=.001;pageSurface.y=-7
+            pageOut.restart();pageIn.restart()
+        }
     }
     ImportDialog{id:importDialog;parent:root.popupLayer}
     PlaylistEditor{id:playlistEditor;parent:root.popupLayer;onCreated:key=>root.openPlaylist(key)}
@@ -429,7 +450,8 @@ ApplicationWindow {
     ConfirmDialog {
         id:closeConfirm;parent:root.popupLayer;objectName:"closeTasksConfirmation";anchors.centerIn:parent;width:Math.min(480,root.width-40);modal:true
         title:"结束当前任务并退出？";standardButtons:Dialog.Ok|Dialog.Cancel
-        contentItem:Label{text:"退出将取消尚未完成的导入和翻译，并放弃未保存的翻译预览。已经导入的曲目会保留；已发送请求可能仍产生费用。";wrapMode:Text.Wrap}
-        onAccepted:{if(importBridge.busy){root.awaitingImportClose=true;importBridge.beginShutdown()}else{root.allowClose=true;root.close()}}
+        contentItem:Label{text:(lyricsSearchBridge.busy?"还有歌词尚未查找完毕，确认退出将中断查找。\n":"")+"退出将取消尚未完成的导入和翻译，并放弃未保存的翻译预览。已经保存的结果会保留；已发送的 AI 请求可能仍产生费用。";wrapMode:Text.Wrap}
+        onRejected:root.exitRequested=false
+        onAccepted:{lyricsSearchBridge.stop();if(importBridge.busy){root.awaitingImportClose=true;importBridge.beginShutdown()}else{root.allowClose=true;root.close()}}
     }
 }

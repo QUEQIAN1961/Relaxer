@@ -59,7 +59,7 @@ class QmlFoundationTests final : public QObject {
         QVERIFY(shell.load()); QVERIFY(shell.load());
         auto *window = shell.window(); QVERIFY(window);
         QVERIFY(window->isVisible());
-        QCOMPARE(window->title(), QString("Relaxer V0.2.1-dev-c4c5-ui2-fix1 · QML"));
+        QCOMPARE(window->title(), QString::fromLatin1(phaseC::WindowTitle) + QStringLiteral(" · QML"));
         QCOMPARE(shell.appBridge()->version(), QString::fromLatin1(phaseC::Display));
         QVERIFY(window->minimumWidth() >= 900); QVERIFY(window->minimumHeight() >= 600);
         QCOMPARE(QSqlDatabase::connectionNames(), connections);
@@ -222,7 +222,7 @@ class QmlFoundationTests final : public QObject {
         QCOMPARE(result["mode"].toString(), mode == "qml" ? QString("qml") : QString("widgets"));
         QCOMPARE(result["databaseConnections"].toInt(), 1); QCOMPARE(result["playbackInstances"].toInt(), 1);
         QVERIFY(result["saveSucceeded"].toBool());
-        QVERIFY(result["title"].toString().contains("V0.2.1-dev-c4c5-ui2-fix1"));
+        QVERIFY(result["title"].toString().contains(QString::fromLatin1(phaseC::Display)));
         QVERIFY(!QFile::exists(dir.filePath("must-not-open")));
         QVERIFY(!QFile::exists(data + "/data")); QVERIFY(!QFile::exists(data + "/relaxer.lock"));
         Library reopened(data); QVERIFY(reopened.open()); QCOMPARE(reopened.tracks().size(), 1);
