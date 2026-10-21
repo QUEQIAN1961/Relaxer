@@ -211,8 +211,11 @@ class QmlFoundationTests final : public QObject {
         process.setProcessEnvironment(env);
         QStringList args{"--data", data, "--diagnostics", report, "--quit-after", "300"};
         if (!mode.isEmpty()) args << "--ui=" + mode;
+        QSignalSpy ended(&process, &QProcess::finished);
         process.start(appPath(), args);
-        const bool finished = process.waitForFinished(15000);
+        // Native Windows children may exchange window/theme messages with the
+        // host. Keep its event loop responsive; retain the same 15s deadline.
+        const bool finished = !ended.isEmpty() || ended.wait(15000);
         const auto failure = process.readAllStandardError();
         const auto detail = QJsonDocument(readJson(report)).toJson();
         QVERIFY2(finished, (QByteArray("Child timeout: ") + failure + " / " + process.errorString().toUtf8() + detail).constData());

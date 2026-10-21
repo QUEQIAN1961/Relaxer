@@ -109,6 +109,20 @@ def main():
             command = f'"{copy / "RelaxerQml.cmd"}" --data "{absent}"'
             run(f'{cmd} /d /s /c "{command}"', tag + "-cmd", 11)
             assert not absent.exists()
+            # Restore the original bytes in this same disposable copy, then
+            # prove both entry points work again rather than inferring it
+            # from a different complete installation.
+            for filename in missing:
+                shutil.copy2(package / "runtime" / filename, runtime / filename)
+            for mode in ("widgets", "qml"):
+                restored_image = out / (tag + "-restored-" + mode + ".png")
+                restored_report = out / (tag + "-restored-" + mode + ".json")
+                run([exe, "--ui=" + mode, "--data", data, "--screenshot", restored_image,
+                     "--diagnostics", restored_report], tag + "-restored-" + mode)
+                restored = json.loads(restored_report.read_text(encoding="utf-8"))
+                assert restored["saveSucceeded"] and restored["databaseConnections"] == 1 and restored["playbackInstances"] == 1
+                assert restored_image.stat().st_size > 1024
+            assert snapshot(database) == before
         else:
             image = out / (tag + "-qml.png")
             report = out / (tag + "-qml.json")
@@ -127,6 +141,7 @@ def main():
         row = {"path": str(copy), "missing": missing, "widgetsVisible": True, "localAndSettings": True,
                "lockExit": 3, "qmlExit": 11 if missing else 0, "cmdExit": 11 if missing else 0,
                "existingFilesUnchangedOnLoadFailure": bool(missing), "dataIdentityPreserved": True,
+               "restoredBothUis": bool(missing),
                "remainingOwned": [], "widgets": proof}
         results.append(row)
         (out / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

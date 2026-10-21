@@ -36,7 +36,7 @@ def main():
         visible_startup = subprocess.STARTUPINFO()
         visible_startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         visible_startup.wShowWindow = 5
-        native_gui = name in ("relaxer_qml_c6_evidence_tests", "relaxer_qml_c6_parity_tests")
+        native_gui = Path(exe).name.lower() == "relaxer.exe" or name.endswith("_tests")
         process_startup = visible_startup if name.endswith("-navigation") or native_gui else startup
         with (out / (name + ".stdout")).open("wb") as stdout, (out / (name + ".stderr")).open("wb") as stderr:
             process = subprocess.run([str(exe), *map(str, arguments)], cwd=cwd or out, env=env,
