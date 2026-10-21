@@ -20,6 +20,39 @@ QJsonObject record(const Track &t){return {{"id",1234},{"trackName",t.title},{"a
 class QmlLyricsSearchBridgeTests:public QObject {
     Q_OBJECT
 private slots:
+    void selectedBatchKeepsFullReviewListAndOnlySearchesChosenTracks(){
+        QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        const auto a=seed(lib,"A","selected-a"),b=seed(lib,"B","selected-b"),c=seed(lib,"C","selected-c");
+        FakeNetwork network;PlaybackFacade player(&lib,nullptr,true);
+        LyricsSearchCoordinator service(&lib,nullptr,QUrl("https://mock.invalid/api"),{},&network);LyricsSearchBridge model(&lib,&player,&service);
+        const QStringList keys{QString::number(a.id),QString::number(b.id)};QVERIFY(model.setTargetTracks(keys,false,true));
+        QVERIFY(!model.searchTracks({},true));QVERIFY(!model.searchTracks({QString::number(c.id)},true));
+        QVERIFY(!model.searchTracks({QString::number(b.id)},false));QCOMPARE(network.calls,0);
+        QList<qint64> events;connect(&service,&LyricsSearchCoordinator::eventOccurred,this,[&](const auto &event){events.append(event.trackId);});
+        QVERIFY(model.searchTracks({QString::number(b.id),QString::number(b.id)},true));
+        QCOMPARE(service.summary().requested,1);QCOMPARE(model.targetTracks().size(),2);
+        QTRY_VERIFY_WITH_TIMEOUT(!model.busy(),5000);QVERIFY(!events.isEmpty());
+        for(auto id:events)QCOMPARE(id,b.id);
+        QCOMPARE(model.targetTracks()[0].toMap()["trackKey"].toString(),keys[0]);
+        QCOMPARE(model.targetTracks()[1].toMap()["trackKey"].toString(),keys[1]);service.shutdown();QVERIFY(player.shutdown());
+    }
+    void missingTranslationUsesLocalAssessmentAndHumanJudgment(){
+        QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        const auto a=seed(lib,"Foreign","foreign"),b=seed(lib,"Bilingual","bilingual"),c=seed(lib,"Missing","missing"),d=seed(lib,"中文","chinese");
+        QVERIFY(lib.saveLyrics(a.id,"[00:01.00]Hello my friend\n[00:03.00]We walk together\n"));
+        QVERIFY(lib.saveLyrics(b.id,QString("[00:01.00]Hello friend\n[00:01.00]朋友你好\n[00:02.00]Goodbye friend\n[00:02.00]朋友再见\n").toUtf8()));
+        QVERIFY(lib.saveLyrics(d.id,QString("[00:01.00]今天的风很温柔\n[00:03.00]我们一起走回家\n").toUtf8()));
+        FakeNetwork network;PlaybackFacade player(&lib,nullptr,true);LyricsSearchCoordinator service(&lib,nullptr,QUrl("https://mock.invalid/api"),{},&network);
+        LyricsSearchBridge model(&lib,&player,&service);
+        QVERIFY(model.setTargetTracks({QString::number(a.id),QString::number(b.id),QString::number(c.id),QString::number(d.id)},false,true));
+        auto rows=model.targetTracks();QVERIFY(rows[0].toMap()["translationMissing"].toBool());
+        for(int i=1;i<4;++i)QVERIFY(!rows[i].toMap()["translationMissing"].toBool());
+        QVERIFY(lib.setTranslationJudgment(a.id,TranslationJudgment::NoTranslationNeeded));QVERIFY(!model.targetTracks()[0].toMap()["translationMissing"].toBool());
+        QVERIFY(lib.setTranslationJudgment(c.id,TranslationJudgment::NeedsTranslation));QVERIFY(model.targetTracks()[2].toMap()["translationMissing"].toBool());
+        QVERIFY(lib.setTranslationJudgment(a.id,TranslationJudgment::Unknown));
+        QVERIFY(lib.saveLyrics(a.id,QString("[00:01.00]Hello friend\n[00:01.00]朋友你好\n[00:02.00]Goodbye friend\n[00:02.00]朋友再见\n").toUtf8()));
+        QVERIFY(!model.targetTracks()[0].toMap()["translationMissing"].toBool());QCOMPARE(network.calls,0);service.shutdown();QVERIFY(player.shutdown());
+    }
     void reviewUnsavedReplacementStaysOrangeAfterRestart(){
         QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());const auto t=seed(lib,"Alpha","review-existing");QVERIFY(wave(lib.absolute(t.file)));
         QVERIFY(lib.saveLyrics(t.id,"[00:01.00]Existing local lyrics\n"));FakeNetwork network;network.body=QJsonDocument(QJsonArray{record(t)}).toJson(QJsonDocument::Compact);PlaybackFacade player(&lib,nullptr,true);

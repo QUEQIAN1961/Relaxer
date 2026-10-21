@@ -32,6 +32,7 @@ public:
     Q_INVOKABLE bool setTargetTracks(const QStringList &keys,bool missingOnly=false,bool showCompleted=false);
     Q_INVOKABLE bool search(bool confirmed=false);
     Q_INVOKABLE bool searchTargets(bool confirmed=false);
+    Q_INVOKABLE bool searchTracks(const QStringList &keys,bool confirmed=false);
     Q_INVOKABLE bool searchQuery(const QString &title,const QString &artist,const QString &fragment,bool confirmed=false,bool requireTimed=false);
     Q_INVOKABLE bool searchDetailed(const QString &title,const QString &artist,const QString &album,const QString &fragment,bool confirmed=false,bool requireTimed=false,bool replace=false);
     Q_INVOKABLE bool saveText(const QString &text,bool confirmed=false);
@@ -53,6 +54,9 @@ private:
     QSet<qint64> m_cachedChoices;
     QSet<qint64> m_pendingReviews;
     bool m_missingOnly=false;
+    mutable QHash<qint64,QPair<QByteArray,bool>> m_translationCache;
+    bool translationMissing(const Track &track)const;
+    bool startTargets(const QVector<qint64> &ids,bool confirmed,bool missingOnly);
     qint64 targetId()const{return m_target?m_target:m_facade->current().id;}
     bool saveBytes(const QByteArray &bytes,bool confirmed);
     void resetForTrack();

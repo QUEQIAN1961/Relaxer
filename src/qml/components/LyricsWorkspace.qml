@@ -4,16 +4,65 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import "../theme"
 
-ConfirmDialog {
+Page {
     id: workspace
     objectName: "lyricsWorkspace"
-    modal: true
-    closePolicy: Popup.NoAutoClose
-    anchors.centerIn: parent
-    width: Math.min(1180, parent ? parent.width - 60 : 1180)
-    height: Math.min(760, parent ? parent.height - 60 : 760)
+    visible: false
+    anchors.fill: parent
+    focus: visible
+    readonly property bool opened: visible
+    signal aboutToShow()
+    signal closed()
+    function open() { aboutToShow(); visible = true; forceActiveFocus() }
+    function close() { visible = false; closed() }
     padding: 18
     spacing: 12
+    property var selectedTracks: []
+    property int targetRevision: 0
+    ListModel { id: targetRows }
+    function acceptsRow(row) {
+        return (!missingLyrics.checked || !row.lyricsAvailable) && (!missingTranslation.checked || row.translationMissing)
+    }
+    function visibleKeys() {
+        const revision = targetRevision
+        const keys = []
+        for (let i = 0; i < targetRows.count; ++i) {
+            const row = targetRows.get(i)
+            if (acceptsRow(row)) keys.push(row.trackKey)
+        }
+        return keys
+    }
+    function searchKeys() {
+        const keys = visibleKeys()
+        return multiSelect.checked ? keys.filter(key => selectedTracks.indexOf(key) >= 0) : keys
+    }
+    function toggleTrack(key) {
+        const keys = selectedTracks.slice(); const index = keys.indexOf(key)
+        if (index < 0) keys.push(key); else keys.splice(index, 1)
+        selectedTracks = keys
+    }
+    function syncTargets() {
+        const rows = lyricsSearchBridge.targetTracks
+        let rebuild = rows.length !== targetRows.count
+        for (let i = 0; !rebuild && i < rows.length; ++i)
+            rebuild = rows[i].trackKey !== targetRows.get(i).trackKey
+        if (rebuild) {
+            targetRows.clear()
+            for (let i = 0; i < rows.length; ++i) targetRows.append(rows[i])
+            selectedTracks = selectedTracks.filter(key => rows.some(row => row.trackKey === key))
+        } else {
+            // Update roles in place: status signals must not reset ListView or its scroll position.
+            for (let i = 0; i < rows.length; ++i) targetRows.set(i, rows[i])
+        }
+        ++targetRevision
+    }
+    function startTargetSearch() {
+        if (lyricsSearchBridge.busy) { lyricsSearchBridge.stop(); return }
+        if (multiSelect.checked || missingLyrics.checked || missingTranslation.checked)
+            lyricsSearchBridge.searchTracks(searchKeys(), true)
+        else lyricsSearchBridge.searchTargets(true)
+    }
+    Connections { target: lyricsSearchBridge; function onChanged() { workspace.syncTargets() } }
     property bool allowClose: false
     property string localStatus: ""
     property string fileTargetKey: "0"
@@ -51,7 +100,7 @@ ConfirmDialog {
         if (sourceActionsEnabled && !lyricsSearchBridge.busy)
             lyricsSearchBridge.searchDetailed(songTitle.text, songArtist.text, songAlbum.text, fragment.text, true, syncedOnly.checked, replaceExisting.checked)
     }
-    onAboutToShow: { allowClose = false; updateQuery(); previewTabs.currentIndex = translationBridge.preview ? 1 : 0 }
+    onAboutToShow: { syncTargets(); allowClose = false; updateQuery(); previewTabs.currentIndex = translationBridge.preview ? 1 : 0 }
     onClosed: {
         consent.close()
         lyricsSearchBridge.stop()
@@ -69,55 +118,78 @@ ConfirmDialog {
         enabled: workspace.opened && !consent.opened && !leaveConfirm.opened && !replaceConfirm.opened && !discardConfirm.opened && !pasteDialog.opened && !instrumentalConfirm.opened
         onActivated: workspace.requestClose()
     }
-    background: Rectangle { color: Theme.background; radius: 14; border.color: Theme.border }
+    background: Rectangle { color: Theme.background }
     header: Item {
         implicitHeight: 45
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 12
+            ShellButton { objectName: "lyricsWorkspaceClose"; text: "‹ 返回"; flat: true; implicitHeight: 36; Accessible.name: "返回上一页"; onClicked: workspace.requestClose() }
             Label { text: "查找歌词"; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
-            ToolButton {implicitWidth:36;implicitHeight:36;background:Rectangle{radius:8;color:parent.hovered?Theme.hover:"transparent"} objectName: "lyricsWorkspaceClose"; text: "×"; font.pixelSize: 24; Accessible.name: "关闭查找歌词"; onClicked: workspace.requestClose() }
+            Item { Layout.preferredWidth: 126 }
         }
     }
     contentItem: RowLayout {
         spacing: 14
         Rectangle {
-            Layout.preferredWidth: Math.max(160, workspace.availableWidth * .205)
-            Layout.minimumWidth: 150; Layout.fillHeight: true
+            Layout.preferredWidth: Math.max(220, workspace.availableWidth * .25)
+            Layout.minimumWidth: 200; Layout.fillHeight: true
             color: Theme.panel; radius: 10
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 10; spacing: 8
-                Label { text: "歌曲 · " + lyricsSearchBridge.targetTracks.length; color: Theme.text; font.weight: Font.DemiBold }
+                Label { text: "歌曲 · " + workspace.visibleKeys().length + (multiSelect.checked ? " · 已选 " + workspace.searchKeys().length : ""); color: Theme.text; font.weight: Font.DemiBold }
+                CheckBox { id: missingLyrics; objectName: "lyricsMissingOnly"; text: "仅显示无歌词"; implicitHeight: 28; onToggled: if (checked) missingTranslation.checked = false }
+                CheckBox { id: missingTranslation; objectName: "lyricsMissingTranslationOnly"; text: "仅显示缺失翻译"; implicitHeight: 28; onToggled: if (checked) missingLyrics.checked = false }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 2
+                    CheckBox { id: multiSelect; objectName: "lyricsMultiSelect"; text: "多选"; implicitHeight: 30; onToggled: if (!checked) workspace.selectedTracks = [] }
+                    ShellButton { objectName: "lyricsSelectAll"; text: "全选"; flat: true; implicitHeight: 30; visible: multiSelect.checked; onClicked: workspace.selectedTracks = workspace.visibleKeys() }
+                    ShellButton { objectName: "lyricsClearSelection"; text: "清空"; flat: true; implicitHeight: 30; visible: multiSelect.checked; onClicked: workspace.selectedTracks = [] }
+                }
                 ListView {
                     objectName: "lyricsTargetTracks"
                     Layout.fillWidth: true; Layout.fillHeight: true
-                    clip: true; model: lyricsSearchBridge.targetTracks
+                    clip: true; model: targetRows
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
                     delegate: ItemDelegate {
-                        required property var modelData
-                        width: ListView.view.width; height: 74; padding: 9
-                        highlighted: modelData.trackKey === lyricsSearchBridge.targetTrackKey
+                        required property string trackKey
+                        required property string title
+                        required property string artist
+                        required property string status
+                        required property string searchState
+                        required property bool lyricsAvailable
+                        required property bool translationMissing
+                        objectName: "lyricsTarget-" + trackKey
+                        readonly property bool matchesFilter: (!missingLyrics.checked || !lyricsAvailable) && (!missingTranslation.checked || translationMissing)
+                        visible: matchesFilter
+                        width: ListView.view.width; height: matchesFilter ? 74 : 0; padding: 9
+                        highlighted: trackKey === lyricsSearchBridge.targetTrackKey
+                        Accessible.name: title + " · " + artist + " · " + status
                         background: Rectangle { radius: 7; color: parent.highlighted ? Theme.selected : parent.hovered ? Theme.hover : "transparent" }
-                        contentItem: Column {
-                            spacing: 4
-                            UiText { width: parent.width; text: modelData.title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                            UiText { width: parent.width; text: modelData.artist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
-                            RowLayout {
-                                width: parent.width; spacing: 5
-                                BusyIndicator { objectName: "lyricsStateSpinner-" + modelData.trackKey; Layout.preferredWidth: 18; Layout.preferredHeight: 18; visible: modelData.searchState === "searching"; running: visible }
-                                UiText { objectName: "lyricsStateIcon-" + modelData.trackKey; text: modelData.searchState === "complete" ? "✓" : modelData.searchState === "choice" ? "⚠" : ""; visible: text.length > 0; color: modelData.searchState === "complete" ? "#249c58" : "#d78816"; font.pixelSize: 17; font.bold: true }
-                                UiText { Layout.fillWidth: true; text: modelData.status || (modelData.lyricsAvailable ? "已有本地歌词" : "缺失歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                        contentItem: Item {
+                            implicitHeight: 54
+                            CheckBox { objectName: "lyricsCheck-" + trackKey; x: 0; anchors.verticalCenter: parent.verticalCenter; width: 28; visible: multiSelect.checked; checked: workspace.selectedTracks.indexOf(trackKey) >= 0; onToggled: workspace.toggleTrack(trackKey) }
+                            Item {
+                                id: stateSlot; x: multiSelect.checked ? 30 : 0; anchors.verticalCenter: parent.verticalCenter; width: 26; height: 26
+                                BusyIndicator { objectName: "lyricsStateSpinner-" + trackKey; anchors.fill: parent; visible: searchState === "searching"; running: visible }
+                                UiText { objectName: "lyricsStateIcon-" + trackKey; anchors.fill: parent; text: searchState === "complete" ? "✓" : searchState === "choice" ? "⚠" : ""; visible: text.length > 0; color: searchState === "complete" ? "#249c58" : "#d78816"; font.pixelSize: 20; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            }
+                            Column {
+                                objectName: "lyricsTargetText-" + trackKey
+                                x: stateSlot.x + stateSlot.width + 9; anchors.verticalCenter: parent.verticalCenter; width: Math.max(0, parent.width - x); spacing: 4
+                                UiText { width: parent.width; text: title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                                UiText { width: parent.width; text: artist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
                             }
                         }
-                        onClicked: workspace.chooseTarget(modelData.trackKey)
+                        onClicked: { workspace.chooseTarget(trackKey); if (multiSelect.checked) workspace.toggleTrack(trackKey) }
                     }
                 }
                 ShellButton {
                     objectName: "batchLyricsSearchButton"
                     Layout.fillWidth: true; implicitHeight: 34
                     text: lyricsSearchBridge.busy ? "停止查找" : "开始查找"
-                    enabled: workspace.hasTarget && !workspace.taskNeedsAction
-                    onClicked: { if (lyricsSearchBridge.busy) lyricsSearchBridge.stop(); else lyricsSearchBridge.searchTargets(true) }
+                    enabled: lyricsSearchBridge.busy || (workspace.hasTarget && !workspace.taskNeedsAction && workspace.searchKeys().length > 0)
+                    onClicked: workspace.startTargetSearch()
                 }
                 Label { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: 4; elide: Text.ElideRight }
             }
@@ -158,15 +230,23 @@ ConfirmDialog {
                         required property string album
                         required property string source
                         required property bool timed
-                        width: ListView.view.width; height: visible ? 76 : 0
+                        width: ListView.view.width; height: (!syncedOnly.checked || timed) ? 96 : 0; padding: 10
                         visible: !syncedOnly.checked || timed
                         highlighted: lyricsSearchBridge.selectedKey.endsWith(":" + candidateKey)
                         background: Rectangle { radius: 7; color: parent.highlighted ? Theme.selected : parent.hovered ? Theme.hover : "transparent" }
-                        contentItem: Column {
-                            spacing: 5
-                            UiText { width: parent.width; text: title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                            UiText { width: parent.width; text: artist + (album.length ? " · " + album : ""); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
-                            UiText { width: parent.width; text: source + (timed ? " · 滚动歌词" : " · 普通歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                        objectName: "lyricsCandidate-" + index
+                        contentItem: Item {
+                            implicitHeight: candidateText.implicitHeight
+                            Column {
+                                id: candidateText; objectName: "lyricsCandidateText-" + index; anchors.verticalCenter: parent.verticalCenter; width: parent.width; spacing: 4
+                                RowLayout {
+                                    width: parent.width; spacing: 6
+                                    UiText { Layout.fillWidth: true; text: title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                                    UiText { objectName: "lyricsRecommended-" + index; text: "★ 最推荐"; visible: index === 0; color: Theme.accent; font.pixelSize: 12 }
+                                }
+                                UiText { width: parent.width; text: artist + (album.length ? " · " + album : ""); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                                UiText { width: parent.width; text: source + (timed ? " · 滚动歌词" : " · 普通歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                            }
                         }
                         onClicked: { lyricsSearchBridge.select(index); previewTabs.currentIndex = 0 }
                     }
@@ -242,7 +322,7 @@ ConfirmDialog {
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 18
             Label { Layout.fillWidth: true; text: workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 13; wrapMode: Text.Wrap }
-            ShellButton { objectName: "lyricsSaveClose"; implicitHeight: 34; text: "关闭"; onClicked: workspace.requestClose() }
+
         }
     }
     RoundMenu {

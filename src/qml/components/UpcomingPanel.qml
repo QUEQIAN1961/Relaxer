@@ -61,10 +61,18 @@ Item {
             file: upcomingModel.firstCoverUrl; seed: upcomingModel.firstTitle; revision: upcomingModel.firstCoverRevision
         }
         UiText { fontRegion: "next";
+            id: compactTitle; objectName: "nextCompactTitle"
             visible: !panel.expandedPlayer && !panel.panelExpanded
-            x: upcomingModel.count ? 112 : 80; width: Math.max(0, parent.width - x - 12); height: parent.height
+            x: upcomingModel.count ? 112 : 80; width: Math.min(implicitWidth, Math.max(0, parent.width - x - 12)); height: parent.height
             text: upcomingModel.count ? upcomingModel.firstTitle : "暂无待播放歌曲"
             textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 15; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
+        }
+        TextMetrics { id: artistMinimum; font.family: panel.regionFontFamily; font.pixelSize: 15; text: " — …" }
+        UiText { fontRegion: "next";
+            objectName: "nextCompactArtist"
+            x: compactTitle.x + compactTitle.width; width: Math.max(0, parent.width - x - 12); height: parent.height
+            visible: compactTitle.visible && upcomingModel.count > 0 && upcomingModel.firstArtist.length > 0 && compactTitle.width >= compactTitle.implicitWidth && width >= artistMinimum.advanceWidth
+            text: " — " + upcomingModel.firstArtist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 15; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
         }
         MouseArea {
             id: headerMouse

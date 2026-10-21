@@ -300,6 +300,88 @@ private slots:
         record("unfinished-search-exit",{{"warningShown",true},{"rejectedExitKeptTask",true},{"confirmedExitStoppedTask",true},{"networkRequests",service->summary().requests}});
         QVERIFY(f.shell->shutdown());
     }
+    void lyricsSecondaryPageKeepsScrollSelectionAndCenteredRows(){
+        Fixture f(4);QVERIFY(prepare(f));auto *w=f.shell->window();auto *bridge=f.shell->lyricsSearchBridge();
+        auto *service=f.shell->findChild<LyricsSearchCoordinator *>();QVERIFY(service);
+        QStringList keys{QString::number(f.a.id),QString::number(f.b.id)};
+        const QJsonObject candidate{{"id",12345},{"trackName","A candidate title"},{"artistName","Candidate singer"},{"albumName","Album"},
+            {"syncedLyrics","[00:01.00]Hello friend\n[00:03.00]We walk home\n"},{"source","Local fixture"},{"duration",60}};
+        QVERIFY(f.library.saveLookupCache(f.a.id,QJsonArray{candidate},false));
+        QVERIFY(f.library.setTranslationJudgment(f.a.id,TranslationJudgment::NeedsTranslation));
+        for(int i=0;i<70;++i){const auto t=seed(f.library,QString("Missing %1 中文").arg(i),QString("page-scroll-%1").arg(i));QVERIFY(t.id);keys.append(QString::number(t.id));}
+        const auto playing=f.shell->facade()->current().id;const auto queue=f.shell->facade()->queue().items;
+        const int originalPage=w->property("currentPage").toInt();
+        QVERIFY(QMetaObject::invokeMethod(w,"openLyricsTools",Q_ARG(QVariant,QVariant(keys)),Q_ARG(QVariant,QVariant(true))));
+        auto *page=visual(w->contentItem(),"lyricsWorkspace");QVERIFY(page);QVERIFY(page->isVisible());
+        QCOMPARE(rect(page),QRectF(0,0,w->width(),w->height()));QVERIFY(!visual(w->contentItem(),"playerBar")->isVisible());
+        QVERIFY(!visual(w->contentItem(),"sidebar")->isVisible());
+        auto *list=visual(page,"lyricsTargetTracks");QVERIFY(list);
+        QVERIFY(QMetaObject::invokeMethod(list,"forceLayout"));QTest::qWait(80);
+        auto *icon=visual(page,"lyricsStateIcon-"+keys[0]);auto *text=visual(page,"lyricsTargetText-"+keys[0]);QVERIFY(icon&&text);
+        QVERIFY(qAbs(rect(icon).center().y()-rect(text).center().y())<1.1);
+        auto *recommend=visual(page,"lyricsRecommended-0");auto *candidateRow=visual(page,"lyricsCandidate-0");auto *candidateText=visual(page,"lyricsCandidateText-0");
+        QTRY_VERIFY(recommend&&recommend->isVisible());QVERIFY(candidateRow&&candidateText);
+        QVERIFY(rect(candidateRow).contains(rect(candidateText)));QVERIFY(qAbs(rect(candidateRow).center().y()-rect(candidateText).center().y())<1.1);
+        auto *missing=visual(page,"lyricsMissingOnly"),*translation=visual(page,"lyricsMissingTranslationOnly"),*multi=visual(page,"lyricsMultiSelect");QVERIFY(missing&&translation&&multi);
+        QVERIFY(missing->setProperty("checked",true));QVariant visible;
+        QVERIFY(QMetaObject::invokeMethod(page,"visibleKeys",Q_RETURN_ARG(QVariant,visible)));QCOMPARE(visible.toStringList().size(),70);
+        QVERIFY(missing->setProperty("checked",false));QVERIFY(translation->setProperty("checked",true));
+        QVERIFY(QMetaObject::invokeMethod(page,"visibleKeys",Q_RETURN_ARG(QVariant,visible)));QVERIFY(visible.toStringList().contains(keys[0]));QVERIFY(!visible.toStringList().contains(keys[2]));
+        QVERIFY(translation->setProperty("checked",false));QVERIFY(multi->setProperty("checked",true));
+        for(int i:{8,9})QVERIFY(QMetaObject::invokeMethod(page,"toggleTrack",Q_ARG(QVariant,QVariant(keys[i]))));
+        QVERIFY(list->setProperty("contentY",600.0));QVERIFY(QMetaObject::invokeMethod(list,"forceLayout"));QTest::qWait(30);
+        const auto before=list->property("contentY").toDouble();QVERIFY(before>500);
+        auto *model=qobject_cast<QAbstractItemModel *>(list->property("model").value<QObject *>());QVERIFY(model);
+        QSignalSpy resets(model,&QAbstractItemModel::modelReset);
+        QVariant chosen;QVERIFY(QMetaObject::invokeMethod(page,"searchKeys",Q_RETURN_ARG(QVariant,chosen)));QCOMPARE(chosen.toStringList().size(),2);
+        // Controlled bridge status updates; actual batch transport is covered by FakeNetwork in the bridge suite.
+        for(int i=0;i<120;++i){LyricsSearchEvent event;event.trackId=keys[8+i%2].toLongLong();event.state=LyricsSearchState::Failed;event.status=QString("Progress %1").arg(i);emit service->eventOccurred(event);}
+        QCOMPARE(list->property("contentY").toDouble(),before);QCOMPARE(resets.size(),0);QCOMPARE(page->property("selectedTracks").toList().size(),2);
+        bridge->stop();QCOMPARE(service->summary().requests,0);QTest::qWait(60);
+        QCOMPARE(list->property("contentY").toDouble(),before);QCOMPARE(resets.size(),0);
+        shot(w,"lyrics-secondary-scroll-selection");record("lyrics-secondary-page",{{"scrollBefore",before},{"scrollAfter",list->property("contentY").toDouble()},
+            {"statusSignals",120},{"modelResets",resets.size()},{"selected",2},{"requests",service->summary().requests},{"fullWindow",true}});
+        auto *back=visual(page,"lyricsWorkspaceClose");QVERIFY(back);QVERIFY(QMetaObject::invokeMethod(back,"click"));QTRY_VERIFY(!page->isVisible());
+        QTRY_VERIFY(visual(w->contentItem(),"playerBar")->isVisible());QCOMPARE(w->property("currentPage").toInt(),originalPage);
+        QCOMPARE(f.shell->facade()->current().id,playing);QCOMPARE(f.shell->facade()->queue().items,queue);QVERIFY(f.shell->warnings().isEmpty());
+    }
+    void fullscreenCoverChangesRetainRenderedBackdrop(){
+        Fixture f(4);QVERIFY(prepare(f));auto *w=f.shell->window();
+        QVERIFY(f.shell->settingsBridge()->setTheme(0));QVERIFY(f.shell->settingsBridge()->setPreference("playerCoverBackground",true));
+        QImage art(1024,1024,QImage::Format_RGB32);art.fill(QColor("#204bbf"));const auto blue=f.dir.filePath("next-blue.png");QVERIFY(art.save(blue));QVERIFY(f.library.updateArtwork(f.b.id,blue));
+        QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen"));QTRY_COMPARE(w->visibility(),QWindow::FullScreen);QTRY_VERIFY(w->property("playerProgress").toDouble()>.999);
+        auto *backdrop=visual(w->contentItem(),"playerBackdrop");QVERIFY(backdrop);QVERIFY(backdrop->property("retainWhileLoading").toBool());QTRY_COMPARE(backdrop->property("status").toInt(),1);
+        const auto background=w->property("designTokens").value<QObject *>()->property("background").value<QColor>();
+        QJsonArray measured;int captures=0;
+        for(bool reduced:{false,true}){
+            QVERIFY(f.shell->settingsBridge()->setPreference("reduceMotion",reduced));
+            for(int cycle=0;cycle<4;++cycle){
+                const auto id=cycle%2?f.a.id:f.b.id;f.shell->facade()->play({f.a.id,f.b.id},id);f.shell->playbackBridge()->pause();
+                QElapsedTimer timer;timer.start();int minimum=255;
+                do{
+                    const auto image=w->grabWindow();QVERIFY(!image.isNull());const auto p=backdrop->mapToScene(QPointF(12,backdrop->height()*.55));
+                    const double scale=image.width()/double(w->width());const auto color=image.pixelColor(qRound(p.x()*scale),qRound(p.y()*scale));
+                    const int difference=qMax(qAbs(color.red()-background.red()),qMax(qAbs(color.green()-background.green()),qAbs(color.blue()-background.blue())));
+                    minimum=qMin(minimum,difference);QVERIFY2(difference>8,"Backdrop exposed the plain player background while changing cover");++captures;QTest::qWait(12);
+                }while(timer.elapsed()<280);
+                QTRY_COMPARE(backdrop->property("status").toInt(),1);measured.append(QJsonObject{{"reduced",reduced},{"cycle",cycle},{"minimumDifference",minimum}});
+            }
+        }
+        shot(w,"fullscreen-retained-cover");record("fullscreen-cover-retention",{{"captures",captures},{"cycles",measured}});
+        QVERIFY(f.shell->settingsBridge()->setPreference("playerCoverBackground",false));QTRY_COMPARE(backdrop->property("source").toUrl(),QUrl());
+        QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen"));QVERIFY(f.shell->warnings().isEmpty());
+    }
+    void nextSongTitleKeepsPriorityOverArtist(){
+        Fixture f(4);QVERIFY(prepare(f));auto *w=f.shell->window();
+        auto *panel=visual(w->contentItem(),"nextQueuePanel"),*title=visual(w->contentItem(),"nextCompactTitle"),*artist=visual(w->contentItem(),"nextCompactArtist");QVERIFY(panel&&title&&artist);
+        QTRY_COMPARE(title->property("text").toString(),f.b.title);
+        QVERIFY(panel->setProperty("width",480));QTRY_VERIFY(artist->isVisible());QVERIFY(title->width()>=title->implicitWidth());QVERIFY(artist->x()>=title->x()+title->width());
+        QCOMPARE(artist->property("text").toString(),QString(" — ")+f.b.artist);
+        QVERIFY(panel->setProperty("width",112+title->implicitWidth()+14));QTRY_VERIFY(!artist->isVisible());QVERIFY(title->width()>=title->implicitWidth());
+        QVERIFY(panel->setProperty("width",160));QTRY_VERIFY(title->width()<title->implicitWidth());QVERIFY(!artist->isVisible());
+        QVERIFY(panel->setProperty("width",480));QTRY_VERIFY(artist->isVisible());shot(w,"next-title-and-artist");
+        record("next-title-priority",{{"title",title->property("text").toString()},{"artist",artist->property("text").toString()},{"width",panel->width()}});QVERIFY(f.shell->warnings().isEmpty());
+    }
     void userReviewCompletedWorkspaceCanAlwaysOpen(){
         Fixture f(2);QVERIFY(prepare(f));auto *w=f.shell->window();
         const QVariant keys=QStringList{QString::number(f.a.id),QString::number(f.b.id)};
@@ -307,7 +389,7 @@ private slots:
         auto *workspace=w->findChild<QObject *>("lyricsWorkspace");QVERIFY(workspace);QTRY_VERIFY(workspace->property("visible").toBool());
         const auto rows=f.shell->lyricsSearchBridge()->targetTracks();QCOMPARE(rows.size(),2);
         for(const auto &value:rows){const auto row=value.toMap();QCOMPARE(row["searchState"].toString(),QString("complete"));
-            auto *icon=visual(w->contentItem(),"lyricsStateIcon-"+row["trackKey"].toString());QVERIFY(icon);QCOMPARE(icon->property("text").toString(),QString("✓"));}
+            QQuickItem *icon=nullptr;QTRY_VERIFY((icon=visual(w->contentItem(),"lyricsStateIcon-"+row["trackKey"].toString())));QCOMPARE(icon->property("text").toString(),QString("✓"));}
         record("completed-search-workspace-reopened",{{"tracks",QJsonArray::fromVariantList(rows)}});shot(w,"completed-search-workspace");
     }
     void userReviewSmoothReturnAndFixedTimestamp(){

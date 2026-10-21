@@ -192,7 +192,7 @@ ApplicationWindow {
     Shortcut { sequence: "Escape"; enabled: !lyricsWorkspace.visible && !root.popupOpen; onActivated: {if(root.bulkActive)root.clearBulk();else if(root.fullScreenMode)root.toggleFullscreen();else if(root.lyricsOpen)root.animatePlayer(false);else upcoming.panelExpanded=false} }
     Shortcut {sequence:"Ctrl+O";onActivated:importDialog.chooseFiles()}
     Shortcut {sequence:"Ctrl+Shift+O";onActivated:importDialog.chooseFolder()}
-    Shortcut {sequence:"Ctrl+F";onActivated:{root.navigateOriginal(0);searchFocus.restart()}}
+    Shortcut {sequence:"Ctrl+F";enabled:!lyricsWorkspace.visible;onActivated:{root.navigateOriginal(0);searchFocus.restart()}}
     Timer{id:searchFocus;interval:260;onTriggered:localPage.focusSearch()}
     onClosing: close => {
         if (!allowClose && (importBridge.busy || translationBridge.unfinished || lyricsSearchBridge.busy)) { close.accepted=false; closeConfirm.open() }
@@ -203,6 +203,7 @@ ApplicationWindow {
     Timer { id: windowSave; interval: 350; onTriggered: if(root.visibility!==Window.FullScreen && root.visibility!==Window.Minimized)settingsBridge.saveWindowState(root.width,root.height,root.visibility===Window.Maximized) }
     Item {
         id: contentHost
+        visible: !lyricsWorkspace.visible
         objectName: "contentHost"
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
         anchors.bottom: importPanel.visible ? importPanel.top : playerBar.top
@@ -293,12 +294,12 @@ ApplicationWindow {
     }
     PlayerBar {
         id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98
-        visible:!root.bulkActive;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
+        visible:!root.bulkActive&&!lyricsWorkspace.visible;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
         onExpandRequested:root.animatePlayer(!root.lyricsOpen)
     }
 
     Rectangle {
-        objectName:"bulkBar";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98;visible:root.bulkActive;color:Theme.card;z:3
+        objectName:"bulkBar";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98;visible:root.bulkActive&&!lyricsWorkspace.visible;color:Theme.card;z:3
         ColumnLayout {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;anchors.topMargin:10;anchors.bottomMargin:10;spacing:4
             RowLayout {
@@ -339,7 +340,7 @@ ApplicationWindow {
         property bool completionVisible:false
         property string completionText:""
         readonly property string shownStatus:importBridge.busy?importBridge.status:completionText
-        visible:importBridge.busy||completionVisible
+        visible:(importBridge.busy||completionVisible)&&!lyricsWorkspace.visible
         height:Math.min(144,Math.max(44,importStatus.implicitHeight+16));color:Theme.panel;clip:true;z:3
         function updateTask(){
             if(importBridge.busy){
@@ -362,7 +363,7 @@ ApplicationWindow {
         onPressedChanged:if(pressed&&upcoming.panelExpanded&&!upcoming.contains(upcoming.mapFromItem(root.contentItem,point.position.x,point.position.y)))upcoming.panelExpanded=false
     }
     Item {
-        objectName:"upcomingWindowClip";anchors.fill:parent;clip:true;z:2
+        objectName:"upcomingWindowClip";anchors.fill:parent;clip:true;z:2;visible:!lyricsWorkspace.visible
         UpcomingPanel {
             id:upcoming;objectName:"nextQueuePanel"
             expandedPlayer:root.upcomingAtLeft;x:root.upcomingAtLeft?8:root.width-8-width
@@ -378,7 +379,7 @@ ApplicationWindow {
     }
     NumberAnimation {id:upcomingIn;target:root;property:"upcomingTravel";to:0;duration:210;easing.type:Easing.OutCubic}
     Artwork {
-        id:flight;objectName:"sharedArtworkFlight";z:4;visible:root.coverTravelling
+        id:flight;objectName:"sharedArtworkFlight";z:4;visible:root.coverTravelling&&!lyricsWorkspace.visible
         file:root.flightFile;seed:root.flightSeed;resolution:768
         x:root.coverFrom.x+(root.coverTo.x-root.coverFrom.x)*root.coverProgress
         y:root.coverFrom.y+(root.coverTo.y-root.coverFrom.y)*root.coverProgress
@@ -387,7 +388,7 @@ ApplicationWindow {
     }
 
     UiText {
-        id:titleFlight;objectName:"sharedTitleFlight";z:4;visible:root.metadataTravelling
+        id:titleFlight;objectName:"sharedTitleFlight";z:4;visible:root.metadataTravelling&&!lyricsWorkspace.visible
         text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideRight;color:Theme.text
         x:root.titleFrom.x+(root.titleTo.x-root.titleFrom.x)*root.coverProgress
         y:root.titleFrom.y+(root.titleTo.y-root.titleFrom.y)*root.coverProgress
@@ -397,7 +398,7 @@ ApplicationWindow {
         font.family:root.titleTo.family;font.weight:root.titleTo.weight
     }
     UiText {
-        id:artistFlight;objectName:"sharedArtistFlight";z:4;visible:root.metadataTravelling
+        id:artistFlight;objectName:"sharedArtistFlight";z:4;visible:root.metadataTravelling&&!lyricsWorkspace.visible
         text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideRight;color:Theme.secondary
         x:root.artistFrom.x+(root.artistTo.x-root.artistFrom.x)*root.coverProgress
         y:root.artistFrom.y+(root.artistTo.y-root.artistFrom.y)*root.coverProgress
@@ -424,7 +425,7 @@ ApplicationWindow {
         }
     }
     Row {
-        id:titleBar;objectName:"titleBar";anchors.top:parent.top;anchors.right:parent.right;z:5;height:32
+        id:titleBar;objectName:"titleBar";anchors.top:parent.top;anchors.right:parent.right;z:7;height:32
         Repeater{
             model:["—","□","×"]
             delegate:AbstractButton{
@@ -462,7 +463,7 @@ ApplicationWindow {
     }
     ImportDialog{id:importDialog;parent:root.popupLayer}
     PlaylistEditor{id:playlistEditor;parent:root.popupLayer;onCreated:key=>root.openPlaylist(key)}
-    LyricsWorkspace{id:lyricsWorkspace;parent:root.popupLayer}
+    LyricsWorkspace{id:lyricsWorkspace;parent:root.contentItem;z:6}
     Toast{id:toast;anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:playerBar.top;anchors.bottomMargin:16;z:20}
     ConfirmDialog {
         id:closeConfirm;parent:root.popupLayer;objectName:"closeTasksConfirmation";anchors.centerIn:parent;width:Math.min(480,root.width-40);modal:true

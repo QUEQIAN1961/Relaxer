@@ -4,6 +4,9 @@
 #include <QSet>
 #include <QFileInfo>
 #include <QCryptographicHash>
+#include <QDateTime>
+#include <QJsonDocument>
+#include "ai/whole-song-lyrics-translation.h"
 namespace relaxer {
 LyricsSearchBridge::LyricsSearchBridge(Library *library,PlaybackFacade *facade,LyricsSearchCoordinator *service,QObject *parent)
     :QAbstractListModel(parent),m_library(library),m_facade(facade),m_service(service){
@@ -73,6 +76,23 @@ void LyricsSearchBridge::restoreReviews(const QVector<qint64> &ids){
         if(digest==value["sourceDigest"].toString())m_pendingReviews.insert(id);
     }
 }
+bool LyricsSearchBridge::translationMissing(const Track &track)const{
+    const auto judgment=m_library->translationJudgment(track.id);
+    if(judgment==TranslationJudgment::NoTranslationNeeded||m_library->isInstrumental(track.id))return false;
+    const auto path=track.lyrics.isEmpty()?QString():m_library->absolute(track.lyrics);const QFileInfo file(path);
+    const auto signature=QJsonDocument(QJsonArray{path,double(file.size()),double(file.lastModified().toMSecsSinceEpoch()),
+        track.title,track.artist,int(judgment)}).toJson(QJsonDocument::Compact);
+    const auto cached=m_translationCache.constFind(track.id);
+    if(cached!=m_translationCache.cend()&&cached->first==signature)return cached->second;
+    ai::lyrics::TranslationAssessment assessment;
+    if(!path.isEmpty()&&file.isFile()){
+        const auto source=LyricsDocumentReader::readFile(path);
+        if(source.opened&&source.complete&&!source.tooLarge)assessment=ai::lyrics::assessTranslation(source.bytes,track.title,track.artist);
+    }
+    const bool missing=assessment.need!=ai::lyrics::TranslationNeed::Translated&&
+        (judgment==TranslationJudgment::NeedsTranslation||assessment.missing());
+    m_translationCache.insert(track.id,{signature,missing});return missing;
+}
 QVariantList LyricsSearchBridge::targetTracks()const{
     QVariantList result;auto ids=m_targets;if(ids.isEmpty()&&targetId())ids.append(targetId());
     const auto tracks=m_targets.isEmpty()?m_library->tracksByIds(ids):m_targetRows;
@@ -88,14 +108,14 @@ QVariantList LyricsSearchBridge::targetTracks()const{
         if(state=="incomplete"&&!m_trackStatus.value(id).isEmpty()&&active!=LyricsSearchState::Searching&&active!=LyricsSearchState::Queued)
             label+=" · "+m_trackStatus.value(id);
         result.append(QVariantMap{{"trackKey",QString::number(id)},{"title",track.title},{"artist",track.artist},
-            {"lyricsAvailable",saved},{"status",label},{"searchState",state}});
+            {"lyricsAvailable",saved},{"translationMissing",translationMissing(track)},{"status",label},{"searchState",state}});
     }return result;
 }
 bool LyricsSearchBridge::setTargetTrack(const QString &key){
     bool valid=false;const auto id=key.toLongLong(&valid);
     if(!valid||id<0||(id&&!m_library->track(id).id))return false;
     if(m_target==id)return true;
-    if(!id){m_targets.clear();m_targetRows.clear();m_missingOnly=false;}
+    if(!id){m_targets.clear();m_targetRows.clear();m_translationCache.clear();m_missingOnly=false;}
     m_target=id;resetForTrack();return true;
 }
 bool LyricsSearchBridge::setTargetTracks(const QStringList &keys,bool missingOnly,bool showCompleted){
@@ -128,14 +148,27 @@ bool LyricsSearchBridge::searchDetailed(const QString &title,const QString &arti
     const bool ok=m_service->start({request})!=0;emit changed();return ok;
 }
 bool LyricsSearchBridge::searchTargets(bool confirmed){
+    auto ids=m_targets;if(ids.isEmpty()&&targetId())ids.append(targetId());
+    return startTargets(ids,confirmed,m_missingOnly);
+}
+bool LyricsSearchBridge::searchTracks(const QStringList &keys,bool confirmed){
+    QVector<qint64> ids;QSet<qint64> seen;
+    auto allowed=m_targets;if(allowed.isEmpty()&&targetId())allowed.append(targetId());
+    for(const auto &key:keys){bool valid=false;const auto id=key.toLongLong(&valid);
+        if(!valid||!allowed.contains(id))return false;
+        if(!seen.contains(id)){seen.insert(id);ids.append(id);}
+    }
+    if(ids.isEmpty())return false;
+    return startTargets(ids,confirmed,false);
+}
+bool LyricsSearchBridge::startTargets(const QVector<qint64> &ids,bool confirmed,bool missingOnly){
     if(!confirmed){m_status="请先确认联网查找所选歌曲的歌词";emit changed();return false;}
     if(busy())return false;
-    auto ids=m_targets;if(ids.isEmpty()&&targetId())ids.append(targetId());
     QVector<LyricsSearchRequest> requests;
     const auto tracks=m_library->tracksByIds(ids);
     for(auto id:ids){const auto track=tracks.value(id);if(!track.id)continue;LyricsSearchRequest request;
-        if(m_missingOnly){const QFileInfo file(m_library->absolute(track.lyrics));if(!track.lyrics.isEmpty()&&file.isFile()&&file.size()>0)continue;}
-        request.original=track;request.match=track;request.manual=!m_missingOnly;request.replace=false;
+        if(missingOnly){const QFileInfo file(m_library->absolute(track.lyrics));if(!track.lyrics.isEmpty()&&file.isFile()&&file.size()>0)continue;}
+        request.original=track;request.match=track;request.manual=!missingOnly;request.replace=false;
         request.saveSnapshot=m_library->lyricsSaveSnapshot(id);if(!request.saveSnapshot.valid){m_status=request.saveSnapshot.error;emit changed();return false;}
         requests.append(request);
     }
