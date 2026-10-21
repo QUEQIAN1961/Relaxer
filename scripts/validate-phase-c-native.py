@@ -72,6 +72,8 @@ def main():
              "relaxer_c4c5_bridge_tests", "relaxer_c4c5_ui_tests", "relaxer_qml_search_bridge_tests", "relaxer_qml_upcoming_parity_tests", "relaxer_qml_ai_parity_tests", "relaxer_qml_settings_parity_tests", "relaxer_qml_ui_parity_library_tests", "relaxer_qml_lyrics_workspace_parity_tests", "relaxer_qml_v020_ui_parity_tests", "relaxer_qml_ui2_refinement_tests"]
     names += ["relaxer_qml_c6_evidence_tests", "relaxer_qml_c6_parity_tests"]
     env["RELAXER_C6_EVIDENCE"] = str(out / "native-evidence")
+    # Theme suites record evidence before the C6 suite initializes this folder.
+    (out / "native-evidence").mkdir()
     deployment = json.loads((package / "deployment.json").read_text(encoding="utf-8"))
     copied = []
     suites = []
