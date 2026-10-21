@@ -48,8 +48,8 @@ bool systemDark() {
 }
 }
 
-SettingsBridge::SettingsBridge(Library *library, QObject *parent)
-    : QObject(parent), m_library(library), m_store(library), m_appearance(library) {
+SettingsBridge::SettingsBridge(Library *library, QObject *parent, SystemThemeReader systemTheme)
+    : QObject(parent), m_library(library), m_store(library), m_appearance(library), m_systemTheme(std::move(systemTheme)) {
     resetDraft();
     updateFont();
     if (auto *app = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
@@ -86,7 +86,7 @@ QVariantMap SettingsBridge::palette() const {
     const int theme = m_preview.isEmpty() ? m_store.get("theme", 0).toInt() : m_preview["preset"].toInt(3);
     const bool custom = theme == 3;
     const auto appearance = m_preview.isEmpty() ? m_appearance.active() : m_preview;
-    bool dark = theme == 1 || (theme == 2 && systemDark());
+    bool dark = theme == 1 || (theme == 2 && (m_systemTheme ? m_systemTheme() : systemDark()));
     QColor background(dark ? "#19191e" : "#ffffff"), side(dark ? "#222228" : "#f5f5f7");
     QColor ink(dark ? "#f0edf1" : "#25252b"), sideInk(ink), muted(dark ? "#a09ca6" : "#86818a");
     QColor border(dark ? "#34343c" : "#e9e7eb"), card(dark ? "#25252d" : "#f7f6f8"), accent("#e5455f");

@@ -21,7 +21,8 @@ class QmlShell final : public QObject {
     Q_OBJECT
   public:
     explicit QmlShell(Library *library, QObject *parent = nullptr, bool decodeOnly = false,
-                      ai::AiRuntime *runtime = nullptr, std::unique_ptr<TranslationBrowserBackend> browser = {});
+                      ai::AiRuntime *runtime = nullptr, std::unique_ptr<TranslationBrowserBackend> browser = {},
+                      SettingsBridge::SystemThemeReader systemTheme = {});
     ~QmlShell() override;
     bool load();
     bool shutdown();

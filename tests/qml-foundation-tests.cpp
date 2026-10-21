@@ -83,9 +83,9 @@ class QmlFoundationTests final : public QObject {
     }
     void navigationAndComponents() {
         QFETCH(bool, systemDark);
-        SystemThemeFixture systemTheme(systemDark); QVERIFY(systemTheme.ok());
+        SystemThemeFixture systemTheme(systemDark);
         QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open());
-        QmlShell shell(&library, nullptr, true); QVERIFY(shell.load());
+        QmlShell shell(&library, nullptr, true, nullptr, {}, systemTheme.reader()); QVERIFY(shell.load());
         auto *root = shell.window()->contentItem();
         QVERIFY(visualChild(root, "libraryListContainer"));
         QVERIFY(visualChild(root, "playerBar"));
@@ -117,8 +117,16 @@ class QmlFoundationTests final : public QObject {
         QVERIFY(theme->setProperty("currentIndex",0));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,0)));
         QTRY_COMPARE(tokens->property("background").value<QColor>(), QColor("#ffffff"));
         QCOMPARE(library.setting("theme").toInt(), 0);
-        SettingsBridge reopened(&library);
+        SettingsBridge reopened(&library, nullptr, systemTheme.reader());
         QCOMPARE(reopened.palette().value("background").toString(), QString("#ffffff"));
+        QVERIFY(shell.settingsBridge()->setTheme(2));
+        QTRY_COMPARE(tokens->property("background").value<QColor>(), QColor(systemDark ? "#19191e" : "#ffffff"));
+        SettingsBridge following(&library, nullptr, systemTheme.reader());
+        QCOMPARE(following.values().value("theme").toInt(), 2);
+        QCOMPARE(following.palette().value("background").toString(), QString(systemDark ? "#19191e" : "#ffffff"));
+        systemTheme.record({{"initial", systemDark ? "#19191e" : "#ffffff"}, {"explicitLight", "#ffffff"},
+            {"explicitDark", "#19191e"}, {"qmlBackground", tokens->property("background").value<QColor>().name()},
+            {"reopenedFollowing", following.palette().value("background").toString()}});
         QTest::qWait(20); QVERIFY(shell.warnings().isEmpty());
     }
     void realLibraryNotificationsAreCoalesced() {

@@ -7,14 +7,14 @@
 static void initializeQmlResources() { Q_INIT_RESOURCE(qml); }
 namespace relaxer {
 QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRuntime *runtime,
-                   std::unique_ptr<TranslationBrowserBackend> browser)
+                   std::unique_ptr<TranslationBrowserBackend> browser, SettingsBridge::SystemThemeReader systemTheme)
     : QObject(parent), m_facade(library, this, decodeOnly), m_appBridge(library, this),
       m_playbackBridge(&m_facade, this, library), m_tracks(library, this), m_trackView(&m_tracks, this),
       m_playlists(library, this), m_libraryBridge(library, &m_facade, &m_tracks, &m_trackView, &m_playlists, this),
       m_queue(library, &m_facade, this),
       m_upcoming(library, &m_facade, this), m_uiIntegration(library, &m_playbackBridge, this),
       m_ownedAi(runtime?nullptr:std::make_unique<ai::AiRuntime>(library)),m_ai(runtime?runtime:m_ownedAi.get()),
-      m_import(library,this),m_lyrics(library,&m_facade,this),m_settings(library,this),m_aiBridge(m_ai,this),
+      m_import(library,this),m_lyrics(library,&m_facade,this),m_settings(library,this,std::move(systemTheme)),m_aiBridge(m_ai,this),
       m_translation(library,m_ai,this,std::move(browser)),m_translationBridge(library,&m_facade,&m_translation,&m_lyrics,this),
       m_importBridge(library,&m_import,this),m_search(library,this),m_searchBridge(library,&m_facade,&m_search,this) {
     initializeQmlResources();

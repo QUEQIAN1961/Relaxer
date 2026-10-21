@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <QVariantList>
 #include <QUrl>
+#include <functional>
 
 namespace relaxer {
 class SettingsBridge final : public QObject {
@@ -26,7 +27,10 @@ class SettingsBridge final : public QObject {
     Q_PROPERTY(QString dataRoot READ dataRoot CONSTANT)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
 public:
-    explicit SettingsBridge(Library *library, QObject *parent = nullptr);
+    // Explicit C++ instance injection, never a QML or environment override.
+    // An empty reader preserves the native system preference in production.
+    using SystemThemeReader = std::function<bool()>;
+    explicit SettingsBridge(Library *library, QObject *parent = nullptr, SystemThemeReader systemTheme = {});
     ~SettingsBridge() override;
     QVariantList changelog() const;
     QVariantMap values() const;
@@ -74,6 +78,7 @@ private:
     Library *m_library;
     SettingsStore m_store;
     AppearanceStore m_appearance;
+    const SystemThemeReader m_systemTheme;
     QJsonObject m_draft;
     QJsonObject m_appearanceDraft;
     QJsonObject m_preview;

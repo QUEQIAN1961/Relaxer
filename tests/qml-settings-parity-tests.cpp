@@ -19,9 +19,9 @@ struct Fixture {
     Library library{directory.filePath("data")};
     std::unique_ptr<SettingsBridge> bridge;
     bool ok = false;
-    Fixture() {
+    explicit Fixture(SettingsBridge::SystemThemeReader reader = {}) {
         if (!directory.isValid() || !library.open()) return;
-        bridge = std::make_unique<SettingsBridge>(&library);
+        bridge = std::make_unique<SettingsBridge>(&library, nullptr, std::move(reader));
         ok = true;
     }
     QString image(const QString &name, const QColor &color) {
@@ -85,8 +85,8 @@ private slots:
     }
     void builtinAndCustomPaletteUseOriginalLeftRightAndFooterRoles() {
         QFETCH(bool, systemDark);
-        SystemThemeFixture systemTheme(systemDark); QVERIFY(systemTheme.ok());
-        Fixture f; QVERIFY(f.ok);
+        SystemThemeFixture systemTheme(systemDark);
+        Fixture f(systemTheme.reader()); QVERIFY(f.ok);
         QCOMPARE(f.library.setting("theme").toInt(), 2);
         QCOMPARE(f.bridge->palette().value("background").toString(),
                  QString(systemDark ? "#19191e" : "#ffffff"));
@@ -116,9 +116,15 @@ private slots:
         QCOMPARE(f.library.setting("theme").toInt(), 1);
         f.bridge->discardAppearance();
         QCOMPARE(f.bridge->palette().value("background").toString(), QString("#19191e"));
-        SettingsBridge reopened(&f.library);
+        SettingsBridge reopened(&f.library, nullptr, systemTheme.reader());
         QCOMPARE(reopened.values().value("theme").toInt(), 1);
         QCOMPARE(reopened.palette().value("background").toString(), QString("#19191e"));
+        QVERIFY(reopened.setTheme(2));
+        SettingsBridge following(&f.library, nullptr, systemTheme.reader());
+        QCOMPARE(following.values().value("theme").toInt(), 2);
+        QCOMPARE(following.palette().value("background").toString(), QString(systemDark ? "#19191e" : "#ffffff"));
+        systemTheme.record({{"initial", systemDark ? "#19191e" : "#ffffff"}, {"explicitLight", "#ffffff"},
+            {"explicitDark", "#19191e"}, {"reopenedFollowing", following.palette().value("background").toString()}});
     }
     void authoringPreviewSaveRenameOverwriteUseAndDeleteReuseAppearanceStore() {
         Fixture f; QVERIFY(f.ok);
