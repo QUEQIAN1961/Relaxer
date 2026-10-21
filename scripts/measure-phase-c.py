@@ -16,6 +16,7 @@ import shutil
 import statistics
 import subprocess
 import time
+import tempfile
 import winreg
 
 k = c.WinDLL("kernel32", use_last_error=True)
@@ -96,7 +97,11 @@ def clean_environment(out):
     env["QT_QPA_PLATFORM"] = "windows"
     env["QT_MEDIA_BACKEND"] = "ffmpeg"
     env["RELAXER_SKIP_AUDIO_DEVICE_TESTS"] = "1"
-    for name in ("TEMP", "TMP", "APPDATA", "LOCALAPPDATA"):
+    # Keep the native MIDI/MCI cache below its existing short-path limit;
+    # a deeply nested evidence name must not change the media test environment.
+    short_temp = tempfile.mkdtemp(prefix="relaxer-c6-")
+    env["TEMP"] = env["TMP"] = short_temp
+    for name in ("APPDATA", "LOCALAPPDATA"):
         directory = out / name; directory.mkdir(exist_ok=True)
         env[name] = str(directory)
     return env
@@ -175,7 +180,7 @@ def main():
                "physicalMemoryGiB": memory.totalPhysical / 1073741824,
                "method": "Native Windows QPA, default Qt Quick rendering, system-only PATH; WM_CLOSE; identical mature empty SQLite copies; includes Library/Playback initialization; no physical audio output; 25ms OS visibility polling; 2s idle CPU window after 1.5s settling",
                "cacheState": "OS caches not flushed. Unprimed first Widgets launch separate; samples are warm-cache repeated launches with alternating order. uiLoadedMs is process clock; nativeVisibleMs includes CreateProcess/DLL load.",
-               "limitations": "Widgets initializes all legacy settings/import/AI UI; QML initializes only C1 Library/Playback and bridges. Different feature completeness: these numbers do not predict final migrated UI performance. Widgets Paint and QML frameSwapped are different first-frame boundaries.",
+               "limitations": "Both frontends use the existing core and stores; their view initialization differs. Widgets Paint and QML frameSwapped are different first-frame boundaries. Warm-cache startup and idle CPU samples are not cold-boot or FPS guarantees.",
                "unprimedWidgets": json.loads(initial.read_text(encoding="utf-8")), "results": results}
     (out / "performance.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 

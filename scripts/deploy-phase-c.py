@@ -28,12 +28,20 @@ def main():
         (args.source, args.build, args.qt_prefix, args.quick_prefix, args.destination)]
     assert not dest.exists(), "Use a fresh destination; existing runtime is preserved"
     assert (qt / "bin/Qt6Core.dll").is_file() and (quick / "bin/Qt6Quick.dll").is_file()
+    header = (source / "src/phase-c-version.h").read_text(encoding="utf-8")
+    version = re.search(r'Version\[\]\s*=\s*"([^"]+)"', header)[1]
+    display = re.search(r'Display\[\]\s*=\s*"([^"]+)"', header)[1]
+    fingerprint = (build / "relaxer-source-fingerprint.txt").read_text(encoding="utf-8").strip()
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
+    tree = subprocess.check_output(["git", "show", "-s", "--format=%T", "HEAD"], cwd=source, text=True).strip()
+    assert not subprocess.check_output(["git", "status", "--porcelain"], cwd=source, text=True).strip(), "Deploy from clean committed source"
     binaries = ["Relaxer.exe", "RelaxerStart.exe", "RelaxerQmlUi.dll"]
     binary_hashes = {name: hashlib.sha256((build / name).read_bytes()).hexdigest() for name in binaries}
     verified = False
     if args.verification_proof:
         native_proof = json.loads(args.verification_proof.read_text(encoding="utf-8"))
         assert native_proof.get("verified") is True and native_proof.get("binarySHA256") == binary_hashes, "Native proof does not match build inputs"
+        assert native_proof.get("sourceFingerprint") == fingerprint and native_proof.get("sourceCommit") == commit, "Native proof does not match frozen source"
         verified = True
     env = os.environ.copy()
     env["PATH"] = str(quick / "bin") + os.pathsep + str(qt / "bin") + os.pathsep + env["PATH"]
@@ -108,12 +116,20 @@ def main():
         license_root = prefix / "share/licenses"
         if license_root.exists(): shutil.copytree(license_root, dest / "third-party-licenses", dirs_exist_ok=True)
     (dest / "RelaxerQml.cmd").write_text('@echo off\r\nsetlocal\r\n"%~dp0runtime\\Relaxer.exe" --ui=qml %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
-    (dest / "UI-REPAIR-READ-ME-FIRST.md").write_text('# Relaxer V0.2.1-dev-c4c5-ui2-fix1\n\n基于 C4+C5 的 v0.2.0 界面与交互恢复版，等待独立验收。\n\n运行 RelaxerQml.cmd 打开本次修复的 QML 界面。RelaxerStart.exe 沿用原 Widgets 入口。两种界面共享资料路径与锁，请先关闭另一种界面。首次验证建议使用独立资料目录：\nruntime/Relaxer.exe --ui=qml --data <测试目录>\n\n原侧栏恢复本地音乐、歌单、个人、设置、我喜欢与我的歌单。左下角封面或标题展开播放页，保留底部播放栏。恢复切页过渡、封面飞行动画、切歌动画及下一首浮层。\n查找歌词位于歌曲右键菜单、批量操作栏及“查找缺失歌词”；设置仅保留 AI 服务配置。选中歌曲查歌词和预览翻译不改变当前播放。\n修复加载模型后无法选择、刷新丢失配置等问题；模型选择立即保存。顶部操作控件统一为 36px，补齐按钮边框；正文字号和字重适度提高；清理重复悬停提示，列表与菜单统一圆角。背景展开与收起使用一致缓动；下一首先向下离开窗口，再从另一侧底边垂直升起。AI 联网验证使用回环 Mock，未访问用户 Key，未进行真实付费调用。\n字体、外观编辑、快捷键、托盘、导入、个人资料及歌单卡片已接回 QML。保留文件的删除和从歌单移除沿用原核心。\n本次为开发修复包，不是正式版本。数据和数据库格式未改变；旧交付包保留。\n', encoding="utf-8")
+    (dest / "READ-ME-FIRST.md").write_text(
+        f"# Relaxer {display}\n\n"
+        "运行 RelaxerStart.exe 打开 Widgets；运行 RelaxerQml.cmd 打开 QML。\n"
+        "两种界面使用同一资料目录和锁，请先关闭另一入口。\n"
+        "首次独立验证可使用 runtime/Relaxer.exe --ui=qml --data <测试目录>。\n"
+        "歌曲、歌词和自定义资源保存在资料目录；发行包不包含个人资料或 AI 凭据。\n"
+        "本包为开发方验证的候选构建，正式验收状态见随包交付报告。\n",
+        encoding="utf-8")
     if verified:
-        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": "1.5.0", "displayVersion": "V0.2.1-dev-c4c5-ui2-fix1",
+        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": version, "displayVersion": display,
             "windows_only_path": True, "audio_decode": True, "qml_window": True,
             "audio_device_required": False, "media_clock": False}), encoding="utf-8")
-    proof = {"version": "0.2.1-dev-c4c5-ui2-fix1", "qmlImports": imports, "copiedDependencies": sorted(copied),
+    proof = {"version": version, "displayVersion": display, "sourceFingerprint": fingerprint, "sourceCommit": commit, "sourceTree": tree,
+             "qmlImports": imports, "copiedDependencies": sorted(copied),
              "binarySHA256": binary_hashes, "stagingPolicy": "fresh-build-inputs-only",
              "verified": verified, "note": "Native proof from separate candidate" if verified else "Candidate collection only; do not package before native QA"}
     (dest / "deployment.json").write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding="utf-8")
