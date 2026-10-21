@@ -103,16 +103,18 @@ private slots:
         SystemThemeFixture systemTheme(systemDark);
         Fixture f(systemTheme.reader()); QVERIFY(f.ok);
         QCOMPARE(f.library.setting("theme").toInt(), 2);
-        QCOMPARE(f.bridge->palette().value("background").toString(),
-                 QString(systemDark ? "#19191e" : "#ffffff"));
+        const auto initial = f.bridge->palette().value("background").toString();
+        QCOMPARE(initial, QString(systemDark ? "#19191e" : "#ffffff"));
         QVERIFY(f.bridge->setTheme(0));
         auto palette = f.bridge->palette();
         QCOMPARE(palette.value("background").toString(), QString("#ffffff"));
         QCOMPARE(palette.value("panel").toString(), QString("#f5f5f7"));
+        const auto explicitLight = palette.value("background").toString();
         QVERIFY(f.bridge->setTheme(1));
         palette = f.bridge->palette();
         QCOMPARE(palette.value("background").toString(), QString("#19191e"));
         QCOMPARE(palette.value("panel").toString(), QString("#222228"));
+        const auto explicitDark = palette.value("background").toString();
         f.bridge->beginAppearance(); QVERIFY(f.bridge->setAppearanceMode(3));
         QVERIFY(f.bridge->editAppearance("left", "#113355"));
         QVERIFY(f.bridge->editAppearance("right", "#eeeeee"));
@@ -138,8 +140,8 @@ private slots:
         SettingsBridge following(&f.library, nullptr, systemTheme.reader());
         QCOMPARE(following.values().value("theme").toInt(), 2);
         QCOMPARE(following.palette().value("background").toString(), QString(systemDark ? "#19191e" : "#ffffff"));
-        systemTheme.record({{"initial", systemDark ? "#19191e" : "#ffffff"}, {"explicitLight", "#ffffff"},
-            {"explicitDark", "#19191e"}, {"reopenedFollowing", following.palette().value("background").toString()}});
+        systemTheme.record({{"initial", initial}, {"explicitLight", explicitLight},
+            {"explicitDark", explicitDark}, {"reopenedFollowing", following.palette().value("background").toString()}});
     }
     void authoringPreviewSaveRenameOverwriteUseAndDeleteReuseAppearanceStore() {
         Fixture f; QVERIFY(f.ok);

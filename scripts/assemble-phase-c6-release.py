@@ -10,6 +10,7 @@ import argparse
 from datetime import datetime, timezone, timedelta
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import runpy
@@ -39,9 +40,18 @@ def main():
     for name in ('source','build','staging','publish','reports','evidence-root','evidence-list','full-summary','native-proof','isolation','verification'):
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--git',default=shutil.which('git'))
+    parser.add_argument('--version',default='0.2.1-rc1')
+    parser.add_argument('--display-version',default='V0.2.1-RC1')
+    parser.add_argument('--status',default='V0.2.1-RC1 — DEVELOPER-VERIFIED — AWAITING HARNESS R16')
+    parser.add_argument('--report-names',nargs='+',default=REPORTS)
+    parser.add_argument('--complete-prefix',default='Relaxer-PhaseC-C6-RC1-Complete')
+    parser.add_argument('--independent-acceptance',default='AWAITING HARNESS R16')
     args=parser.parse_args()
     source=args.source.resolve();build=args.build.resolve();stage=args.staging.resolve()
-    def git(*command):return subprocess.check_output([args.git,*map(str,command)],cwd=source)
+    git_env=os.environ.copy()
+    git_env['PATH']=str(Path(args.git).resolve().parent)+os.pathsep+git_env.get('PATH','')
+    git_env['MSYS']='noglob'
+    def git(*command):return subprocess.check_output([args.git,*map(str,command)],cwd=source,env=git_env)
     assert not git('status','--porcelain').strip(),'Freeze clean source first'
     head=git('rev-parse','HEAD').decode().strip();tree=git('show','-s','--format=%T','HEAD').decode().strip()
     parent=git('show','-s','--format=%P','HEAD').decode().strip();branch=git('branch','--show-current').decode().strip()
@@ -49,7 +59,7 @@ def main():
     deployed=json.loads((stage/'deployment.json').read_text(encoding='utf-8'))
     summary=json.loads(args.full_summary.read_text(encoding='utf-8'))
     fingerprint=(build/'relaxer-source-fingerprint.txt').read_text().strip()
-    assert deployed['version'].lower()=='0.2.1-rc1' and deployed['displayVersion']=='V0.2.1-RC1'
+    assert deployed['version'].lower()==args.version.lower() and deployed['displayVersion']==args.display_version
     assert proof['verified'] and deployed['verified']
     assert proof['sourceCommit']==deployed['sourceCommit']==summary['commit']==head
     assert proof['sourceTree']==deployed['sourceTree']==summary['tree']==tree
@@ -66,21 +76,26 @@ def main():
     assert len(isolation)==8
     for row in isolation:
         assert row['lockExit']==3 and row['qmlExit']==(11 if row['missing'] else 0) and not row['remainingOwned']
-        assert row['widgets']['version'].lower()=='0.2.1-rc1' and row['dataIdentityPreserved']
+        assert row['widgets']['version'].lower()==args.version.lower() and row['dataIdentityPreserved']
         if row['missing']:assert row['restoredBothUis']
-    for name in REPORTS:assert (args.reports/name).is_file(),name
+    for name in args.report_names:assert Path(name).name==name and (args.reports/name).is_file(),name
     args.publish.mkdir(parents=True,exist_ok=False);args.verification.mkdir(parents=True,exist_ok=False)
-    date=datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d');prefix='Relaxer-V0.2.1-RC1'
+    date=datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d');prefix='Relaxer-'+args.display_version
     packager=runpy.run_path(str(source/'scripts/package-phase-c.py'))
     inventory=packager['inventory'](stage)
     win=args.publish/(prefix+'-Win64.zip')
     packager['package'](stage,win,prefix)
+    with zipfile.ZipFile(win) as package_zip:
+        (args.publish/'PACKAGE-MANIFEST.json').write_bytes(package_zip.read(prefix+'/PACKAGE-MANIFEST.json'))
+    write_json(args.publish/'BUILD-IDENTITY.json',{'version':args.version,'displayVersion':args.display_version,
+        'commit':head,'tree':tree,'parent':parent,'branch':branch,'sourceFingerprint':fingerprint,
+        'binarySHA256':proof['binarySHA256'],'verified':True})
 
     # Git archive entries must match every frozen tree blob byte for byte.
     source_zip=args.publish/(prefix+'-Source.zip')
-    subprocess.run([args.git,'archive','--format=zip','--prefix='+prefix+'-Source/','--output',str(source_zip),'HEAD'],cwd=source,check=True)
+    subprocess.run([args.git,'archive','--format=zip','--prefix='+prefix+'-Source/','--output',str(source_zip),'HEAD'],cwd=source,env=git_env,check=True)
     rows=git('ls-tree','-r','-z','--full-tree','HEAD').split(b'\0');manifest={};blobs={}
-    cat=subprocess.Popen([args.git,'cat-file','--batch'],cwd=source,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+    cat=subprocess.Popen([args.git,'cat-file','--batch'],cwd=source,env=git_env,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
     try:
         with zipfile.ZipFile(source_zip) as archive_file:
             assert archive_file.testzip() is None
@@ -100,17 +115,17 @@ def main():
     identity+=''.join(name+':'+sha(blobs[name])+'\n' for name in selected)
     assert sha(identity.encode('utf-8'))==fingerprint,'Archived source does not reproduce build fingerprint'
     write_json(args.publish/'SOURCE-TREE-MANIFEST.json',manifest)
-    (args.publish/'Source-Fingerprint.txt').write_text(fingerprint+'\n',encoding='ascii')
+    (args.publish/'Source-Fingerprint.txt').write_text(fingerprint+'\n',encoding='ascii',newline='\n')
 
     bundle=args.publish/(prefix+'-History.bundle')
-    subprocess.run([args.git,'bundle','create',str(bundle),'--all'],cwd=source,check=True)
-    result=subprocess.run([args.git,'bundle','verify',str(bundle)],cwd=source,capture_output=True,check=True)
+    subprocess.run([args.git,'bundle','create',str(bundle),'--all'],cwd=source,env=git_env,check=True)
+    result=subprocess.run([args.git,'bundle','verify',str(bundle)],cwd=source,env=git_env,capture_output=True,check=True)
     (args.verification/'bundle-verify.log').write_bytes(result.stdout+result.stderr)
     clone=args.verification/'bundle-clone'
-    subprocess.run([args.git,'clone','--no-checkout',str(bundle),str(clone)],capture_output=True,check=True)
-    assert subprocess.check_output([args.git,'rev-parse','HEAD'],cwd=clone).decode().strip()==head
-    assert subprocess.check_output([args.git,'rev-parse','HEAD^{tree}'],cwd=clone).decode().strip()==tree
-    fsck=subprocess.run([args.git,'fsck','--full'],cwd=clone,capture_output=True,check=True)
+    subprocess.run([args.git,'clone','--no-checkout',str(bundle),str(clone)],env=git_env,capture_output=True,check=True)
+    assert subprocess.check_output([args.git,'rev-parse','HEAD'],cwd=clone,env=git_env).decode().strip()==head
+    assert subprocess.check_output([args.git,'show','-s','--format=%T','HEAD'],cwd=clone,env=git_env).decode().strip()==tree
+    fsck=subprocess.run([args.git,'fsck','--full'],cwd=clone,env=git_env,capture_output=True,check=True)
     (args.verification/'bundle-fsck.log').write_bytes(fsck.stdout+fsck.stderr)
 
     # Execute the final unzipped copy; keep it as separate disposable evidence.
@@ -138,7 +153,7 @@ def main():
         diagnostics=args.verification/(mode+'.json');data=args.verification/(mode+'-data')
         run([runtime/'Relaxer.exe','--ui='+mode,'--data',data,'--diagnostics',diagnostics,'--quit-after','500'],mode)
         value=json.loads(diagnostics.read_text(encoding='utf-8'))
-        assert value['version'].lower()=='0.2.1-rc1' and value['saveSucceeded'] and value['databaseConnections']==1 and value['playbackInstances']==1
+        assert value['version'].lower()==args.version.lower() and value['saveSucceeded'] and value['databaseConnections']==1 and value['playbackInstances']==1
         assert not (data/'relaxer.lock').exists()
     audio=args.verification/'synthetic.wav'
     with wave.open(str(audio),'wb') as file:file.setparams((1,2,8000,0,'NONE','not compressed'));file.writeframes(b'\0'*16000)
@@ -163,24 +178,24 @@ def main():
         entries['FinalExtractedVerification/'+name]=(args.verification/name).read_bytes()
     evidence_zip=args.publish/(prefix+'-Evidence.zip');archive(evidence_zip,entries,prefix+'-Evidence')
     report_copy=args.publish/'Reports';report_copy.mkdir()
-    for name in REPORTS:shutil.copy2(args.reports/name,report_copy/name)
+    for name in args.report_names:shutil.copy2(args.reports/name,report_copy/name)
     artifacts={p.name:{'sha256':digest(p),'bytes':p.stat().st_size} for p in (win,source_zip,bundle,evidence_zip)}
-    delivery={'status':'V0.2.1-RC1 — DEVELOPER-VERIFIED — AWAITING HARNESS R16','createdUtc':datetime.now(timezone.utc).isoformat(),
+    delivery={'status':args.status,'createdUtc':datetime.now(timezone.utc).isoformat(),
         'commit':head,'tree':tree,'parent':parent,'branch':branch,'sourceFingerprint':fingerprint,'binarySHA256':proof['binarySHA256'],
         'ctest':summary['ctest'],'qtTest':summary['qtTotals'],'fourServices':summary['fourServices'],'artifacts':artifacts,
         'portableQtTest':native['qtTestTotals'],'portableSuites':len(native['suites']),'isolationCases':len(isolation),
         'launcherClose':launcher,'baselineTestNamesRetained':summary['baselineTestNamesRetained'],
         'verification':str(args.verification/'RESULT.json'),'protocolVersion':'1.5.0 (retained startup protocol)',
         'paidRequests':0,'physicalListening':'NOT EXECUTED','physicalGlobalKeyboard':'NOT EXECUTED on isolated desktop; Windows registration/native message dispatch tested',
-        'formalTagCreated':False,'remotePushed':False,'independentAcceptance':'AWAITING HARNESS R16'}
+        'formalTagCreated':False,'remotePushed':False,'independentAcceptance':args.independent_acceptance}
     write_json(args.publish/'DELIVERY.json',delivery)
     files={p.relative_to(args.publish).as_posix():p.read_bytes() for p in args.publish.rglob('*') if p.is_file()}
     components=''.join(sha(data)+'  '+name+'\n' for name,data in sorted(files.items()))
-    (args.publish/'SHA256SUMS-components.txt').write_text(components,encoding='utf-8');files['SHA256SUMS-components.txt']=components.encode()
-    complete=args.publish/('Relaxer-PhaseC-C6-RC1-Complete-'+date+'.zip')
-    archive(complete,files,'Relaxer-PhaseC-C6-RC1-Complete-'+date)
+    (args.publish/'SHA256SUMS-components.txt').write_text(components,encoding='utf-8',newline='\n');files['SHA256SUMS-components.txt']=components.encode()
+    complete=args.publish/(args.complete_prefix+'-'+date+'.zip')
+    archive(complete,files,args.complete_prefix+'-'+date)
     sums=''.join(digest(p)+'  '+p.relative_to(args.publish).as_posix()+'\n' for p in sorted(args.publish.rglob('*')) if p.is_file())
-    (args.publish/'SHA256SUMS.txt').write_text(sums,encoding='utf-8')
+    (args.publish/'SHA256SUMS.txt').write_text(sums,encoding='utf-8',newline='\n')
     print(json.dumps({'status':delivery['status'],'publish':str(args.publish),'complete':str(complete),'completeSHA256':digest(complete),'commit':head,'tree':tree},ensure_ascii=False),flush=True)
 
 

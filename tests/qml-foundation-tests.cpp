@@ -107,12 +107,15 @@ class QmlFoundationTests final : public QObject {
         QCOMPARE(library.setting("theme").toInt(), 2);
         QTRY_COMPARE(tokens->property("background").value<QColor>(),
                      QColor(systemDark ? "#19191e" : "#ffffff"));
+        const auto initial = tokens->property("background").value<QColor>().name();
         QVERIFY(theme->setProperty("currentIndex",0));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,0)));
         QTRY_COMPARE(tokens->property("background").value<QColor>(), QColor("#ffffff"));
+        const auto explicitLight = tokens->property("background").value<QColor>().name();
         const auto background=tokens->property("background");
         QVERIFY(theme->setProperty("currentIndex",1));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,1)));
         QTRY_VERIFY(tokens->property("background")!=background);
         QTRY_COMPARE(tokens->property("background").value<QColor>(), QColor("#19191e"));
+        const auto explicitDark = tokens->property("background").value<QColor>().name();
         QCOMPARE(library.setting("theme").toInt(), 1);
         QVERIFY(theme->setProperty("currentIndex",0));QVERIFY(QMetaObject::invokeMethod(theme,"activated",Q_ARG(int,0)));
         QTRY_COMPARE(tokens->property("background").value<QColor>(), QColor("#ffffff"));
@@ -124,8 +127,8 @@ class QmlFoundationTests final : public QObject {
         SettingsBridge following(&library, nullptr, systemTheme.reader());
         QCOMPARE(following.values().value("theme").toInt(), 2);
         QCOMPARE(following.palette().value("background").toString(), QString(systemDark ? "#19191e" : "#ffffff"));
-        systemTheme.record({{"initial", systemDark ? "#19191e" : "#ffffff"}, {"explicitLight", "#ffffff"},
-            {"explicitDark", "#19191e"}, {"qmlBackground", tokens->property("background").value<QColor>().name()},
+        systemTheme.record({{"initial", initial}, {"explicitLight", explicitLight},
+            {"explicitDark", explicitDark}, {"qmlBackground", tokens->property("background").value<QColor>().name()},
             {"reopenedFollowing", following.palette().value("background").toString()}});
         QTest::qWait(20); QVERIFY(shell.warnings().isEmpty());
     }
