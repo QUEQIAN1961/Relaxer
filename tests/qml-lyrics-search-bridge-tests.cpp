@@ -4,15 +4,15 @@ using namespace c4c5_fixture;
 namespace {
 class EmptyReply final:public QNetworkReply {
 public:
-    EmptyReply(const QNetworkRequest &request,QObject *parent):QNetworkReply(parent){setRequest(request);setUrl(request.url());open(QIODevice::ReadOnly);QTimer::singleShot(0,this,[this]{if(!isFinished()){setAttribute(QNetworkRequest::HttpStatusCodeAttribute,200);setFinished(true);emit readyRead();emit finished();}});}
+    EmptyReply(const QNetworkRequest &request,QObject *parent,QByteArray body="[]"):QNetworkReply(parent),m_body(std::move(body)){setRequest(request);setUrl(request.url());open(QIODevice::ReadOnly);QTimer::singleShot(0,this,[this]{if(!isFinished()){setAttribute(QNetworkRequest::HttpStatusCodeAttribute,200);setFinished(true);emit readyRead();emit finished();}});}
     void abort()override{if(isFinished())return;setError(OperationCanceledError,"cancelled");setFinished(true);emit finished();}
-    qint64 bytesAvailable()const override{return 2-offset+QNetworkReply::bytesAvailable();}
-protected:qint64 readData(char *data,qint64 max)override{const auto count=qMin(max,2-offset);if(count<=0)return -1;memcpy(data,"[]"+offset,size_t(count));offset+=count;return count;}
-private:qint64 offset=0;
+    qint64 bytesAvailable()const override{return m_body.size()-offset+QNetworkReply::bytesAvailable();}
+protected:qint64 readData(char *data,qint64 max)override{const auto count=qMin(max,m_body.size()-offset);if(count<=0)return -1;memcpy(data,m_body.constData()+offset,size_t(count));offset+=count;return count;}
+private:qint64 offset=0;QByteArray m_body;
 };
 class FakeNetwork final:public QNetworkAccessManager {
-public:int calls=0;
-protected:QNetworkReply *createRequest(Operation,const QNetworkRequest &request,QIODevice *)override{++calls;return new EmptyReply(request,this);}
+public:int calls=0;QByteArray body="[]";
+protected:QNetworkReply *createRequest(Operation,const QNetworkRequest &request,QIODevice *)override{++calls;return new EmptyReply(request,this,body);}
 };
 QJsonObject record(const Track &t){return {{"id",1234},{"trackName",t.title},{"artistName",t.artist},{"albumName",t.album},{"duration",60},
     {"syncedLyrics","[00:01.00]Hello world\n[00:04.00]Walk home\n[00:50.00]Goodnight moon\n"},{"source","Controlled cache"}};}
@@ -20,6 +20,23 @@ QJsonObject record(const Track &t){return {{"id",1234},{"trackName",t.title},{"a
 class QmlLyricsSearchBridgeTests:public QObject {
     Q_OBJECT
 private slots:
+    void reviewUnsavedReplacementStaysOrangeAfterRestart(){
+        QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());const auto t=seed(lib,"Alpha","review-existing");QVERIFY(wave(lib.absolute(t.file)));
+        QVERIFY(lib.saveLyrics(t.id,"[00:01.00]Existing local lyrics\n"));FakeNetwork network;network.body=QJsonDocument(QJsonArray{record(t)}).toJson(QJsonDocument::Compact);PlaybackFacade player(&lib,nullptr,true);
+        {
+            LyricsSearchCoordinator service(&lib,nullptr,QUrl("https://mock.invalid/api"),{},&network);LyricsSearchBridge model(&lib,&player,&service);
+            QVERIFY(model.setTargetTracks({QString::number(t.id)},false,true));QVERIFY(model.search(true));
+            QTRY_VERIFY_WITH_TIMEOUT(!model.busy(),5000);QCOMPARE(model.targetTracks()[0].toMap()["searchState"].toString(),QString("choice"));service.shutdown();
+        }
+        const int calls=network.calls;
+        {
+            LyricsSearchCoordinator service(&lib,nullptr,QUrl("https://mock.invalid/api"),{},&network);LyricsSearchBridge model(&lib,&player,&service);
+            QVERIFY(model.setTargetTracks({QString::number(t.id)},true,true));QCOMPARE(network.calls,calls);
+            QCOMPARE(model.targetTracks()[0].toMap()["searchState"].toString(),QString("choice"));QVERIFY(model.select(0));QVERIFY(model.saveSelected(model.selectedKey(),true));
+            QCOMPARE(model.targetTracks()[0].toMap()["searchState"].toString(),QString("complete"));service.shutdown();
+        }
+        QVERIFY(player.shutdown());
+    }
     void reviewCompletedAndChoiceStatesSurviveBridgeRecreation(){
         QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());
         const auto a=seed(lib,"Saved","saved"),b=seed(lib,"Choice","choice"),c=seed(lib,"Unfinished","unfinished");

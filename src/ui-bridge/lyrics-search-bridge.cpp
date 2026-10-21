@@ -3,6 +3,7 @@
 #include "lyrics-document-reader.h"
 #include <QSet>
 #include <QFileInfo>
+#include <QCryptographicHash>
 namespace relaxer {
 LyricsSearchBridge::LyricsSearchBridge(Library *library,PlaybackFacade *facade,LyricsSearchCoordinator *service,QObject *parent)
     :QAbstractListModel(parent),m_library(library),m_facade(facade),m_service(service){
@@ -15,7 +16,12 @@ LyricsSearchBridge::LyricsSearchBridge(Library *library,PlaybackFacade *facade,L
         beginResetModel();m_snapshot=snapshot;m_selected={};m_selectedKey.clear();endResetModel();emit changed();
     });
     connect(service,&LyricsSearchCoordinator::summaryChanged,this,[this](const LyricsSearchSummary &s){m_status=s.status;emit changed();});
-    connect(service,&LyricsSearchCoordinator::eventOccurred,this,[this](const LyricsSearchEvent &event){m_trackStatus[event.trackId]=event.status;m_trackState[event.trackId]=event.state;emit changed();});
+    connect(service,&LyricsSearchCoordinator::eventOccurred,this,[this](const LyricsSearchEvent &event){
+        m_trackStatus[event.trackId]=event.status;m_trackState[event.trackId]=event.state;
+        if(event.state==LyricsSearchState::AwaitingChoice)rememberReview(event.trackId,true);
+        else if(event.state==LyricsSearchState::Saved)rememberReview(event.trackId,false);
+        emit changed();
+    });
     connect(library,&Library::changed,this,[this]{if(!m_targets.isEmpty())m_targetRows=m_library->tracksByIds(m_targets);emit changed();});
 }
 int LyricsSearchBridge::rowCount(const QModelIndex &p)const{return p.isValid()?0:m_snapshot.records.size();}
@@ -43,13 +49,37 @@ QString LyricsSearchBridge::sourceText()const{
     const auto file=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));
     return file.opened&&file.complete&&!file.tooLarge?QString::fromUtf8(file.bytes):QString();
 }
+void LyricsSearchBridge::rememberReview(qint64 id,bool pending){
+    const auto track=m_library->track(id);if(!track.id)return;
+    if(pending)m_pendingReviews.insert(id);else m_pendingReviews.remove(id);
+    QJsonObject value{{"pending",pending},{"trackHash",track.hash}};
+    if(pending){const auto file=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));
+        value["sourceDigest"]=QString::fromLatin1(QCryptographicHash::hash(file.bytes,QCryptographicHash::Sha256).toHex());}
+    // Only UI review metadata uses the existing settings store. Candidate text
+    // remains exclusively in the coordinator's existing lookup cache.
+    m_library->setSetting(QString("qml.lyricsReviewV1.%1").arg(id),value);
+}
+void LyricsSearchBridge::restoreReviews(const QVector<qint64> &ids){
+    if(busy())return;
+    for(auto id:ids){
+        m_pendingReviews.remove(id);
+        m_trackState.remove(id);
+        if(!m_cachedChoices.contains(id))continue;
+        const auto value=m_library->setting(QString("qml.lyricsReviewV1.%1").arg(id)).toObject();
+        const auto track=m_library->track(id);
+        if(!value["pending"].toBool()||value["trackHash"].toString()!=track.hash)continue;
+        const auto file=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));
+        const auto digest=QString::fromLatin1(QCryptographicHash::hash(file.bytes,QCryptographicHash::Sha256).toHex());
+        if(digest==value["sourceDigest"].toString())m_pendingReviews.insert(id);
+    }
+}
 QVariantList LyricsSearchBridge::targetTracks()const{
     QVariantList result;auto ids=m_targets;if(ids.isEmpty()&&targetId())ids.append(targetId());
     const auto tracks=m_targets.isEmpty()?m_library->tracksByIds(ids):m_targetRows;
     for(auto id:ids){const auto track=tracks.value(id);if(!track.id)continue;
         const QFileInfo file(m_library->absolute(track.lyrics));
         const bool saved=!track.lyrics.isEmpty()&&file.isFile()&&file.size()>0;
-        QString state=saved?"complete":m_cachedChoices.contains(id)?"choice":"incomplete";
+        QString state=saved?(m_pendingReviews.contains(id)?"choice":"complete"):m_cachedChoices.contains(id)?"choice":"incomplete";
         const auto active=m_trackState.value(id,LyricsSearchState::Cancelled);
         if(busy()&&(active==LyricsSearchState::Searching||active==LyricsSearchState::Queued))state="searching";
         else if(active==LyricsSearchState::CandidatesFound||active==LyricsSearchState::AwaitingChoice)state="choice";
@@ -82,6 +112,7 @@ bool LyricsSearchBridge::setTargetTracks(const QStringList &keys,bool missingOnl
     if(!keys.isEmpty()&&ids.isEmpty()){m_status="当前没有缺失歌词的歌曲";emit changed();return false;}
     if(!busy())m_service->loadCached(ids);
     for(auto id:ids)if(!m_service->candidates(id).records.isEmpty())m_cachedChoices.insert(id);
+    restoreReviews(ids);
     m_targets=ids;m_targetRows=tracks;m_missingOnly=missingOnly;m_target=ids.isEmpty()?0:ids.first();resetForTrack();return true;
 }
 bool LyricsSearchBridge::searchQuery(const QString &title,const QString &artist,const QString &fragment,bool confirmed,bool requireTimed){
@@ -132,7 +163,7 @@ bool LyricsSearchBridge::saveSelected(const QString &key,bool confirmed){
         m_status=error;emit changed();return false;
     }
     const bool ok=m_library->saveLyricsChecked(m_guard.id,bytes,m_guard);
-    if(ok){m_service->cancelTrack(m_guard.id);m_service->noteManualSave();m_trackState[m_guard.id]=LyricsSearchState::Saved;}
+    if(ok){m_service->cancelTrack(m_guard.id);m_service->noteManualSave();m_trackState[m_guard.id]=LyricsSearchState::Saved;rememberReview(m_guard.id,false);}
     m_status=ok?"歌词已保存":m_library->lastError();m_selectedKey.clear();emit changed();return ok;
 }
 bool LyricsSearchBridge::saveBytes(const QByteArray &bytes,bool confirmed){
@@ -140,7 +171,7 @@ bool LyricsSearchBridge::saveBytes(const QByteArray &bytes,bool confirmed){
     QString error;if(!LyricMatchPolicy::rawLyricsAllowed(bytes,&error)){m_status=error;emit changed();return false;}
     const auto snapshot=m_library->lyricsSaveSnapshot(targetId());
     const bool ok=m_library->saveLyricsChecked(targetId(),bytes,snapshot);
-    if(ok){m_service->cancelTrack(targetId());m_service->noteManualSave();m_trackState[targetId()]=LyricsSearchState::Saved;m_selectedKey.clear();m_selected={};}
+    if(ok){m_service->cancelTrack(targetId());m_service->noteManualSave();m_trackState[targetId()]=LyricsSearchState::Saved;rememberReview(targetId(),false);m_selectedKey.clear();m_selected={};}
     m_status=ok?"歌词已保存":m_library->lastError();emit changed();return ok;
 }
 bool LyricsSearchBridge::saveText(const QString &text,bool confirmed){return saveBytes(text.toUtf8(),confirmed);}
@@ -153,7 +184,7 @@ bool LyricsSearchBridge::importLocalLyrics(const QUrl &file,bool confirmed){
 bool LyricsSearchBridge::markInstrumental(bool confirmed){
     if(!confirmed||!targetId())return false;
     const bool ok=m_library->markInstrumental(targetId());
-    if(ok){m_service->cancelTrack(targetId());m_service->clearCandidates(targetId());m_cachedChoices.remove(targetId());m_trackState[targetId()]=LyricsSearchState::Saved;resetForTrack();}
+    if(ok){m_service->cancelTrack(targetId());m_service->clearCandidates(targetId());m_cachedChoices.remove(targetId());m_trackState[targetId()]=LyricsSearchState::Saved;rememberReview(targetId(),false);resetForTrack();}
     m_status=ok?"已标记为纯音乐":m_library->lastError();emit changed();return ok;
 }
 }

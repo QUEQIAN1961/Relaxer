@@ -51,9 +51,12 @@ private:
     QHash<qint64,QString> m_trackStatus;
     QHash<qint64,LyricsSearchState> m_trackState;
     QSet<qint64> m_cachedChoices;
+    QSet<qint64> m_pendingReviews;
     bool m_missingOnly=false;
     qint64 targetId()const{return m_target?m_target:m_facade->current().id;}
     bool saveBytes(const QByteArray &bytes,bool confirmed);
     void resetForTrack();
+    void rememberReview(qint64 id,bool pending);
+    void restoreReviews(const QVector<qint64> &ids);
 };
 }
