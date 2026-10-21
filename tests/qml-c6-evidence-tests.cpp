@@ -126,19 +126,24 @@ private slots:
             QVERIFY(QMetaObject::invokeMethod(w,opening?"showLyrics":"closeLyrics"));
             QElapsedTimer timer;timer.start();bool reversed=false;int frames=0;double minY=1e9,maxY=-1e9;double minH=1e9,maxH=-1e9;
             while(timer.elapsed()<600){
-                if(scenario==2&&timer.elapsed()>100&&!reversed){const auto before=clip->height();QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QVERIFY(qAbs(clip->height()-before)<2);reversed=true;}
+                // Reverse an observed intermediate frame. A synchronous
+                // screenshot may consume the first 100 ms before Qt's
+                // animation clock has advanced at all on a loaded runner.
+                const auto progress=w->property("playerProgress").toDouble();
+                if(scenario==2&&progress>.1&&progress<.9&&!reversed){const auto before=clip->height();QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QVERIFY(qAbs(clip->height()-before)<2);reversed=true;}
                 const auto r=rect(panel);minY=qMin(minY,r.y());maxY=qMax(maxY,r.y());minH=qMin(minH,clip->height());maxH=qMax(maxH,clip->height());
                 record("animation-frame",{{"scenario",scenario},{"ms",double(timer.elapsed())},{"x",r.x()},{"y",r.y()},{"width",r.width()},{"height",r.height()},{"opacity",panel->opacity()},{"visible",panel->isVisible()},{"atLeft",w->property("upcomingAtLeft").toBool()},{"backdropHeight",clip->height()},{"progress",w->property("playerProgress").toDouble()},{"coverRunning",w->property("coverTravelling").toBool()}});
                 if(frames%12==0)shot(w,QString("animation-%1-frame-%2").arg(scenario).arg(frames));++frames;QTest::qWait(10);
             }
             record("animation-summary",{{"scenario",scenario},{"frames",frames},{"minY",minY},{"maxY",maxY},{"minBackdrop",minH},{"maxBackdrop",maxH},{"finalProgress",w->property("playerProgress").toDouble()}});
             QVERIFY(frames>15);
-            // Reversing at 100 ms intentionally travels only a short distance;
+            if(scenario==2)QVERIFY2(reversed,"No intermediate frame was observed for reversal");
+            // Reversing early intentionally travels only a short distance;
             // full transitions must leave the bottom edge, reversal must move
             // and settle without jumping (checked above at the reversal).
             if(scenario==2)QVERIFY(maxY-minY>1);else QVERIFY(maxY-minY>20);
             QVERIFY(maxH-minH>20);
-            const bool finalOpen=opening&&scenario!=2;QVERIFY(qAbs(w->property("playerProgress").toDouble()-(finalOpen?1:0))<.001);
+            const bool finalOpen=opening&&scenario!=2;QTRY_VERIFY(qAbs(w->property("playerProgress").toDouble()-(finalOpen?1:0))<.001);
             QCOMPARE(w->property("upcomingAtLeft").toBool(),finalOpen);
         }
     }
@@ -255,19 +260,27 @@ private slots:
     }
     void userReviewPageInteriorNeverFlashesBlack_data(){
         QTest::addColumn<bool>("reduced");
-        QTest::newRow("reduced-animation")<<true;
-        QTest::newRow("normal-animation")<<false;
+        QTest::addColumn<int>("theme");
+        QTest::newRow("light-reduced-animation")<<true<<0;
+        QTest::newRow("light-normal-animation")<<false<<0;
+        QTest::newRow("dark-reduced-animation")<<true<<1;
+        QTest::newRow("dark-normal-animation")<<false<<1;
     }
     void userReviewPageInteriorNeverFlashesBlack(){
         QFETCH(bool,reduced);
+        QFETCH(int,theme);
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();
-        QVERIFY(f.shell->settingsBridge()->setTheme(0));
+        QVERIFY(f.shell->settingsBridge()->setTheme(theme));
         QVERIFY(f.shell->settingsBridge()->setPreference("reduceMotion",reduced));
         auto *paper=visual(w->contentItem(),"paperSurface");QVERIFY(paper);
         auto *surface=visual(w->contentItem(),"pageSurface");QVERIFY(surface);
         for(int destination:{1,3,0}){
             auto *button=visual(w->contentItem(),"navigation"+QString::number(destination));QVERIFY(button);
             QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(button).center().toPoint());
+            if(destination==3){
+                w->showMinimized();QTRY_COMPARE(w->visibility(),QWindow::Minimized);
+                w->showNormal();QVERIFY(QTest::qWaitForWindowExposed(w));
+            }
             QElapsedTimer timer;timer.start();QJsonArray frames;double minimumMean=255,maximumDark=0;QImage worst;
             while(timer.elapsed()<400){
                 const auto image=w->grabWindow();QVERIFY(!image.isNull());const auto area=rect(paper);const auto dpr=image.devicePixelRatio();
@@ -276,7 +289,7 @@ private slots:
                 // the outer padding white while obscuring the entire page.
                 for(double y=.05;y<.96;y+=.05)for(double x=.05;x<.96;x+=.05){
                     const int value=qGray(image.pixelColor(qRound((area.x()+area.width()*x)*dpr),qRound((area.y()+area.height()*y)*dpr)).rgb());
-                    sum+=value;dark+=value<60;++count;
+                    sum+=value;dark+=value<(theme==1?12:60);++count;
                 }
                 const double mean=double(sum)/count,ratio=double(dark)/count;
                 if(mean<minimumMean){minimumMean=mean;worst=image;}
@@ -286,9 +299,9 @@ private slots:
             }
             const auto path=QDir(output).filePath(QString("%1-page-interior-%2-%3.png").arg(++serial,4,10,QChar('0')).arg(reduced).arg(destination));
             QVERIFY(worst.save(path));
-            record("sidebar-page-interior",{{"reduced",reduced},{"destination",destination},{"minimumMean",minimumMean},{"maximumDarkRatio",maximumDark},{"frames",frames}});
+            record("sidebar-page-interior",{{"reduced",reduced},{"theme",theme},{"restoredDuringTransition",destination==3},{"destination",destination},{"minimumMean",minimumMean},{"maximumDarkRatio",maximumDark},{"frames",frames}});
             QCOMPARE(f.shell->appBridge()->page(),destination);
-            QVERIFY2(minimumMean>190&&maximumDark<.15,"Light-theme page interior flashed dark during navigation");
+            QVERIFY2(minimumMean>(theme==1?17:190)&&maximumDark<.15,"Page interior flashed black during navigation or window restore");
         }
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
