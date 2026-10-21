@@ -197,12 +197,28 @@ private slots:
         QVERIFY(!f.web());for(const auto id:ids){QVERIFY(f.coordinator->cancel(id));QVERIFY(f.coordinator->forget(id));}
         QVERIFY(f.web());QVERIFY(f.browser->calls.isEmpty());
     }
+    void twoWindowsReverseAiCompletionStayWithTheirSongs_data(){
+        QTest::addColumn<bool>("secondArrivesFirst");
+        QTest::newRow("first-window-arrives-first")<<false;
+        QTest::newRow("second-window-arrives-first")<<true;
+    }
     void twoWindowsReverseAiCompletionStayWithTheirSongs(){
+        QFETCH(bool,secondArrivesFirst);
         Fixture f;QVERIFY(f.ok);f.http.setHold(true);f.response();f.response();
         TranslationCoordinator second(&f.library,f.runtime.get());
         const auto a=f.ai(),b=second.prepareAi(f.b.id);QVERIFY(a!=b);
-        f.coordinator->start(a);second.start(b);QTRY_COMPARE(f.http.heldCount(),2);
-        QVERIFY(f.http.releaseHeldAt(1));QTRY_COMPARE(second.summary(b).state,State::CompletedPendingSave);
+        if(secondArrivesFirst){
+            QVERIFY(second.start(b));QTRY_COMPARE(f.http.heldCount(),1);
+            QVERIFY(f.coordinator->start(a));
+        }else{
+            QVERIFY(f.coordinator->start(a));QTRY_COMPARE(f.http.heldCount(),1);
+            QVERIFY(second.start(b));
+        }
+        QTRY_COMPARE(f.http.heldCount(),2);
+        // Independent HTTP connections may arrive in either order. Release B's
+        // held response, not an assumed second arrival. The barriers above make
+        // both arrival orders deterministic without changing completion order.
+        QVERIFY(f.http.releaseHeldAt(secondArrivesFirst?0:1));QTRY_COMPARE(second.summary(b).state,State::CompletedPendingSave);
         QCOMPARE(f.state(a),State::Running);QCOMPARE(second.summary(b).trackId,f.b.id);
         QVERIFY(second.save(b));QCOMPARE(f.bytes(f.a.id),f.source);QVERIFY(f.bytes(f.b.id).contains("relaxer-bilingual"));
         QVERIFY(f.http.releaseHeld());QTRY_COMPARE(f.state(a),State::CompletedPendingSave);
