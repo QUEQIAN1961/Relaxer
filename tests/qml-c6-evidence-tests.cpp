@@ -1,0 +1,188 @@
+#include "c4c5-ui-fixture.h"
+#include <QApplication>
+#include <QDateTime>
+#include <QElapsedTimer>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QPointer>
+#include <QSignalSpy>
+#include <QUuid>
+#include <QWheelEvent>
+using namespace c4c5_fixture;
+namespace {
+QString output;
+int serial=0;
+QRectF rect(QQuickItem *item){return item->mapRectToScene(QRectF(QPointF(),item->size()));}
+void record(const QString &stage,QJsonObject value){
+    value["stage"]=stage;value["test"]=QString::fromLatin1(QTest::currentTestFunction());
+    value["utc"]=QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    const auto path=QDir(output).filePath(QString("%1-%2.json").arg(++serial,4,10,QChar('0')).arg(stage));
+    QFile file(path);if(!file.open(QIODevice::WriteOnly|QIODevice::NewOnly))qFatal("Cannot preserve C6 evidence");
+    file.write(QJsonDocument(value).toJson());file.flush();
+}
+void shot(QQuickWindow *w,const QString &name){
+    const auto path=QDir(output).filePath(QString("%1-%2.png").arg(++serial,4,10,QChar('0')).arg(name));
+    if(!w->grabWindow().save(path))qFatal("Cannot preserve C6 screenshot");
+}
+bool prepare(Fixture &f){
+    if(!f.ok)return false;
+    auto *w=f.shell->window();w->showNormal();w->setGeometry(45,50,1240,790);w->requestActivate();
+    if(!QTest::qWaitForWindowExposed(w))return false;
+    f.shell->playbackBridge()->pause();QTest::qWait(100);return true;
+}
+QJsonArray rows(QQuickItem *list){
+    QJsonArray values;
+    for(auto *row:delegates(list))values.append(QJsonObject{{"index",row->property("index").toInt()},
+        {"current",row->property("current").toBool()},{"height",row->height()},
+        {"scale",row->childItems().first()->scale()},{"targetScale",row->property("activeScale").toDouble()}});
+    return values;
+}
+QJsonArray requests(TranslationHttpMock &http){
+    QJsonArray result;
+    for(int i=0;i<http.requestCount();++i)result.append(QJsonObject{
+        {"requestLine",QString::fromUtf8(http.request(i).split('\n').first()).trimmed()},
+        {"body",QJsonDocument::fromJson(http.requestBody(i)).object()}});
+    return result; // Headers, including the fake credential, are deliberately excluded.
+}
+}
+class C6EvidenceTests final:public QObject{
+    Q_OBJECT
+private slots:
+    void initTestCase(){
+        auto base=qEnvironmentVariable("RELAXER_C6_EVIDENCE");
+        if(base.isEmpty())base=QCoreApplication::applicationDirPath()+"/Evidence/C6";
+        output=base+"/Measurements-"+QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz")+"-"+QUuid::createUuid().toString(QUuid::Id128);
+        QVERIFY(QDir().mkpath(output));qInfo().noquote()<<"C6_EVIDENCE"<<output;
+    }
+    void cleanup(){record("test-result",{{"failed",QTest::currentTestFailed()}});}
+    void lyricsRuntimeAndBoundaries(){
+        Fixture f(60);QVERIFY(prepare(f));auto *w=f.shell->window();auto *p=f.shell->facade();auto *m=f.shell->lyricsModel();
+        QByteArray bilingual;
+        for(int i=0;i<60;++i)bilingual+=QString("[00:%1.00]Line %2 original\n[00:%1.00]第 %2 行译文\n").arg(i,2,10,QChar('0')).arg(i).toUtf8();
+        QVERIFY(f.library.saveLyrics(f.a.id,bilingual));QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));
+        QTRY_COMPARE(m->count(),60);QTRY_VERIFY(p->seekable());
+        p->seek(3000);QTRY_COMPARE(m->currentIndex(),3);QTest::qWait(230);
+        auto *panel=visual(w->contentItem(),"lyricsPanel");auto *list=visual(w->contentItem(),"lyricsList");QVERIFY(panel&&list);
+        const auto before=rows(list);QHash<int,qreal> heights;
+        for(auto *row:delegates(list))heights[row->property("index").toInt()]=row->height();
+        p->seek(4000);QTRY_COMPARE(m->currentIndex(),4);QTest::qWait(250);
+        record("lyrics-scale-raw",{{"before",before},{"after",rows(list)},{"actualPosition",double(p->position())}});
+        bool active=false,previous=false;double drift=0;
+        for(auto *row:delegates(list)){
+            const int index=row->property("index").toInt();
+            if(heights.contains(index))drift=qMax(drift,qAbs(row->height()-heights[index]));
+            if(index==4){QVERIFY(qAbs(row->childItems().first()->scale()-1.2)<.001);active=true;}
+            if(index==3){QVERIFY(qAbs(row->childItems().first()->scale()-1.0)<.001);previous=true;}
+        }
+        record("lyrics-scale",{{"input","decode-only backend paused; real seeks 3000 and 4000"},{"before",before},{"after",rows(list)},{"heightDrift",drift}});
+        QVERIFY(active&&previous);QCOMPARE(drift,0.0);
+        const auto original=m->data(m->index(0),LyricsModel::Original).toString();const auto translated=m->data(m->index(0),LyricsModel::Translation).toString();
+        QCOMPARE(original,QString("Line 0 original"));QCOMPARE(translated,QString("第 0 行译文"));
+        const auto autoBefore=list->property("contentY").toReal();p->seek(25000);QTRY_COMPARE(m->currentIndex(),25);QTest::qWait(60);
+        const auto autoAfter=list->property("contentY").toReal();QVERIFY(autoAfter>autoBefore);
+        const auto point=list->mapToScene(QPointF(list->width()/2,list->height()/2));
+        QWheelEvent wheel(point,w->mapToGlobal(point.toPoint()),QPoint(),QPoint(0,-240),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+        wheel.setTimestamp(++QTest::lastMouseTimestamp);QCoreApplication::sendEvent(w,&wheel);QTRY_VERIFY(panel->property("manualScroll").toBool());
+        QTest::qWait(100);QVERIFY(QMetaObject::invokeMethod(list,"cancelFlick"));QTRY_VERIFY(!list->property("moving").toBool());
+        const auto manual=list->property("contentY").toReal();p->seek(12000);QTRY_COMPARE(m->currentIndex(),12);QTest::qWait(70);
+        QCOMPARE(list->property("contentY").toReal(),manual);
+        auto *back=visual(w->contentItem(),"lyricsReturnCurrent");QVERIFY(back);QVERIFY(QMetaObject::invokeMethod(back,"click"));
+        QVERIFY(!panel->property("manualScroll").toBool());QTest::qWait(60);
+        record("lyrics-scroll",{{"autoBefore",autoBefore},{"autoAfter",autoAfter},{"manualY",manual},{"returnedY",list->property("contentY").toReal()},{"original",original},{"translation",translated}});shot(w,"lyrics-bilingual");
+        QVERIFY(m->setOffsetMs(5000));p->seek(6000);QTRY_COMPARE(m->currentIndex(),1);
+        QVERIFY(!m->setOffsetMs(5001));QVERIFY(m->setOffsetMs(-5000));p->seek(0);QTRY_COMPARE(m->currentIndex(),5);
+        QVERIFY(!m->setOffsetMs(-5001));QVERIFY(m->setOffsetMs(2500));m->reload();QTRY_COMPARE(m->offsetMs(),2500);
+        record("lyrics-offset",{{"positiveBoundary",5000},{"negativeBoundary",-5000},{"outOfRangeRejected",true},{"stored",f.library.lyricOffset(f.a.id)},{"reloaded",m->offsetMs()}});
+        TranslationSummary old;old.trackId=f.a.id;old.trackHash=f.library.track(f.a.id).hash;old.state=TranslationState::CompletedPendingSave;
+        old.prepared=ai::lyrics::prepare(f.source,"a",{});old.sourceDigest=old.prepared.sourceDigest;old.translations=QStringList(60,"stale");
+        p->play({f.a.id,f.b.id},f.b.id);QTRY_COMPARE(m->trackKey(),QString::number(f.b.id));m->presentTranslation(old);QVERIFY(!m->preview());
+        const auto noLyrics=seed(f.library,"No lyrics","no-lyrics");QVERIFY(noLyrics.id);QVERIFY(wave(f.library.absolute(noLyrics.file)));
+        p->play({noLyrics.id},noLyrics.id);QTRY_COMPARE(m->trackKey(),QString::number(noLyrics.id));QTRY_COMPARE(m->count(),0);QVERIFY(m->status().contains("暂无歌词"));
+        record("lyrics-empty-and-old-result",{{"count",m->count()},{"status",m->status()},{"preview",m->preview()}});shot(w,"lyrics-empty");
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void fullscreenEscapeButtonAndRestore(){
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *p=f.shell->facade();const auto geometry=w->geometry();const auto queue=p->queue().items;
+        for(int i=0;i<3;++i){
+            QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen"));QTRY_COMPARE(w->visibility(),QWindow::FullScreen);QTest::qWait(100);shot(w,QString("fullscreen-%1").arg(i));
+            if(i!=1){QTest::keyClick(w,Qt::Key_Escape);if(i==2)QTest::keyClick(w,Qt::Key_Escape);}
+            else{QTRY_VERIFY(w->property("playerProgress").toDouble()>.999);auto *button=visual(w->contentItem(),"fullscreenButton");QVERIFY(button);QVERIFY(button->isVisible()&&button->isEnabled());QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(button).center().toPoint());}
+            QTRY_VERIFY(w->visibility()!=QWindow::FullScreen);QTRY_COMPARE(w->geometry(),geometry);
+            QCOMPARE(f.shell->facade(),p);QCOMPARE(p->queue().items,queue);
+            record("fullscreen-restore",{{"cycle",i},{"exit",i==1?"Qt mouse event on actual button":"Qt key event Escape (not physical keyboard)"},{"x",w->x()},{"y",w->y()},{"width",w->width()},{"height",w->height()},{"playbackInstances",f.shell->findChildren<Playback *>().size()},{"sqliteConnections",QSqlDatabase::connectionNames().size()}});
+        }
+        f.shell->playbackBridge()->play();QTRY_VERIFY(p->position()>500);const auto position=p->position();
+        QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen"));QTest::qWait(150);QVERIFY(p->position()>=position);
+        p->next();QTRY_COMPARE(p->current().id,f.b.id);QTest::keyClick(w,Qt::Key_Escape);QTRY_COMPARE(w->geometry(),geometry);
+        record("fullscreen-playback",{{"beforePosition",double(position)},{"afterPosition",double(p->position())},{"currentTrack",QString::number(p->current().id)},{"playing",p->playing()}});
+        QPointer<PlaybackFacade> guard=p;QVERIFY(f.shell->shutdown());f.shell.reset();QVERIFY(!guard);
+    }
+    void actualAnimationFrames(){
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();auto *clip=visual(root,"playerBackdropClip");auto *panel=visual(root,"nextQueuePanel");QVERIFY(clip&&panel);
+        for(int scenario=0;scenario<5;++scenario){
+            const bool opening=scenario!=1; if(scenario==3)w->resize(1000,660);
+            if(scenario==4){QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QTest::qWait(500);}
+            QVERIFY(QMetaObject::invokeMethod(w,opening?"showLyrics":"closeLyrics"));
+            QElapsedTimer timer;timer.start();bool reversed=false;int frames=0;double minY=1e9,maxY=-1e9;double minH=1e9,maxH=-1e9;
+            while(timer.elapsed()<600){
+                if(scenario==2&&timer.elapsed()>100&&!reversed){const auto before=clip->height();QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QVERIFY(qAbs(clip->height()-before)<2);reversed=true;}
+                const auto r=rect(panel);minY=qMin(minY,r.y());maxY=qMax(maxY,r.y());minH=qMin(minH,clip->height());maxH=qMax(maxH,clip->height());
+                record("animation-frame",{{"scenario",scenario},{"ms",double(timer.elapsed())},{"x",r.x()},{"y",r.y()},{"width",r.width()},{"height",r.height()},{"opacity",panel->opacity()},{"visible",panel->isVisible()},{"atLeft",w->property("upcomingAtLeft").toBool()},{"backdropHeight",clip->height()},{"progress",w->property("playerProgress").toDouble()},{"coverRunning",w->property("coverTravelling").toBool()}});
+                if(frames%12==0)shot(w,QString("animation-%1-frame-%2").arg(scenario).arg(frames));++frames;QTest::qWait(10);
+            }
+            record("animation-summary",{{"scenario",scenario},{"frames",frames},{"minY",minY},{"maxY",maxY},{"minBackdrop",minH},{"maxBackdrop",maxH},{"finalProgress",w->property("playerProgress").toDouble()}});
+            QVERIFY(frames>15);
+            // Reversing at 100 ms intentionally travels only a short distance;
+            // full transitions must leave the bottom edge, reversal must move
+            // and settle without jumping (checked above at the reversal).
+            if(scenario==2)QVERIFY(maxY-minY>1);else QVERIFY(maxY-minY>20);
+            QVERIFY(maxH-minH>20);
+            const bool finalOpen=opening&&scenario!=2;QVERIFY(qAbs(w->property("playerProgress").toDouble()-(finalOpen?1:0))<.001);
+            QCOMPARE(w->property("upcomingAtLeft").toBool(),finalOpen);
+        }
+    }
+    void localAiPositiveNegativeAndPersistence(){
+        Fixture f(2);QVERIFY(prepare(f));auto *bridge=f.shell->translationBridge();auto *m=f.shell->lyricsModel();
+        QTRY_COMPARE(m->count(),2);QCOMPARE(f.http.requestCount(),0);QVERIFY(bridge->classify(1));
+        auto token=bridge->prepareAi();QVERIFY(!token.isEmpty());QVERIFY(!bridge->start("0"));bridge->declineConsent();QVERIFY(!bridge->start(token));QCOMPARE(f.http.requestCount(),0);
+        auto respond=[&]{f.http.enqueue(completion(QString::fromUtf8(translationJson({{0,"你好月亮"},{1,"你好世界"}}))));};
+        respond();token=bridge->prepareAi();QVERIFY(!token.isEmpty());QVERIFY(bridge->start(token));QVERIFY(!bridge->start(token));QTRY_VERIFY(bridge->preview());
+        QCOMPARE(f.http.requestCount(),1);QCOMPARE(LyricsDocumentReader::readFile(f.library.absolute(f.library.track(f.a.id).lyrics)).bytes,f.source);
+        record("ai-preview-unsaved",{{"state",bridge->state()},{"requests",requests(f.http)},{"databaseUnchanged",true}});QVERIFY(bridge->discard());QTRY_VERIFY(!m->preview());
+        respond();token=bridge->prepareAi();QVERIFY(!token.isEmpty());QVERIFY(bridge->start(token));QTRY_VERIFY(bridge->preview());QVERIFY(bridge->save());QTRY_COMPARE(bridge->state(),QString("Saved"));
+        QCOMPARE(f.http.requestCount(),2);const auto bytes=LyricsDocumentReader::readFile(f.library.absolute(f.library.track(f.a.id).lyrics)).bytes;QVERIFY(bytes.contains("relaxer-bilingual"));
+        f.shell.reset();f.shell=std::make_unique<QmlShell>(&f.library,nullptr,true,f.runtime.get());QVERIFY(f.shell->load());f.shell->facade()->play({f.a.id,f.b.id},f.a.id);
+        QTRY_VERIFY(f.shell->lyricsModel()->data(f.shell->lyricsModel()->index(0),LyricsModel::HasTranslation).toBool());
+        record("ai-save-reopen",{{"requests",requests(f.http)},{"savedBytes",QString::fromUtf8(bytes)},{"translation",f.shell->lyricsModel()->data(f.shell->lyricsModel()->index(0),LyricsModel::Translation).toString()}});
+        QCOMPARE(f.http.requestCount(),2);QVERIFY(f.shell->warnings().isEmpty());
+    }
+    void folderBridgeMatrixAndHarnessFixtureDiagnosis(){
+        QTemporaryDir dir;const auto data=dir.filePath("data");qint64 count=0;
+        {
+            Library lib(data);QVERIFY(lib.open());QmlShell shell(&lib,nullptr,true);auto *bridge=shell.importBridge();
+            const auto folder=dir.filePath("中文 folder with spaces");QVERIFY(QDir().mkpath(folder+"/子目录"));
+            const auto badHarness=folder+QString("/\\u4e2d\\u6587 %1.wav").arg(0);
+            const bool created=wave(badHarness);QVERIFY(!created);QCOMPARE(QDir(folder).entryList(QDir::Files).size(),0);
+            record("r15-fixture-diagnosis",{{"attemptedPath",badHarness},{"writeSucceeded",created},{"directoryFiles",0},{"cause","R15 literal backslash-u filename creates nonexistent subdirectories; writeWav return was unchecked"}});
+            QVERIFY(import_fixture::midi(folder+"/一.mid",1001));QVERIFY(import_fixture::midi(folder+"/二.mid",1002));QVERIFY(import_fixture::midi(folder+"/子目录/three.mid",1003));
+            QFile text(folder+"/说明.txt");QVERIFY(text.open(QIODevice::WriteOnly));text.write("not audio");text.close();
+            const auto one=dir.filePath("one.mid"),two=dir.filePath("two.mid"),three=dir.filePath("three.mid");
+            QVERIFY(import_fixture::midi(one,1004));QVERIFY(import_fixture::midi(two,1005));QVERIFY(import_fixture::midi(three,1006));
+            auto start=[&](QStringList paths){QList<QUrl> urls;for(const auto &path:paths)urls<<QUrl::fromLocalFile(path);return bridge->start(urls);};
+            QVERIFY(start({one}));QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);QCOMPARE(lib.trackCount(),qint64(1));record("import-single",QJsonObject::fromVariantMap(bridge->result()));
+            QVERIFY(start({two,three}));QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);QCOMPARE(lib.trackCount(),qint64(3));record("import-multiple",QJsonObject::fromVariantMap(bridge->result()));
+            QVERIFY(start({folder}));QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);QCOMPARE(lib.trackCount(),qint64(6));QCOMPARE(bridge->result()["ignoredPaths"].toInt(),1);record("import-recursive-folder",QJsonObject::fromVariantMap(bridge->result()));
+            QVERIFY(start({folder}));QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);QCOMPARE(bridge->result()["duplicates"].toInt(),3);record("import-repeat",QJsonObject::fromVariantMap(bridge->result()));
+            const auto empty=dir.filePath("empty");QVERIFY(QDir().mkpath(empty));
+            QVERIFY(start({empty}));QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);record("import-empty",QJsonObject::fromVariantMap(bridge->result()));
+            QVERIFY(start({dir.filePath("does not exist")}));QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);QCOMPARE(bridge->result()["ignoredPaths"].toInt(),1);record("import-missing",QJsonObject::fromVariantMap(bridge->result()));
+            const auto broken=dir.filePath("broken.wav"),fresh=dir.filePath("fresh.mid");QFile bad(broken);QVERIFY(bad.open(QIODevice::WriteOnly));bad.write("bad wave");bad.close();QVERIFY(import_fixture::midi(fresh,1007));
+            QVERIFY(start({broken,fresh}));QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);QCOMPARE(bridge->result()["failed"].toInt(),1);QCOMPARE(bridge->result()["added"].toInt(),1);QVERIFY(!bridge->result()["errors"].toStringList().isEmpty());record("import-partial",QJsonObject::fromVariantMap(bridge->result()));
+            QTRY_COMPARE(shell.libraryModel()->count(),7);count=lib.trackCount();QCOMPARE(QSqlDatabase::connectionNames().size(),1);QVERIFY(shell.shutdown());
+        }
+        Library reopened(data);QVERIFY(reopened.open());QCOMPARE(reopened.trackCount(),count);record("import-reopened",{{"tracks",double(reopened.trackCount())},{"connections",QSqlDatabase::connectionNames().size()}});
+    }
+};
+int main(int argc,char **argv){QApplication app(argc,argv);app.setStyle("Fusion");app.setQuitOnLastWindowClosed(false);C6EvidenceTests tests;return QTest::qExec(&tests,argc,argv);}
+#include "qml-c6-evidence-tests.moc"
