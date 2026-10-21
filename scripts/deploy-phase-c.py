@@ -51,8 +51,8 @@ def main():
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
 
-    def run(command):
-        result = subprocess.run(list(map(str, command)), env=env, capture_output=True,
+    def run(command, cwd=None):
+        result = subprocess.run(list(map(str, command)), env=env, cwd=cwd, capture_output=True,
                                 text=True, encoding="utf-8", errors="replace", timeout=120, startupinfo=startup)
         assert result.returncode == 0, result.stdout + result.stderr
         return result.stdout
@@ -101,7 +101,10 @@ def main():
             file = pending.popleft()
             if file in seen: continue
             seen.add(file)
-            for name in re.findall(r"DLL Name:\s*(\S+)", run([objdump, "-p", file])):
+            # Binutils' narrow filename conversion cannot represent every
+            # Unicode absolute path. CreateProcessW can set the real Unicode
+            # working directory; pass the unchanged file's ASCII basename.
+            for name in re.findall(r"DLL Name:\s*(\S+)", run([objdump, "-p", file.name], cwd=file.parent)):
                 if name.lower().startswith(("api-ms-", "ext-ms-")): continue
                 target = output / name
                 if target.exists():
