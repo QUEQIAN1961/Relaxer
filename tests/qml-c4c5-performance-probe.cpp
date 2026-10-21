@@ -116,8 +116,20 @@ int main(int argc,char **argv) {
     clock.restart();model->setFilterText("Artist A");result["filterModelMs"]=clock.nsecsElapsed()/1000000.;
     if(frame(window)<0||model->count()!=(count+1)/2)return 15;
     result["filterUntilNextFrameMs"]=clock.nsecsElapsed()/1000000.;
-    model->setFilterText({});clock.restart();model->setSortKey(1);result["sortModelMs"]=clock.nsecsElapsed()/1000000.;
-    if(frame(window)<0)return 16;result["sortUntilNextFrameMs"]=clock.nsecsElapsed()/1000000.;
+    model->setFilterText({});if(frame(window)<0)return 16;
+    clock.restart();model->setSortKey(1);result["sortCallOnlyMs"]=clock.nsecsElapsed()/1000000.;
+    // Proxy mappings may be lazy: force every row before stopping the clock.
+    const auto sorted=model->ids();
+    result["sortCompleteIncludingMappingMs"]=clock.nsecsElapsed()/1000000.;
+    if(sorted.size()!=count)return 16;
+    QString previous;
+    for(int row=0;row<count;++row){
+        const auto title=model->data(model->index(row,0),TrackListModel::Title).toString();
+        if(row&&QString::localeAwareCompare(previous,title)>0)return 16;
+        previous=title;
+    }
+    result["sortAllRowsOrderVerified"]=true;
+    if(frame(window)<0)return 16;result["sortAndVerificationUntilNextFrameMs"]=clock.nsecsElapsed()/1000000.;
     QJsonArray navigation;
     for(int i=0;i<12;++i) {
         shell.appBridge()->navigate(i%3);const auto ms=frame(window);if(ms<0)return 17;navigation.append(ms);
@@ -215,24 +227,21 @@ int main(int argc,char **argv) {
         result["rapidTrackChangeNextFrameMs"]=transitions;result["memoryAfterRapidTrackChanges"]=memory();
     }
     shell.appBridge()->navigate(3);if(frame(window)<0)return 42;
+    {QElapsedTimer settle;settle.start();while(window->property("playerProgress").toDouble()>.001&&settle.elapsed()<3000)QTest::qWait(10);if(window->property("playerProgress").toDouble()>.001)return 42;}
     auto *settings=visual(window->contentItem(),"settingsPage");if(!settings)return 42;
-    settings->setProperty("section",0);if(frame(window)<0)return 42;
     clock.restart();shell.settingsBridge()->edit("reduceMotion",true);if(!shell.settingsBridge()->save()||frame(window)<0)return 43;
     result["settingsSaveUntilNextFrameMs"]=clock.nsecsElapsed()/1000000.;
     if(!shots.isEmpty()&&!window->grabWindow().save(QDir(shots).filePath("settings.png")))return 35;
-    settings->setProperty("section",2);if(frame(window)<0)return 42;
+    if(!QMetaObject::invokeMethod(settings,"aiRequested"))return 42;
+    {QElapsedTimer settle;settle.start();while(window->property("settingsSection").toString()!="ai"&&settle.elapsed()<3000)QTest::qWait(10);if(window->property("settingsSection").toString()!="ai")return 42;}
+    if(frame(window)<0)return 42;
     if(!shots.isEmpty()&&!window->grabWindow().save(QDir(shots).filePath("translation-ai.png")))return 35;
     if(!shots.isEmpty()) {
-        auto *translation=visual(window->contentItem(),"translationPage");
-        auto *flick=translation?qvariant_cast<QQuickItem *>(translation->property("contentItem")):nullptr;
-        if(!flick)return 42;
-        flick->setProperty("contentY",qMax(0.,flick->property("contentHeight").toDouble()-flick->height()));
         if(frame(window)<0||!window->grabWindow().save(QDir(shots).filePath("ai-config.png")))return 35;
-        flick->setProperty("contentY",0.);
     }
     const auto incoming=QDir(root).filePath("incoming");QDir().mkpath(incoming);
     for(int i=0;i<10;++i){QFile file(QDir(incoming).filePath(QString("导入 %1.mid").arg(i)));if(!file.open(QIODevice::WriteOnly))return 44;file.write(QByteArray::fromHex("4d546864000000060000000100604d54726b0000000400ff2f00")+QByteArray::number(i));}
-    settings->setProperty("section",1);if(frame(window)<0)return 42;
+    if(!QMetaObject::invokeMethod(window,"navigateOriginal",Q_ARG(QVariant,QVariant(3)))||frame(window)<0)return 42;
     const auto importQueue=shell.facade()->queue().items;clock.restart();
     if(!shell.importBridge()->start({QUrl::fromLocalFile(incoming)}))return 45;
     QJsonArray importFrames;QElapsedTimer wait;wait.start();
@@ -243,7 +252,7 @@ int main(int argc,char **argv) {
     if(!shots.isEmpty()&&!window->grabWindow().save(QDir(shots).filePath("import.png")))return 35;
     if(!shots.isEmpty()) {
         if(!shell.settingsBridge()->setTheme(1))return 43;
-        settings->setProperty("section",0);QTest::qWait(250);
+        QTest::qWait(250);
         if(frame(window)<0||!window->grabWindow().save(QDir(shots).filePath("settings-dark.png")))return 35;
         QMetaObject::invokeMethod(window,"showLyrics");QTest::qWait(250);
         if(frame(window)<0||!window->grabWindow().save(QDir(shots).filePath("lyrics-dark.png")))return 35;

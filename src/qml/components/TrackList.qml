@@ -55,7 +55,7 @@ Item {
                 delegate:Item{
                     required property int index;required property string modelData
                     width:table.columnWidths[index];height:38
-                    UiText {anchors.fill:parent;anchors.leftMargin:8;text:table.bulkMode&&index===0?"选择":modelData;color:Theme.secondary;font.pixelSize: 13;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
+                    UiText { fontRegion: "songs";anchors.fill:parent;anchors.leftMargin:8;text:table.bulkMode&&index===0?"选择":modelData;color:Theme.secondary;font.pixelSize: 13;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
                     MouseArea{anchors.fill:parent;onClicked:{if(index===0&&table.bulkMode){const all=[];for(let i=0;i<table.trackModel.count;i++)all.push(table.trackModel.idAt(i));table.checkedKeys=table.checkedKeys.length===all.length?[]:all;table.bulkChanged(true,table.checkedKeys)}else table.sortColumn(index)}}
                     MouseArea{
                         visible:index>=2;anchors.right:parent.right;width:6;height:parent.height;cursorShape:Qt.SplitHCursor
@@ -106,21 +106,21 @@ Item {
                     Item{
                         width:table.columnWidths[0];height:parent.height
                         CheckBox{visible:table.bulkMode;anchors.centerIn:parent;checked:table.checkedKeys.indexOf(row.trackKey)>=0;onClicked:table.toggleKey(row.trackKey)}
-                        UiText {visible:!table.bulkMode&&!hover.containsMouse&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
+                        UiText { fontRegion: "songs";visible:!table.bulkMode&&!hover.containsMouse&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
                         IconButton{visible:!table.bulkMode&&(hover.containsMouse||table.currentKey===row.trackKey);anchors.centerIn:parent;width:28;height:28;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"volumeMedium":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:table.playRequested(row.trackKey)}
                     }
                     Item{width:table.columnWidths[1];height:parent.height;IconButton{anchors.centerIn:parent;width:28;height:28;symbol:row.favorite?"liked":"heart";tint:row.favorite?Theme.accent:Theme.secondary;onClicked:if(!table.bulkMode)table.favoriteRequested(row.trackKey)}}
                     Item{
                         width:table.columnWidths[2];height:parent.height
                         Artwork{x:6;anchors.verticalCenter:parent.verticalCenter;width:40;height:40;file:row.rowCover;seed:row.title;resolution:128;radius:6}
-                        UiText {x:56;width:parent.width-62;anchors.verticalCenter:parent.verticalCenter;text:row.title;textFormat:Text.PlainText;color:table.currentKey===row.trackKey?Theme.accent:Theme.text;font.pixelSize: 15;font.weight:Font.DemiBold;font.family:{const f=settingsBridge.values.uiFont;return settingsBridge.fontFamilyFor("songs")||"Microsoft YaHei UI"} elide:Text.ElideRight}
+                        UiText { fontRegion: "songs";x:56;width:parent.width-62;anchors.verticalCenter:parent.verticalCenter;text:row.title;textFormat:Text.PlainText;color:table.currentKey===row.trackKey?Theme.accent:Theme.text;font.pixelSize: 15;font.weight:Font.DemiBold;elide:Text.ElideRight}
                     }
                     Repeater{
                         model:table.statisticsMode?4:5
                         delegate:Item{
                             required property int index
                             width:table.columnWidths[index+3];height:row.height
-                            UiText {anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:8;text:index===0?row.artist:index===1?row.album:index===2?table.timeText(row.duration):index===3?table.statisticsMode?row.rowPlays:table.sizeText(row.rowSize):row.rowAdded.length?row.rowAdded.slice(0,10):"—";textFormat:Text.PlainText;color:Theme.secondary;font.pixelSize: 14;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
+                            UiText { fontRegion: "songs";anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:8;text:index===0?row.artist:index===1?row.album:index===2?table.timeText(row.duration):index===3?table.statisticsMode?row.rowPlays:table.sizeText(row.rowSize):row.rowAdded.length?row.rowAdded.slice(0,10):"—";textFormat:Text.PlainText;color:Theme.secondary;font.pixelSize: 14;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
                         }
                     }
                 }

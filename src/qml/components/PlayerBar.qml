@@ -33,12 +33,12 @@ Rectangle {
         }
         Column {
             x: 92; width: 194; anchors.verticalCenter: parent.verticalCenter; spacing: 4
-            UiText {
+            UiText { fontRegion: "footer";
                 id: title; objectName: "currentTitle"; width: parent.width
                 text: playbackBridge.hasTrack ? playbackBridge.title : "Relaxer"
                 textFormat: Text.PlainText; font.pixelSize: 15; font.weight:Font.DemiBold;color: Theme.text; elide: Text.ElideRight
             }
-            UiText {
+            UiText { fontRegion: "footer";
                 id: artist; objectName: "currentArtist"; width: parent.width
                 text: playbackBridge.hasTrack ? playbackBridge.artist : "选一首歌，开始放松。"
                 textFormat: Text.PlainText; font.pixelSize: 14; color: Theme.secondary; elide: Text.ElideRight
@@ -90,7 +90,7 @@ Rectangle {
         }
         RowLayout {
             x: 0; y: 46; width: parent.width; height: 22; spacing: 8
-            UiText {
+            UiText { fontRegion: "footer";
                 objectName: "playbackState"; Layout.preferredWidth: 40
                 text: bar.timeText(playbackBridge.position); color: Theme.secondary; font.pixelSize: 12
             }
@@ -108,7 +108,7 @@ Rectangle {
                 onMoved: { if (pressed) dragValue = value; else if (playbackBridge.seekable) playbackBridge.seek(Math.round(value)) }
                 Binding { target: seek; property: "value"; value: Math.min(playbackBridge.position,seek.to); when: !seek.pressed; restoreMode: Binding.RestoreBindingOrValue }
             }
-            UiText {
+            UiText { fontRegion: "footer";
                 objectName: "durationDisplay"; Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight
                 text: bar.timeText(playbackBridge.duration); color: Theme.secondary; font.pixelSize: 12
             }

@@ -410,12 +410,20 @@ if(RELAXER_ENABLE_QML)
   relaxer_add_qt_test(relaxer_qml_c6_evidence relaxer_qml_c6_evidence_tests)
   relaxer_qml_test_environment(relaxer_qml_c6_evidence)
   set_tests_properties(relaxer_qml_c6_evidence PROPERTIES TIMEOUT 240)
+  add_executable(relaxer_qml_c6_parity_tests tests/qml-c6-parity-tests.cpp)
+  target_link_libraries(relaxer_qml_c6_parity_tests PRIVATE relaxer_qml Qt6::Test)
+  relaxer_add_qt_test(relaxer_qml_c6_parity relaxer_qml_c6_parity_tests)
+  relaxer_qml_test_environment(relaxer_qml_c6_parity)
+  set_tests_properties(relaxer_qml_c6_parity PROPERTIES TIMEOUT 180)
   if(WIN32)
     # Pixel/hover evidence must exercise the native window backend. Offscreen
     # has no real cursor/window activation and can return black grab buffers.
     # Keep all assertions and configure this per test, never in the user's shell.
     set_property(TEST relaxer_qml_c6_evidence APPEND PROPERTY ENVIRONMENT_MODIFICATION
       "QT_QPA_PLATFORM=set:windows")
+    set_property(TEST relaxer_qml_c6_parity APPEND PROPERTY ENVIRONMENT_MODIFICATION
+      "QT_QPA_PLATFORM=set:windows")
+    target_link_libraries(relaxer_qml_c6_parity_tests PRIVATE user32)
   endif()
   add_executable(relaxer_qml_tests tests/qml-foundation-tests.cpp)
   target_link_libraries(relaxer_qml_tests PRIVATE relaxer_qml Qt6::Test)

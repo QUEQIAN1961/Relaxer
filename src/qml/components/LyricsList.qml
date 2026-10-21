@@ -96,12 +96,14 @@ Item {
                     Behavior on scale { NumberAnimation { duration: panel.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
                     Behavior on opacity { NumberAnimation { duration: panel.reduceMotion ? 0 : 180 } }
                     UiText {
+                        fontRegion: "lyrics"
                         width: parent.width; text: row.original; textFormat: Text.PlainText
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
-                        font.pixelSize: 22; font.family: { const f=settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("lyrics") || "Microsoft YaHei UI" } font.weight: Font.DemiBold
+                        font.pixelSize: 22; font.weight: Font.DemiBold
                         color: settingsBridge.values.lyricColor.length > 0 ? settingsBridge.values.lyricColor : Theme.text
                     }
                     UiText {
+                        fontRegion: "lyrics"
                         width: parent.width; text: row.translation; textFormat: Text.PlainText
                         visible: settingsBridge.values.showLyricTranslation && text.length > 0
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
