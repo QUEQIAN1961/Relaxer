@@ -172,7 +172,7 @@ int main(int argc,char **argv) {
     }
     if(parser.isSet("screenshots")) {
         const auto directory=parser.value("screenshots");QDir().mkpath(directory);
-        for(const auto &size:{QSize(900,600),QSize(1180,760),QSize(1600,900)}) {
+        for(const auto &size:{QSize(1000,660),QSize(1240,790),QSize(1600,900)}) {
             window->resize(size);if(frame(window)<0||!window->grabWindow().save(QDir(directory).filePath(QString("%1x%2.png").arg(size.width()).arg(size.height()))))return 23;
         }
         shell.appBridge()->navigate(2);if(frame(window)<0||!window->grabWindow().save(QDir(directory).filePath("queue.png")))return 23;
@@ -202,7 +202,7 @@ int main(int argc,char **argv) {
     QTest::qWait(100);if(window->geometry()!=beforeBounds||shell.facade()->queue().items!=queueBefore)return 34;
     result["fullscreenNextFrameMs"]=fullscreen;result["fullscreenGeometryRestored"]=true;
     const auto shots=parser.value("screenshots");
-    if(!shots.isEmpty())for(const auto &size:{QSize(900,600),QSize(1180,760),QSize(1600,900)}){
+    if(!shots.isEmpty())for(const auto &size:{QSize(1000,660),QSize(1240,790),QSize(1600,900)}){
         window->resize(size);if(frame(window)<0||!window->grabWindow().save(QDir(shots).filePath(QString("lyrics-%1x%2.png").arg(size.width()).arg(size.height()))))return 35;
     }
     if(count){
