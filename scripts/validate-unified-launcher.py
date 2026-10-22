@@ -16,6 +16,12 @@ def main():
     env=support['clean_environment'](out); env.pop('QT_QPA_PLATFORM',None)
     k,u=support['k'],support['u']; k.SetErrorMode(0x8003)
     k.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD]; k.OpenProcess.restype=w.HANDLE
+    k.GetExitCodeProcess.argtypes=[w.HANDLE,c.POINTER(w.DWORD)]
+    k.QueryFullProcessImageNameW.argtypes=[w.HANDLE,w.DWORD,w.LPWSTR,c.POINTER(w.DWORD)]
+    k.TerminateProcess.argtypes=[w.HANDLE,w.UINT]
+    k.GetCurrentProcess.restype=w.HANDLE
+    k.DuplicateHandle.argtypes=[w.HANDLE,w.HANDLE,w.HANDLE,c.POINTER(w.HANDLE),w.DWORD,w.BOOL,w.DWORD]
+    k.WaitForSingleObject.argtypes=[w.HANDLE,w.DWORD]
     ps=c.WinDLL('psapi',use_last_error=True)
     ps.EnumProcessModules.argtypes=[w.HANDLE,c.POINTER(w.HMODULE),w.DWORD,c.POINTER(w.DWORD)]
     ps.GetModuleFileNameExW.argtypes=[w.HANDLE,w.HMODULE,w.LPWSTR,w.DWORD]
@@ -23,7 +29,7 @@ def main():
     u.GetClassNameW.argtypes=[w.HWND,w.LPWSTR,c.c_int]
     u.EnumChildWindows.argtypes=[w.HWND,support['callback_type'],w.LPARAM]
     startup=subprocess.STARTUPINFO(); startup.dwFlags|=subprocess.STARTF_USESHOWWINDOW; startup.wShowWindow=5
-    rows=[]; active=[]
+    rows=[]; active=[]; cleanup=[]
     def modules(pid):
         h=k.OpenProcess(0x410,False,pid); assert h,('OpenProcess',pid,c.get_last_error())
         try:
@@ -64,21 +70,68 @@ def main():
                     values.append(result.stdout.decode('utf-8',errors='replace'))
                 found.append((hwnd,'\n'.join(values)))
         return found
+    def created(handle):
+        times=[w.FILETIME() for _ in range(4)]
+        assert k.GetProcessTimes(handle,*(c.byref(t) for t in times))
+        return (times[0].dwHighDateTime<<32)+times[0].dwLowDateTime
+    def image(handle):
+        buf=c.create_unicode_buffer(32768);size=w.DWORD(len(buf))
+        if not k.QueryFullProcessImageNameW(handle,0,buf,c.byref(size)):
+            error=c.get_last_error()
+            # A short-lived child may exit between the snapshot and this query.
+            # Only a signaled original handle may be ignored; a live query
+            # failure remains a verification failure.
+            if k.WaitForSingleObject(handle,50)==0:return None
+            raise c.WinError(error)
+        return Path(buf.value).resolve()
+    def admitted(parent_time,child_time,child_path):
+        return child_time>=parent_time and child_path.is_relative_to(out)
+    # PID-only ancestry is unsafe: Windows retains stale parent IDs and reuses
+    # them. Require both birth order and this disposable directory, then retain
+    # the actual handle so neither monitoring nor cleanup can target a reused ID.
+    assert not admitted(20,10,out/'old.exe')
+    assert not admitted(10,20,Path(os.environ['SystemRoot']).resolve()/'explorer.exe')
+    assert admitted(10,20,out/'runtime/Relaxer.exe')
     def track(item):
         for pid,(parent,name) in support['processes']().items():
-            if parent in item['owned']:item['owned'].add(pid)
+            if pid in item['identities'] or parent not in item['identities']:continue
+            handle=k.OpenProcess(0x100000|0x1000|1,False,pid)
+            if not handle:continue
+            try:
+                birth=created(handle);path=image(handle)
+                if path is None:continue
+                if not admitted(item['identities'][parent][1],birth,path):continue
+                item['owned'].add(pid);item['identities'][pid]=(handle,birth,path)
+                handle=None
+            finally:
+                if handle:k.CloseHandle(handle)
+    def living(item):
+        result=[]
+        for pid,(handle,birth,path) in item['identities'].items():
+            code=w.DWORD();assert k.GetExitCodeProcess(handle,c.byref(code))
+            if code.value==259:result.append(pid)
+        return sorted(result)
     def start(command,tag):
         f=(out/(tag+'.log')).open('xb')
         p=subprocess.Popen(command if isinstance(command,str) else list(map(str,command)),cwd=out,env=env,
             stdout=f,stderr=subprocess.STDOUT,startupinfo=startup)
-        item={'p':p,'owned':{p.pid},'tag':tag,'file':f};active.append(item);return item
+        # Duplicate the original CreateProcess handle; never rediscover a root
+        # by PID, including when it has already exited.
+        duplicate=w.HANDLE();current=k.GetCurrentProcess()
+        assert k.DuplicateHandle(current,int(p._handle),current,c.byref(duplicate),0,False,2)
+        root_handle=duplicate.value
+        item={'p':p,'owned':{p.pid},'tag':tag,'file':f,
+            'identities':{p.pid:(root_handle,created(root_handle),image(root_handle))}}
+        active.append(item);return item
     def finish(item,expected=0):
         deadline=time.monotonic()+30
         while item['p'].poll() is None and time.monotonic()<deadline:track(item);time.sleep(.025)
         assert item['p'].poll()==expected,(item['tag'],item['p'].poll(),expected)
         item['file'].close();track(item)
-        remaining=sorted(item['owned'] & support['processes']().keys());assert not remaining,(item['tag'],remaining)
+        remaining=living(item);assert not remaining,(item['tag'],remaining)
         rows.append({'case':item['tag'],'exit':expected,'remainingOwned':remaining})
+        rows[-1]['ownedIdentities']=[{'pid':pid,'created':birth,'image':str(path),
+            'originalRoot':pid==item['p'].pid} for pid,(_,birth,path) in item['identities'].items()]
         (out/'rows.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding='utf-8')
         return rows[-1]
     def ready(item,mode,report=None):
@@ -217,17 +270,29 @@ def main():
             'sourceCommit':deployment['sourceCommit'],'sourceTree':deployment['sourceTree'],
             'sourceFingerprint':deployment['sourceFingerprint'],'binarySHA256':deployment['binarySHA256'],
             'peImports':imports,'sharedDefaultDataRoot':True,'delayedGuiLockExit':3,'friendlyMissingExit':11,
+            'ownershipPolicy':'Original root handles; descendants require birth order and executable within this run; retained handles prevent PID reuse',
+            'ownershipGuardFixturesPassed':3,
             'noPersonalDataUsed':True,'paidRequests':0,'physicalInput':False}
         (out/'RESULT.json').write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8')
         print(json.dumps({'status':'PASS','cases':len(rows)},ensure_ascii=False),flush=True)
     finally:
         # Only owned disposable test processes are cleaned on assertion failure.
         for item in active:
-            track(item)
-            for pid in item['owned'] & support['processes']().keys():
-                handle=k.OpenProcess(1,False,pid)
-                if handle:
-                    k.TerminateProcess.argtypes=[w.HANDLE,w.UINT];k.TerminateProcess(handle,124);k.CloseHandle(handle)
+            # Never expand ancestry or open a PID for termination during cleanup.
+            # Only original retained handles are eligible, and child paths must
+            # still be under this run's directory. No image-name/global cleanup.
+            for pid,(handle,birth,path) in item['identities'].items():
+                code=w.DWORD()
+                if k.GetExitCodeProcess(handle,c.byref(code)) and code.value==259:
+                    if pid==item['p'].pid or (path is not None and path.is_relative_to(out) and created(handle)==birth):
+                        assert created(handle)==birth
+                        cleanup.append({'pid':pid,'image':str(path),'originalRoot':pid==item['p'].pid,
+                            'insideRun':path is not None and path.is_relative_to(out),'created':birth})
+                        assert k.TerminateProcess(handle,124)
+                        assert k.WaitForSingleObject(handle,5000)==0
+                k.CloseHandle(handle)
             item['file'].close()
+        (out/'cleanup-audit.json').write_text(json.dumps({'targets':cleanup,
+            'policy':'Retained verified handles only; never terminate by PID or expand ancestry during cleanup'},ensure_ascii=False,indent=2),encoding='utf-8')
 
 if __name__=='__main__': main()
