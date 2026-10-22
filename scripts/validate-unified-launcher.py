@@ -84,6 +84,12 @@ def main():
                     assert all(table[p][1].lower()!='conhost.exe' for p in item['owned'] if p in table)
                     if report:
                         value=json.loads(report.read_text(encoding='utf-8'));assert value['mode']==mode
+                        # Widgets emits a database-ready snapshot before the
+                        # window-ready snapshot; retain the full invariant and
+                        # wait for its fields instead of treating existence as readiness.
+                        if 'databaseConnections' not in value or 'playbackInstances' not in value:
+                            time.sleep(.025)
+                            continue
                         assert value['databaseConnections']==value['playbackInstances']==1
                     item.update(player=pid,hwnds=hwnds,loaded=loaded);return
             time.sleep(.04)
