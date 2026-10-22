@@ -43,11 +43,25 @@ def main():
         for pid in pids:
             for hwnd in support['windows'](pid):
                 buf=c.create_unicode_buffer(128);u.GetClassNameW(hwnd,buf,len(buf))
-                if buf.value!='#32770':continue
+                if buf.value!='#32770' and text(hwnd)!='Relaxer':continue
                 values=[text(hwnd)]
                 @support['callback_type']
                 def child(control,_):values.append(text(control));return True
                 u.EnumChildWindows(hwnd,child,0)
+                # QMessageBox is a Qt window, not a native #32770 dialog.
+                # Its alien child widgets expose their text through UI Automation.
+                if buf.value!='#32770':
+                    powershell=Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe'
+                    command=('[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); '
+                        'Add-Type -AssemblyName UIAutomationClient; '
+                        '$e=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]'+str(hwnd)+'); '
+                        '$e.FindAll([System.Windows.Automation.TreeScope]::Descendants,'
+                        '[System.Windows.Automation.Condition]::TrueCondition) | '
+                        'ForEach-Object { $_.Current.Name }')
+                    result=subprocess.run([str(powershell),'-NoLogo','-NoProfile','-NonInteractive','-Command',command],
+                        capture_output=True,timeout=10,creationflags=subprocess.CREATE_NO_WINDOW)
+                    assert result.returncode==0,result.stderr
+                    values.append(result.stdout.decode('utf-8',errors='replace'))
                 found.append((hwnd,'\n'.join(values)))
         return found
     def track(item):
@@ -155,7 +169,7 @@ def main():
         assert any('另一个 Relaxer' in value for _,value in found),found
         (out/'lock-dialog.txt').write_text('\n'.join(v for _,v in found),encoding='utf-8')
         time.sleep(3.1);assert other['p'].poll() is None
-        for hwnd,_ in found:assert u.PostMessageW(hwnd,0x111,1,0)
+        for hwnd,_ in found:assert u.PostMessageW(hwnd,0x10,0,0)
         finish(other,3);assert item['p'].poll() is None;close(item,report)
         # Each missing optional component: controlled launcher/runtime exit 11,
         # no dataRoot, independent Widgets, then restored QML.
@@ -178,7 +192,7 @@ def main():
                     time.sleep(.05)
                 assert any('新版界面的组件缺失' in v and '--widgets' in v and '11' in v for _,v in found),found
                 (out/'missing-dialog.txt').write_text('\n'.join(v for _,v in found),encoding='utf-8')
-                for hwnd,_ in found:assert u.PostMessageW(hwnd,0x111,1,0)
+                for hwnd,_ in found:assert u.PostMessageW(hwnd,0x10,0,0)
                 finish(p,11);assert not data.exists()
             shutil.copy2(package/'runtime'/filename,target)
             p=start([missing/'RelaxerStart.exe','--data',out/('restored-'+filename),'--diagnostics',out/(filename+'-restored.json'),'--quit-after','250'],'restored-'+filename);finish(p)
@@ -190,7 +204,9 @@ def main():
         assert objdump,'objdump required for PE dependency audit'
         imports={}
         for name,path in [('launcher',launcher),('runtime',runtime),('qml',copy/'runtime/RelaxerQmlUi.dll')]:
-            result=subprocess.run([objdump,'-p',str(path)],capture_output=True,check=True)
+            # MinGW objdump's filename argument is ANSI; let CreateProcessW set
+            # the Unicode working directory and pass only the ASCII basename.
+            result=subprocess.run([objdump,'-p',path.name],cwd=path.parent,capture_output=True,check=True)
             raw=result.stdout.decode('utf-8',errors='replace');(out/(name+'-pe.txt')).write_text(raw,encoding='utf-8')
             imports[name]=[line.split('DLL Name:')[1].strip() for line in raw.splitlines() if 'DLL Name:' in line]
         assert not any('qt6' in s.lower() for s in imports['launcher'])
