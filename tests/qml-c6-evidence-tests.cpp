@@ -14,6 +14,14 @@ namespace {
 QString output;
 int serial=0;
 QRectF rect(QQuickItem *item){return item->mapRectToScene(QRectF(QPointF(),item->size()));}
+template<typename Predicate> bool remainsTrueFor(Predicate predicate,int milliseconds){
+    QElapsedTimer timer;timer.start();
+    while(timer.elapsed()<milliseconds){
+        if(!predicate())return false;
+        QTest::qWait(qMin(20,qMax(1,milliseconds-int(timer.elapsed()))));
+    }
+    return predicate();
+}
 void record(const QString &stage,QJsonObject value){
     value["stage"]=stage;value["test"]=QString::fromLatin1(QTest::currentTestFunction());
     value["utc"]=QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
@@ -426,13 +434,28 @@ private slots:
         QTest::mouseMove(w,QPoint(30,40));QTest::qWait(60);
         QTest::mouseMove(w,rect(panel).center().toPoint());QTest::qWait(200);
         record("question-hover-initial",{{"opacity",question->opacity()},{"panelVisible",panel->isVisible()},{"panelX",rect(panel).x()},{"panelY",rect(panel).y()},{"panelWidth",panel->width()},{"panelHeight",panel->height()}});shot(w,"question-hover-initial");QTRY_VERIFY(question->opacity()>.99);
-        QTest::mouseMove(w,rect(question).center().toPoint());QTest::qWait(3150);QVERIFY(question->opacity()>.99);
+        QTest::mouseMove(w,rect(question).center().toPoint());
+        QTRY_VERIFY(question->property("hovered").toBool());
+        // Observe the entire original interval, beyond the 3000 ms idle timer.
+        // Retrying visibility alone would pass immediately and miss early hiding.
+        const bool questionHeld=remainsTrueFor([&]{return question->property("hovered").toBool()&&question->opacity()>.99;},3150);
+        record("question-hover-held",{{"heldFor3150ms",questionHeld},{"hovered",question->property("hovered").toBool()},{"opacity",question->opacity()}});
+        QVERIFY2(questionHeld,"Question hover/visibility was not continuous for 3150 ms");
         QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(question).center().toPoint());
         auto *menu=w->findChild<QObject *>("lyricToolsMenu");QVERIFY(menu);QTRY_VERIFY(menu->property("visible").toBool());
+        QTRY_VERIFY(menu->property("opened").toBool());
         auto *body=qvariant_cast<QQuickItem *>(menu->property("contentItem"));QVERIFY(body);
-        QTest::mouseMove(w,rect(body).center().toPoint());QTest::qWait(3150);QVERIFY(menu->property("visible").toBool());
+        body->ensurePolished();
+        QTRY_VERIFY(body->width()>0&&body->height()>0&&QRectF(QPointF(),w->size()).contains(rect(body).center()));
+        QTest::mouseMove(w,rect(body).center().toPoint());
+        QTRY_VERIFY(menu->property("hovered").toBool());
+        const bool menuHeld=remainsTrueFor([&]{return menu->property("hovered").toBool()&&menu->property("visible").toBool();},3150);
+        record("question-menu-hover-held",{{"heldFor3150ms",menuHeld},{"hovered",menu->property("hovered").toBool()},{"opened",menu->property("opened").toBool()},{"visible",menu->property("visible").toBool()},{"bodyWidth",body->width()},{"bodyHeight",body->height()}});
+        QVERIFY2(menuHeld,"Opened menu hover/visibility was not continuous for 3150 ms");
         auto *art=visual(w->contentItem(),"currentArtwork");QVERIFY(art);QTest::mouseMove(w,rect(art).center().toPoint());
-        QTest::qWait(1500);QVERIFY(menu->property("visible").toBool());QTRY_VERIFY_WITH_TIMEOUT(!menu->property("visible").toBool(),2500);
+        QTRY_VERIFY(!question->property("hovered").toBool()&&!menu->property("hovered").toBool());
+        QVERIFY2(remainsTrueFor([&]{return menu->property("visible").toBool();},1500),"Menu hid during the first 1500 ms after leaving both hover regions");
+        QTRY_VERIFY_WITH_TIMEOUT(!menu->property("visible").toBool(),2500);
         record("question-menu-idle",{{"staysWhileQuestionHovered",true},{"staysWhileMenuHovered",true},{"closedAfterLeavingBoth",true}});
     }
     void userReviewPageInteriorNeverFlashesBlack_data(){

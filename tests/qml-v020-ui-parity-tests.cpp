@@ -197,8 +197,11 @@ private slots:
         QCOMPARE(activated.size(), 1); QCOMPARE(f.shell->facade()->queue().items, queue);
         QVERIFY(click(window, visual(content, "bottomCover")));
         QTRY_VERIFY_WITH_TIMEOUT(window->property("playerProgress").toReal() > .999, 1200);
+        // The panel has its own outgoing/incoming animations. Player progress
+        // can reach its endpoint before the incoming panel animation finishes.
+        QTRY_VERIFY_WITH_TIMEOUT(!panel->property("relocating").toBool(), 1200);
         QTRY_VERIFY(qAbs(sceneBounds(panel).left() - 8.) < 2);
-        QVERIFY(qAbs(sceneBounds(panel).bottom() - (window->height() - 4)) < 2);
+        QTRY_VERIFY_WITH_TIMEOUT(qAbs(sceneBounds(panel).bottom() - (window->height() - 4)) < 2, 1200);
         QVERIFY(panel->property("expandedPlayer").toBool());
         const auto expandedExpected = f.shell->facade()->upcoming(); QVERIFY(!expandedExpected.isEmpty());
         QTRY_COMPARE(forecast->ids(), expandedExpected);
