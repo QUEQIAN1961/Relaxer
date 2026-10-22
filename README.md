@@ -1,36 +1,24 @@
-# Relaxer V0.2.1-dev-c4c5 · 歌词、全屏、设置、导入与 AI 界面
+# Relaxer V0.2.1
 
-本批次从 Harness R14 PASS 的 C2+C3 `f2242c9523ea0200d43ad6fbcba6ab6978dbe364` 起步。当前为 C4+C5 开发交付，独立验收状态以随包五份报告为准。未进入 C6，未创建正式 v0.2.1 标签或公开发布。
+本正式版本号候选从 Harness R18 已通过的 Final-RC 提交 `1f1624bb123f1bbd1ab1d034beda57bd8a3e28cc` 收敛，只更新版本与发布资料，播放器业务逻辑和 QML 布局保持不变。状态：FINAL RELEASE CANDIDATE — PENDING HARNESS APPROVAL。未创建 v0.2.1 标签，未推送或对外发布。
 
-默认 `RelaxerStart.exe` 使用 Widgets；`RelaxerQml.cmd` 或 `runtime/Relaxer.exe --ui=qml` 使用 QML。切换前关闭另一入口。两者沿用同一 dataRoot、单实例锁、SQLite schema、Library、PlaybackFacade、Queue 和既有设置。请先备份资料库，再在副本上人工验收。
+便携包完整解压后，双击根目录 `RelaxerStart.exe` 直接打开 QML 新界面。`RelaxerStart.exe --widgets` 打开兼容界面，`--qml` 显式选择新版；`RelaxerQml.cmd` 保留兼容。两套界面共享包根 data、数据库和锁；切换前关闭另一实例。使用与升级说明见 `RELEASE-NOTES-V0.2.1.md`。
 
-QML 保留 C2+C3 音乐库、筛选排序、收藏、歌单、真实播放控制和队列。本轮新增真实歌词页面：原有解析时间轴、双语对应、当前行 1.2 倍显示、手动滚动及回到当前、点击 Seek、每曲 ±5 秒精细延时、原歌词缓存及本地导入。全屏使用同一窗口，支持 Esc、窗口几何恢复、异步封面和适度动画；背景使用低透明度封面着色。减少动画可在设置中开启。
+## 开发构建
 
-设置页复用 SettingsStore/AppearanceStore，提供主题、显示偏好、歌词颜色及原有颜色历史。导入页调用原 ImportCoordinator，支持文件/文件夹、目标歌单、取消、结果与即时模型刷新。AI 页使用原配置和凭据存储：打开页面不会读取 Key 或发起网络请求；显式查询模型目录才联网。歌词检索、翻译准备、一次性付费确认、预览、保存/放弃和浏览器翻译均经原协调器。预览不会自动保存；切歌后旧任务不能写入新歌。
-
-高级图片外观编辑、字体/快捷键编辑和托盘操作仍由 Widgets 提供。真实付费服务与实际听音须由用户另行验收。自动测试只用隔离资料库、合成音频与 Mock/Fake，不读取真实凭据或调用收费 API。
-
-## 构建与测试
-
-Windows MSYS2 UCRT64、C++17、CMake/Ninja，以及版本匹配的 Qt 6 Core/Gui/Widgets/Sql/Multimedia/Svg/Test/Network/Qml/Quick/QuickControls2。
+Windows MSYS2 UCRT64、C++17、CMake、Ninja、Qt 6 和 FFmpeg；Declarative 前缀须与基础 Qt 匹配。配置 Release 并使用全新构建目录，例如：
 
 ```powershell
-cmake -S . -B build-c4c5 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Software/MSYS2/ucrt64 -DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=D:/path/to/quick/ucrt64
-cmake --build build-c4c5 --parallel 8
-ctest --test-dir build-c4c5 --output-on-failure
+cmake -S . -B build-v021-final -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Software/MSYS2/ucrt64 -DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=D:/path/to/quick/ucrt64
+cmake --build build-v021-final --parallel 8
+ctest --test-dir build-v021-final --output-on-failure
 ```
 
-CTest 自动配置匹配 Declarative 的 imports；全量验证前清除外部 QML_IMPORT_PATH、QML2_IMPORT_PATH、QT_PLUGIN_PATH。完整中文 build 输出路径的 Qt moc 限制仍存在；中文运行、资料和导入路径另有隔离测试。
+源码中的历史准备工具及预编译 bootstrap 仅用于源码环境恢复；正式便携包的三个产品 PE 必须由本候选 Commit 重新构建，不能直接复制源码根的历史 EXE。`relaxer-ready.json` 的 version=1.5.0 是保留的启动握手协议，displayVersion 才是产品显示版本。历史版本日志和旧报告保留原名。
 
-新增队列选择读取、歌词模型、C4C5 bridge/UI 与检索 bridge 专项。原生 `relaxer_c4c5_performance_probe` 按需构建，先用 --prepare 在新目录创建合成夹具，再以新进程测量。真实渲染帧响应与合成 adapter 信号耗时分别报告，不能视为 FPS 或物理听音结果。
+主 EXE 不直接导入 QtQuick/QtQml，QML 模块按需加载；Widgets 可独立于 QML 依赖启动。默认启动 QML，正常退出码 0；锁冲突 3、QML 组件缺失 11、非法或冲突参数 64。
 
-## 架构与部署
-
-Library::tracksByIds 仅在原连接按队列 ID 批量读取，保留队列次序、重复及缺失项规则。播放进度不刷新队列或歌词文档。歌词解析、导入、翻译、付费门禁和配置格式均复用原核心；QML 仅提供模型和受控命令。接口映射见 `docs/phase-c/c4c5-interface-map.md`。
-
-主 EXE 不导入 Quick/QML；`RelaxerQmlUi.dll` 按需加载。显式 QML 缺模块/依赖时在创建 dataRoot 前返回 11。模块代码保留到进程结束，单次会话按 engine、bridge/services、facade、Library 顺序释放。关闭时处理未完成任务/预览，等待原导入线程退出屏障。
-
-`scripts/deploy-phase-c.py` 创建全新候选，继承隔离矩阵和 `scripts/validate-phase-c-native.py` 验证后，以绑定实际二进制哈希的 proof 重新部署到全新 shipping 目录。`scripts/package-phase-c.py` 拒绝日志、数据库、媒体、缓存及凭据，输出包内清单。运行过的候选不用于交付。--data / RELAXER_DATA 优先级保持不变。
+开发自动验证使用隔离资料库、合成媒体与 Mock；不读取私人曲库或真实 API Key。最终交付和独立复核边界以随包报告为准。
 
 以下为原稳定版历史说明，其发布结论仅适用于对应稳定提交。
 
