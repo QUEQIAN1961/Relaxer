@@ -9,6 +9,7 @@
 #define NOMINMAX
 #include "core-update-restart.h"
 #include "launch-plan.h"
+#include "launch-arguments.h"
 #include "owned-cache.h"
 #include "prepare-flow.h"
 #include "prepare-window.h"
@@ -454,7 +455,7 @@ bool prepare(const fs::path &root, fs::path msys) {
         set(L"RELAXER_PREP_CAPTURE", L"");
     });
 }
-int run(const fs::path &root, const fs::path &exe) {
+int run(const fs::path &root, const fs::path &exe, const relaxer::launch::Arguments &args) {
     SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
     Handle log(CreateFileW((root / "startup.log").c_str(), FILE_APPEND_DATA,
                            FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL,
@@ -478,33 +479,51 @@ int run(const fs::path &root, const fs::path &exe) {
     startup.hStdInput = input.value;
     startup.hStdOutput = startup.hStdError = log.value;
     PROCESS_INFORMATION process{};
-    std::wstring command = relaxer::launch::quote(exe.wstring()) + L" --launch";
+    std::wstring command = relaxer::launch::commandLine(exe, args.runtime);
     if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
-                        root.c_str(), &startup, &process)) {
+                        nullptr, &startup, &process)) {
         fail(L"无法打开 Relaxer。\n" + systemError(GetLastError()) +
              L"\n\n不要单独移动 EXE，请保留整个程序文件夹。\n日志：" + (root / "startup.log").wstring());
         return 1;
     }
     Handle thread(process.hThread), child(process.hProcess);
-    // Catch missing DLLs and other immediate loader failures without waiting for
-    // the user's entire desktop session or creating a console window.
-    if (WaitForSingleObject(child.value, 2500) == WAIT_OBJECT_0) {
-        DWORD code = 0;
-        GetExitCodeProcess(child.value, &code);
-        if (code != 0) {
-            fail(L"Relaxer 在启动时退出了。\n\n退出码：" + std::to_wstring(code) +
-                 L"\n请提供 startup.log；若缺少 DLL，请重新部署完整便携包。\n日志：" +
+    // Stay with the runtime so delayed lock dialogs and normal shutdown return
+    // their real status. The preparation guard is released before this call.
+    if (WaitForSingleObject(child.value, INFINITE) != WAIT_OBJECT_0)
+        return 1;
+    DWORD code = 0;
+    if (!GetExitCodeProcess(child.value, &code)) return 1;
+    // Lock conflicts already have a runtime dialog. Diagnostics are explicitly
+    // noninteractive; ordinary users get a short, actionable QML error.
+    if (code && code != 3 && !args.diagnostics) {
+        if (code == 11)
+            fail(L"新版界面的组件缺失或无法加载。请重新解压完整便携包。\n"
+                 L"也可用 RelaxerStart.exe --widgets 启动兼容界面。\n\n"
+                 L"退出码：11\n日志：" + (root / "startup.log").wstring());
+        else
+            fail(L"Relaxer 已退出。\n\n退出码：" + std::to_wstring(code) +
+                 L"\n请查看日志或重新解压完整便携包。\n日志：" +
                  (root / "startup.log").wstring());
-            return 1;
-        }
     }
-    return 0;
+    return static_cast<int>(code);
 }
 } // namespace
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     int result = 1;
     try {
+        int count = 0;
+        auto raw = CommandLineToArgvW(GetCommandLineW(), &count);
+        if (!raw) throw std::runtime_error("Cannot read startup arguments");
+        const std::vector<std::wstring> input(raw + 1, raw + count);
+        LocalFree(raw);
+        const auto args = relaxer::launch::arguments(input);
+        if (!args.valid) {
+            if (!args.diagnostics)
+                fail(L"启动参数有冲突。请选择 --qml 或 --widgets 中的一种。\n退出码：64");
+            if (SUCCEEDED(com)) CoUninitialize();
+            return 64;
+        }
         auto root = location();
         auto plan = relaxer::launch::select(root);
         if (plan.kind == relaxer::launch::Kind::Incomplete) {
@@ -545,7 +564,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
                     const auto runtime = plan.executable.parent_path();
                     environment(runtime, {});
                     set(L"RELAXER_DATA", (root / L"data").wstring());
-                    result = run(runtime, plan.executable);
+                    // Only preparation is serialized. Runtime owns dataRoot's
+                    // cross-UI lock and its existing conflict dialog/exit 3.
+                    CloseHandle(guard.value);
+                    guard.value = INVALID_HANDLE_VALUE;
+                    result = run(runtime, plan.executable, args);
                 }
             }
         }

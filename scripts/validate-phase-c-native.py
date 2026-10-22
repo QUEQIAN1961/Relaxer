@@ -115,9 +115,9 @@ def main():
             if player: break
             assert process.poll() is None, process.returncode
             time.sleep(.05)
-        assert player, "Launcher did not show Widgets"
-        # The launcher deliberately detaches after its 2.5-second loader check.
-        # Its exit cannot establish that its GUI child has finished closing.
+        assert player, "Launcher did not show QML"
+        # The unified launcher waits for its runtime and returns its real status.
+        # Independently monitor the child to verify both processes have exited.
         kernel = support["k"]
         kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel.OpenProcess.restype = wintypes.HANDLE
@@ -149,7 +149,7 @@ def main():
     proof = json.loads((package / "deployment.json").read_text(encoding="utf-8"))
     # The executed candidate remains dirty and unpackageable. This proof is used
     # only to reassemble a new shipping directory from the same build binaries.
-    proof["verified"] = True; proof["note"] = "Developer native C6 candidate QA; awaiting independent Harness R16"
+    proof["verified"] = True; proof["note"] = "Developer native C6 candidate QA; awaiting independent Harness Final-RC"
     proof["verification"] = "System-only PATH, native QPA, PCM/Widgets/QML/launcher; actual suite list and counts in result.json; C6 lyrics, fullscreen, motion, fonts, tray/native-message shortcuts, real import and Mock-only consent/preview workflows"
     (out / "verification-proof.json").write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding="utf-8")
     (out / "result.json").write_text(json.dumps({"results": results, "suites": suites,

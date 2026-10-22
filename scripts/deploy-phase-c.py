@@ -123,7 +123,9 @@ def main():
     (dest / "RelaxerQml.cmd").write_text('@echo off\r\nsetlocal\r\n"%~dp0runtime\\Relaxer.exe" --ui=qml %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
     (dest / "READ-ME-FIRST.md").write_text(
         f"# Relaxer {display}\n\n"
-        "运行 RelaxerStart.exe 打开 Widgets；运行 RelaxerQml.cmd 打开 QML。\n"
+        "双击 RelaxerStart.exe 打开新版 QML 界面。\n"
+        "兼容界面：RelaxerStart.exe --widgets；显式新版：RelaxerStart.exe --qml。\n"
+        "RelaxerQml.cmd 保留为旧版兼容入口。\n"
         "两种界面使用同一资料目录和锁，请先关闭另一入口。\n"
         "首次独立验证可使用 runtime/Relaxer.exe --ui=qml --data <测试目录>。\n"
         "歌曲、歌词和自定义资源保存在资料目录；发行包不包含个人资料或 AI 凭据。\n"

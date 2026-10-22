@@ -1,26 +1,26 @@
 {
   "numericVersion": "0.2.1",
-  "prerelease": "dev-c4c5-ui2-fix1",
-  "displayVersion": "V0.2.1-dev-c4c5-ui2-fix1",
-  "status": "UI2 FIX1 CONTENT OFFSET AND IMPORT MENU ANCHOR — AWAITING INDEPENDENT ACCEPTANCE",
+  "prerelease": "final-rc",
+  "displayVersion": "V0.2.1-Final-RC",
+  "status": "DEVELOPER VERIFICATION IN PROGRESS — AWAITING HARNESS INDEPENDENT REVIEW",
   "applicationName": "Relaxer",
   "organizationName": "Relaxer",
-  "baselineCommit": "6188b829583fd1fb70fffc3219a2ed483c1dabf9",
-  "baselineTree": "16337ff9ff84f01c3fd5240126919fe0c4d6e771",
+  "baselineCommit": "848426e054538a8c760b444a5afb33e21da04697",
+  "baselineTree": "a06b330dc9b95ff23841be3ec76850f2c3bef56e",
   "stableCommit": "43203314012f509a2f83e4558b9206001b2e5f75",
   "stableTag": "v0.2.0",
-  "defaultUi": "widgets",
-  "optionalUi": "--ui=qml",
+  "defaultUi": "qml (RelaxerStart.exe)",
+  "optionalUi": "RelaxerStart.exe --widgets; --qml; --ui=widgets|qml",
   "dataIdentityChanged": false,
   "schemaChanged": false,
   "officialReleaseApproved": false,
   "publicPublicationAuthorized": false,
   "classificationStorage": "existing Library settings rows keyed by stable trackId and content hash",
-  "releaseScope": "Lower right-side page content by 22px and anchor the import popup below its invoking button",
+  "releaseScope": "Unified native launcher default QML, retained Widgets/CMD, runtime exit propagation and Final-RC resources",
   "optionalQmlModule": "RelaxerQmlUi.dll",
   "qmlLoadFailureExit": 11,
   "moduleCodeLifetime": "Pinned until process exit; per-session QML and business objects are destroyed",
-  "independentAcceptance": "UI repair awaits independent acceptance",
+  "independentAcceptance": "AWAITING HARNESS INDEPENDENT REVIEW",
   "defectLedgerBeforeFix": {
     "P0": 0,
     "P1": 0,
@@ -29,7 +29,7 @@
     "total": 24
   },
   "developerFixedPendingVerification": [
-    "D-R14-01"
+    "D-R16-02"
   ],
   "C1-P301": "Independently CLOSED/FIXED by Harness R14; preserved efficient scalar count",
   "inheritedClosedByHarnessR13": [
@@ -41,5 +41,7 @@
   "inheritedClosedByHarnessR14": [
     "C1-P301"
   ],
-  "paidRequestsDuringDevelopment": 0
+  "paidRequestsDuringDevelopment": 0,
+  "runtimeDefaultUi": "widgets (unchanged)",
+  "D-R16-02": "Launcher forwards runtime status including a delayed GUI lock conflict; developer tests required, independent closure pending"
 }

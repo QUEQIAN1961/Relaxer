@@ -39,6 +39,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('source','build','staging','publish','reports','evidence-root','evidence-list','full-summary','native-proof','isolation','verification'):
         parser.add_argument('--'+name,type=Path,required=True)
+    parser.add_argument('--launcher-verification',type=Path,help='Required native matrix for Final-RC')
     parser.add_argument('--git',default=shutil.which('git'))
     parser.add_argument('--version',default='0.2.1-rc1')
     parser.add_argument('--display-version',default='V0.2.1-RC1')
@@ -78,6 +79,17 @@ def main():
         assert row['lockExit']==3 and row['qmlExit']==(11 if row['missing'] else 0) and not row['remainingOwned']
         assert row['widgets']['version'].lower()==args.version.lower() and row['dataIdentityPreserved']
         if row['missing']:assert row['restoredBothUis']
+    unified=None
+    if args.version == '0.2.1-final-rc':
+        assert args.launcher_verification, 'Final-RC requires its own launcher matrix'
+    if args.launcher_verification:
+        unified=json.loads(args.launcher_verification.read_text(encoding='utf-8'))
+        assert unified['status']=='PASS' and unified['caseCount']>=40
+        assert unified['sourceCommit']==head and unified['sourceTree']==tree
+        assert unified['sourceFingerprint']==fingerprint and unified['binarySHA256']==proof['binarySHA256']
+        assert not unified['remainingOwned'] and all(not row['remainingOwned'] for row in unified['cases'])
+        assert unified['delayedGuiLockExit']==3 and unified['friendlyMissingExit']==11
+        assert unified['sharedDefaultDataRoot'] and unified['paidRequests']==0
     for name in args.report_names:assert Path(name).name==name and (args.reports/name).is_file(),name
     args.publish.mkdir(parents=True,exist_ok=False);args.verification.mkdir(parents=True,exist_ok=False)
     date=datetime.now(timezone(timedelta(hours=8))).strftime('%Y%m%d');prefix='Relaxer-'+args.display_version
@@ -155,6 +167,15 @@ def main():
         value=json.loads(diagnostics.read_text(encoding='utf-8'))
         assert value['version'].lower()==args.version.lower() and value['saveSucceeded'] and value['databaseConnections']==1 and value['playbackInstances']==1
         assert not (data/'relaxer.lock').exists()
+    if unified:
+        for mode,flags in [('default',[]),('qml',['--qml']),('widgets',['--widgets'])]:
+            diagnostics=args.verification/('launcher-'+mode+'.json');data=args.verification/('launcher-'+mode+'-data')
+            run([runtime.parent/'RelaxerStart.exe',*flags,'--data',data,'--diagnostics',diagnostics,'--quit-after','350'],'launcher-'+mode)
+            value=json.loads(diagnostics.read_text(encoding='utf-8'))
+            assert value['mode']==('widgets' if mode=='widgets' else 'qml')
+            assert value['version']==args.version and value['saveSucceeded']
+            assert value['databaseConnections']==value['playbackInstances']==1
+            assert not (data/'relaxer.lock').exists()
     audio=args.verification/'synthetic.wav'
     with wave.open(str(audio),'wb') as file:file.setparams((1,2,8000,0,'NONE','not compressed'));file.writeframes(b'\0'*16000)
     run([runtime/'Relaxer.exe','--media-smoke',audio],'pcm-decode')
@@ -176,6 +197,10 @@ def main():
     entries['FinalExtractedVerification/RESULT.json']=(args.verification/'RESULT.json').read_bytes()
     for name in ('widgets.json','qml.json','widgets.log','qml.log','pcm-decode.log','bundle-verify.log','bundle-fsck.log'):
         entries['FinalExtractedVerification/'+name]=(args.verification/name).read_bytes()
+    if unified:
+        entries['UnifiedLauncher/RESULT.json']=args.launcher_verification.read_bytes()
+        for path in args.verification.glob('launcher-*.*'):
+            if path.is_file():entries['FinalExtractedVerification/'+path.name]=path.read_bytes()
     evidence_zip=args.publish/(prefix+'-Evidence.zip');archive(evidence_zip,entries,prefix+'-Evidence')
     report_copy=args.publish/'Reports';report_copy.mkdir()
     for name in args.report_names:shutil.copy2(args.reports/name,report_copy/name)
@@ -188,6 +213,10 @@ def main():
         'verification':str(args.verification/'RESULT.json'),'protocolVersion':'1.5.0 (retained startup protocol)',
         'paidRequests':0,'physicalListening':'NOT EXECUTED','physicalGlobalKeyboard':'NOT EXECUTED on isolated desktop; Windows registration/native message dispatch tested',
         'formalTagCreated':False,'remotePushed':False,'independentAcceptance':args.independent_acceptance}
+    if unified:
+        delivery['unifiedLauncher']={'status':unified['status'],'cases':unified['caseCount'],
+            'delayedGuiLockExit':3,'friendlyMissingExit':11,'sharedDefaultDataRoot':True,
+            'remainingOwned':[], 'extractedDefaultAndAliases':True}
     write_json(args.publish/'DELIVERY.json',delivery)
     files={p.relative_to(args.publish).as_posix():p.read_bytes() for p in args.publish.rglob('*') if p.is_file()}
     components=''.join(sha(data)+'  '+name+'\n' for name,data in sorted(files.items()))
