@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Controls.Fusion as Fusion
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import "../components"
@@ -190,9 +191,10 @@ Item {
                                     value: settingsBridge.appearanceDraft[modelData.key] || 0
                                     onMoved: settingsBridge.editAppearance(modelData.key, value)
                                 }
-                                SpinBox {
+                                Fusion.SpinBox {
                                     objectName: "appearanceBlur-" + modelData.key
                                     Layout.preferredWidth: 94; implicitHeight: 36
+                                    font.family: Theme.fontFamily; font.pixelSize: 14
                                     from: 0; to: 500; editable: true
                                     value: Math.round(Number(settingsBridge.appearanceDraft[modelData.key] || 0) * 10)
                                     validator: DoubleValidator { bottom: 0; top: 50; decimals: 1 }

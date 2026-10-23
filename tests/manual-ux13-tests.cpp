@@ -158,8 +158,14 @@ private slots:
         }
         auto *scroll=visual(root,"appearanceScroll"); QVERIFY(scroll);
         auto *flickable=scroll->property("contentItem").value<QObject *>(); QVERIFY(flickable);
+        QVERIFY(s->editAppearance("blurLeft",12.3));
         flickable->setProperty("contentY",flickable->property("contentHeight").toReal()-flickable->property("height").toReal());
-        QTest::qWait(60); shot(w,"appearance-lower-options");
+        QTest::qWait(60);
+        auto *blur=visual(root,"appearanceBlur-blurLeft"); QVERIFY(blur);
+        QCOMPARE(blur->property("displayText").toString(),QLocale().toString(12.3,'f',1));
+        auto *input=blur->property("contentItem").value<QObject *>(); QVERIFY(input);
+        QVERIFY(input->property("width").toReal()>=input->property("implicitWidth").toReal());
+        shot(w,"appearance-lower-options");
         QVERIFY(click(w,visual(root,"appearanceBack")));
         auto *dialog=w->findChild<QObject *>("appearanceUnsavedDialog"); QVERIFY(dialog); QTRY_VERIFY(dialog->property("opened").toBool());
         auto *cancel=visual(root,"appearanceLeaveCancel"),*discard=visual(root,"appearanceLeaveDiscard"),*save=visual(root,"appearanceLeaveSave");
