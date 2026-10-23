@@ -66,6 +66,9 @@ bool PlaybackBridge::requestExit(int decision){
     const bool closed=m_facade->requestExit(static_cast<PlaybackFacade::ExitDecision>(decision));
     if(guard)guard->refresh();return closed;
 }
+bool PlaybackBridge::nonInteractiveExit() const {
+    return QCoreApplication::instance()->property("relaxerNonInteractiveExit").toBool();
+}
 void PlaybackBridge::pause() { if (available() && m_facade->playing()) { m_facade->toggle(); refresh(); } }
 void PlaybackBridge::next() { if (available()) { beginTransition(1); m_facade->next(); refresh(); } }
 void PlaybackBridge::previous() { if (available()) { beginTransition(-1); m_facade->previous(); refresh(); } }

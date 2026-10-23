@@ -45,6 +45,29 @@ struct Fixture {
 class QmlC4C5BridgeTests:public QObject {
     Q_OBJECT
 private slots:
+    void activeImportExitSaveFailure_data(){QTest::addColumn<bool>("nonInteractive");QTest::newRow("cancel-remains-usable")<<false;QTest::newRow("bounded-cli-exit")<<true;}
+    void activeImportExitSaveFailure(){
+        QFETCH(bool,nonInteractive);QTemporaryDir dir;Library l(dir.filePath("data"));QVERIFY(l.open());auto t=seed(l,"Active import exit","p3-import-exit");QVERIFY(wave20(l.absolute(t.file)));
+        QmlShell shell(&l,nullptr,true);QVERIFY(shell.load());auto *facade=shell.facade();facade->play({t.id},t.id);QTRY_VERIFY(facade->seekable());QTRY_VERIFY(facade->playing());
+        QSqlQuery q(import_fixture::database(l));QVERIFY(q.exec("CREATE TRIGGER p3_busy_exit_fail BEFORE INSERT ON settings WHEN NEW.key='position' BEGIN SELECT RAISE(ABORT,'P3 busy exit'); END"));facade->seek(1200);QVERIFY(!facade->save());
+        const auto folder=dir.filePath("incoming");QVERIFY(QDir().mkpath(folder));for(int i=0;i<60;++i)QVERIFY(import_fixture::midi(folder+QString("/%1.mid").arg(i),i));
+        const auto prior=qApp->property("relaxerNonInteractiveExit");qApp->setProperty("relaxerNonInteractiveExit",nonInteractive);const auto restore=qScopeGuard([&]{qApp->setProperty("relaxerNonInteractiveExit",prior);});
+        auto *bridge=shell.importBridge();QVERIFY(bridge->start({QUrl::fromLocalFile(folder)}));QVERIFY(bridge->busy());
+        // No event-loop gap: the active import is real, and its completion cannot
+        // race this direct close/confirmation/save-failure decision path.
+        shell.window()->close();
+        if(nonInteractive){QVERIFY(facade->isShutdown());QVERIFY(!facade->shutdown());QVERIFY(q.exec("DROP TRIGGER p3_busy_exit_fail"));}
+        else {
+            auto *confirm=shell.window()->findChild<QObject *>("closeTasksConfirmation");QVERIFY(confirm);QVERIFY(QMetaObject::invokeMethod(confirm,"accept"));
+            QVERIFY(!facade->isShutdown());QVERIFY(!bridge->closing());
+            auto *cancel=shell.window()->findChild<QObject *>("exitSaveCancel");QVERIFY(cancel);QVERIFY(QMetaObject::invokeMethod(cancel,"clicked"));
+            QVERIFY(!facade->isShutdown());QVERIFY(facade->playing());QVERIFY(!bridge->closing());
+            bridge->cancel();QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);QVERIFY(!bridge->closing());
+            QVERIFY(bridge->start({QUrl::fromLocalFile(folder+"/0.mid")}));QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);
+            QVERIFY(q.exec("DROP TRIGGER p3_busy_exit_fail"));QVERIFY(facade->save());shell.window()->close();QVERIFY(facade->isShutdown());
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(!bridge->busy(),30000);
+    }
     void exitSaveDecision_data(){
         QTest::addColumn<bool>("qml");QTest::addColumn<int>("decision");QTest::addColumn<bool>("appQuit");
         for(bool qml:{false,true})for(int decision:{0,1,2})for(bool appQuit:{false,true})

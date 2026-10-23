@@ -47,6 +47,7 @@ class PlaybackBridge final : public QObject {
     QString error() const { return m_error; }
     QString exitError() const { return m_facade?m_facade->exitError():QString(); }
     Q_INVOKABLE bool requestExit(int decision=0);
+    Q_INVOKABLE bool nonInteractiveExit() const;
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();

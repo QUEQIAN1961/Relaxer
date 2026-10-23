@@ -195,9 +195,11 @@ ApplicationWindow {
     Shortcut {sequence:"Ctrl+F";enabled:!lyricsWorkspace.visible;onActivated:{root.navigateOriginal(0);searchFocus.restart()}}
     Timer{id:searchFocus;interval:260;onTriggered:localPage.focusSearch()}
     onClosing: close => {
+        if(playbackBridge.nonInteractiveExit()){playbackBridge.requestExit(1);return}
         if (!allowClose && (importBridge.busy || translationBridge.unfinished || lyricsSearchBridge.busy)) { close.accepted=false; closeConfirm.open() }
         else if(!allowClose && !exitRequested && settingsBridge.values.closeToTray && uiIntegration.trayAvailable){close.accepted=false;root.hide();uiIntegration.showTray()}
         else if(!playbackBridge.requestExit()){close.accepted=false;exitSaveFailure.open()}
+        else if(importBridge.busy){close.accepted=false;root.awaitingImportClose=true;if(!importBridge.closing)importBridge.beginShutdown()}
     }
     ConfirmDialog {
         id:exitSaveFailure;parent:root.popupLayer;objectName:"exitSaveFailureDialog";anchors.centerIn:parent
@@ -481,6 +483,6 @@ ApplicationWindow {
         title:"结束当前任务并退出？";standardButtons:Dialog.Ok|Dialog.Cancel
         contentItem:Label{text:(lyricsSearchBridge.busy?"还有歌词尚未查找完毕，确认退出将中断查找。\n":"")+"退出将取消尚未完成的导入和翻译，并放弃未保存的翻译预览。已经保存的结果会保留；已发送的 AI 请求可能仍产生费用。";wrapMode:Text.Wrap}
         onRejected:root.exitRequested=false
-        onAccepted:{lyricsSearchBridge.stop();if(importBridge.busy){root.awaitingImportClose=true;importBridge.beginShutdown()}else{root.allowClose=true;root.close()}}
+        onAccepted:{lyricsSearchBridge.stop();root.allowClose=true;root.close()}
     }
 }
