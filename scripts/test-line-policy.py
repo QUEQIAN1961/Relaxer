@@ -31,7 +31,9 @@ def main():
         # -File executes the exact LF script through both native and MSYS Bash
         # entry paths, with only the local reuse branch reachable.
         native=[powershell,'-NoLogo','-NoProfile','-NonInteractive','-File',script]
-        bash=[args.bash,'--noprofile','--norc','-c','exec "$1" -NoLogo -NoProfile -NonInteractive -File "$2"','line-policy',powershell,script]
+        invocation=out/(mode+'-invoke.sh');invocation.write_text('#!/bin/bash\nexec "$1" -NoLogo -NoProfile -NonInteractive -File "$2"\n',encoding='ascii',newline='\n')
+        # A real script avoids the Windows-to-MSYS nested -c quoting boundary.
+        bash=[args.bash,'--noprofile','--norc',invocation.as_posix(),powershell.as_posix(),script.as_posix()]
         for tag,cmd in [('native',native),('msys',bash)]:
             r=execute(cmd,out,mode+'-'+tag,env=child,timeout=30);assert r['status']=='PASS',r
             assert 'reuse-environment' in Path(r['streams']['stdout']['path']).read_text(errors='replace')

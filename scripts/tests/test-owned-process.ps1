@@ -8,17 +8,18 @@ $null=New-Item -ItemType Directory -Path $root
 $rows=New-Object Collections.Generic.List[object]
 Add-Type -TypeDefinition ($leaseSource[0]+@'
 public sealed class FakeLease : RelaxerVerification.ILease {
- public bool done,deny,race; public int close,kill,wait,poll;
+ public bool done,deny,race,graceful; public int close,kill,wait,poll;
  public int pid,ppid;
  public bool Exited(){poll++; return done;}
  public bool Wait(int ms){wait++; if(kill>0 && !deny)done=true; return done;}
- public void RequestClose(){close++;}
+ public void RequestClose(){close++;if(graceful)done=true;}
  public void Terminate(){kill++; if(race){done=true;throw new System.ComponentModel.Win32Exception(5);} if(deny)throw new System.ComponentModel.Win32Exception(5); done=true;}
 }
 '@)
 function Check([string]$Name,[scriptblock]$Action){ & $Action; $rows.Add([ordered]@{case=$Name;status='PASS'}) }
 try {
  Check 'already exited' { $p=New-Object FakeLease; $p.done=$true; if([RelaxerVerification.Cleanup]::Run($p,0,0)-ne 'already-exited' -or $p.kill){throw 'Exited process targeted'} }
+ Check 'normal close before termination' { $p=New-Object FakeLease;$p.graceful=$true;if([RelaxerVerification.Cleanup]::Run($p,0,0)-ne 'closed' -or $p.kill){throw 'Graceful close not honored'} }
  Check 'timeout and repeated cleanup' { $p=New-Object FakeLease; $null=[RelaxerVerification.Cleanup]::Run($p,0,0); $null=[RelaxerVerification.Cleanup]::Run($p,0,0); if($p.kill-ne 1 -or $p.close-ne 1){throw 'Cleanup not idempotent'} }
  Check 'exit at termination boundary' { $p=New-Object FakeLease; $p.race=$true; $null=[RelaxerVerification.Cleanup]::Run($p,0,0); if(-not $p.done){throw 'Race not observed'} }
  Check 'access denied must fail' { $p=New-Object FakeLease; $p.deny=$true; $rejected=$false; try{$null=[RelaxerVerification.Cleanup]::Run($p,0,0)}catch{$rejected=$true}; if(-not $rejected -or $p.done){throw 'Denied cleanup became success'} }
