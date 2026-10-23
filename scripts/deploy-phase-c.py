@@ -14,6 +14,8 @@ import re
 import shutil
 import subprocess
 import hashlib
+from ready_marker import marker
+from evidence_run import execute
 
 
 def main():
@@ -51,11 +53,16 @@ def main():
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
 
+    logs = dest.parent / (dest.name + '.deployment-evidence')
+    logs.mkdir(parents=True, exist_ok=False)
+    run_index = 0
     def run(command, cwd=None):
-        result = subprocess.run(list(map(str, command)), env=env, cwd=cwd, capture_output=True,
-                                text=True, encoding="utf-8", errors="replace", timeout=120, startupinfo=startup)
-        assert result.returncode == 0, result.stdout + result.stderr
-        return result.stdout
+        nonlocal run_index
+        run_index += 1
+        result = execute(command, logs, f'{run_index:04d}', env=env, cwd=cwd,
+            identity={'commit':commit,'tree':tree,'sourceFingerprint':fingerprint}, timeout=120, startupinfo=startup)
+        assert result['status'] == 'PASS', result
+        return Path(result['streams']['stdout']['path']).read_text(encoding='utf-8', errors='replace')
 
     imports = json.loads(run([quick / "share/qt6/bin/qmlimportscanner.exe", "-rootPath", source / "src/qml",
                               "-importPath", quick / "share/qt6/qml", "-importPath", qt / "share/qt6/qml"]))
@@ -90,7 +97,7 @@ def main():
     (runtime / "bin").mkdir()
     ffmpeg = (args.ffmpeg_bin or qt / "bin").resolve()
     for name in ("ffmpeg.exe", "ffprobe.exe"): shutil.copy2(ffmpeg / name, runtime / "bin")
-    copied = set()
+    copied = set(); seen_dependencies = set()
     system = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
     objdump = qt / "bin/objdump.exe"
 
@@ -101,6 +108,7 @@ def main():
             file = pending.popleft()
             if file in seen: continue
             seen.add(file)
+            seen_dependencies.add(file)
             # Binutils' narrow filename conversion cannot represent every
             # Unicode absolute path. CreateProcessW can set the real Unicode
             # working directory; pass the unchanged file's ASCII basename.
@@ -132,13 +140,14 @@ def main():
         "本包为开发方验证的候选构建，正式验收状态见随包交付报告。\n",
         encoding="utf-8")
     if verified:
-        (runtime / "relaxer-ready.json").write_text(json.dumps({"version": "1.5.0", "displayVersion": display,
+        (runtime / "relaxer-ready.json").write_text(json.dumps(marker(version, displayVersion=display, **{
             "windows_only_path": True, "audio_decode": True, "qml_window": True,
-            "audio_device_required": False, "media_clock": False}), encoding="utf-8")
+            "audio_device_required": False, "media_clock": False})), encoding="utf-8")
     proof = {"version": version, "displayVersion": display, "sourceFingerprint": fingerprint, "sourceCommit": commit, "sourceTree": tree,
-             "qmlImports": imports, "copiedDependencies": sorted(copied),
+             "qmlImports": imports, "copiedDependencies": sorted(copied), "resolvedDependencyInputs": sorted(str(p) for p in seen_dependencies),
              "binarySHA256": binary_hashes, "stagingPolicy": "fresh-build-inputs-only",
-             "verified": verified, "note": "Native proof from separate candidate" if verified else "Candidate collection only; do not package before native QA"}
+             "verified": verified, "missingDependencies": [], "executionReceipts": str(logs),
+             "note": "Native proof from separate candidate" if verified else "Candidate collection only; do not package before native QA"}
     (dest / "deployment.json").write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"destination": str(dest), "qmlImports": len(imports), "dependencies": len(copied)}))
 

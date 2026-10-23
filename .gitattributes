@@ -7,3 +7,6 @@
 *.ico binary
 *.png binary
 *.xz binary
+# PowerShell 5.1 and MSYS2 accept LF. Freeze this script's existing LF policy;
+# no repository-wide normalization or change to historical script logic.
+scripts/online-msys2.ps1 text eol=lf

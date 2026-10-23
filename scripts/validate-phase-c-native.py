@@ -99,7 +99,7 @@ def main():
     # The collection becomes launcher-ready only after actual native checks.
     marker = runtime / "relaxer-ready.json"
     # version is the retained legacy startup protocol, not the product version.
-    marker.write_text(json.dumps({"version": "1.5.0", "displayVersion": deployment["displayVersion"], "windows_only_path": True,
+    marker.write_text(json.dumps({"version": "1.5.0", "readySchemaVersion": "1.5.0", "productVersion": deployment["version"], "displayVersion": deployment["displayVersion"], "windows_only_path": True,
         "audio_decode": True, "qml_window": True, "audio_device_required": False, "media_clock": False}), encoding="utf-8")
     assert not (package / "data").exists(), "Do not run this against an existing user installation"
     with (out / "launcher.stdout").open("wb") as stdout, (out / "launcher.stderr").open("wb") as stderr:
