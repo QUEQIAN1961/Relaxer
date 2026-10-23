@@ -42,7 +42,12 @@ class PlaybackFacade final : public QObject {
     void forget(const QVector<qint64> &ids);
     void restore();
     bool save();
-    bool shutdown();
+    bool shutdown(bool force=false);
+    enum class ExitDecision { Retry=0, ExitAnyway=1, Cancel=2 };
+    Q_ENUM(ExitDecision)
+    // Shared interactive decision boundary for both frontends.
+    bool requestExit(ExitDecision decision=ExitDecision::Retry);
+    QString exitError() const { return m_playback->lastSaveError(); }
     bool isShutdown() const { return m_playback->isShutdown(); }
   signals:
     void snapshotChanged(const relaxer::PlaybackSnapshot &snapshot);

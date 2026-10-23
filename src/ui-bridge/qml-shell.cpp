@@ -3,6 +3,8 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QEventLoop>
+#include <QCoreApplication>
+#include <QEvent>
 
 static void initializeQmlResources() { Q_INIT_RESOURCE(qml); }
 namespace relaxer {
@@ -52,6 +54,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
         for (const auto &error : errors) m_warnings.append(error.toString());
     });
     m_facade.restore();
+    QCoreApplication::instance()->installEventFilter(this);
 }
 QmlShell::~QmlShell() {
     m_engine.reset();shutdown();
@@ -72,5 +75,12 @@ QQuickWindow *QmlShell::window() const {
     return m_engine && !m_engine->rootObjects().isEmpty()
         ? qobject_cast<QQuickWindow *>(m_engine->rootObjects().first()) : nullptr;
 }
-bool QmlShell::shutdown() {m_search.shutdown();m_translation.shutdown();m_import.shutdown();return m_facade.shutdown();}
+bool QmlShell::shutdown() {m_search.shutdown();m_translation.shutdown();m_import.shutdown();return m_facade.shutdown(true);}
+bool QmlShell::eventFilter(QObject *object,QEvent *event){
+    if(object==QCoreApplication::instance()&&event->type()==QEvent::Quit&&
+       object->property("relaxerInteractiveExit").toBool()&&!m_facade.isShutdown()&&window()){
+        QMetaObject::invokeMethod(window(),"requestQuit");event->ignore();return true;
+    }
+    return QObject::eventFilter(object,event);
+}
 }

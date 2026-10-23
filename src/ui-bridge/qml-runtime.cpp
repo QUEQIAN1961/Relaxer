@@ -20,6 +20,8 @@ int runQml(QCoreApplication *app, const relaxer::QmlLaunchOptions *options,
     diagnostics->result["dataRoot"] = library.root();
     diagnostics->result["qtVersion"] = qVersion();
     relaxer::QmlShell shell(&library);
+    app->setProperty("relaxerNonInteractiveExit",options->quitAfter>0||!options->screenshot.isEmpty());
+    app->setProperty("relaxerInteractiveExit",options->quitAfter==0&&options->screenshot.isEmpty());
     QObject::connect(app, &QCoreApplication::aboutToQuit, &shell, &relaxer::QmlShell::shutdown);
     if (!shell.load()) {
         QTextStream(stderr) << "QML window creation failed: " << shell.warnings().join('\n') << '\n';

@@ -197,6 +197,17 @@ ApplicationWindow {
     onClosing: close => {
         if (!allowClose && (importBridge.busy || translationBridge.unfinished || lyricsSearchBridge.busy)) { close.accepted=false; closeConfirm.open() }
         else if(!allowClose && !exitRequested && settingsBridge.values.closeToTray && uiIntegration.trayAvailable){close.accepted=false;root.hide();uiIntegration.showTray()}
+        else if(!playbackBridge.requestExit()){close.accepted=false;exitSaveFailure.open()}
+    }
+    ConfirmDialog {
+        id:exitSaveFailure;parent:root.popupLayer;objectName:"exitSaveFailureDialog";anchors.centerIn:parent
+        width:Math.min(520,root.width-40);modal:true;closePolicy:Popup.NoAutoClose;title:"退出前保存失败"
+        contentItem:Label{text:"播放状态未能保存。请选择后续操作。\n"+playbackBridge.exitError;wrapMode:Text.Wrap}
+        footer:DialogButtonBox {
+            ShellButton {objectName:"exitSaveRetry";text:"重试";onClicked:{exitSaveFailure.close();root.close()}}
+            ShellButton {objectName:"exitSaveAnyway";text:"仍然退出";onClicked:{playbackBridge.requestExit(1);exitSaveFailure.close();root.close()}}
+            ShellButton {objectName:"exitSaveCancel";text:"取消退出";onClicked:{playbackBridge.requestExit(2);root.allowClose=false;root.exitRequested=false;root.awaitingImportClose=false;exitSaveFailure.close()}}
+        }
     }
     onWidthChanged: windowSave.restart()
     onHeightChanged: windowSave.restart()

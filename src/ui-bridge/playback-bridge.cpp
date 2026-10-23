@@ -2,6 +2,7 @@
 #include <QThread>
 #include <QFileInfo>
 #include <QDateTime>
+#include <QCoreApplication>
 
 namespace relaxer {
 PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent, Library *library)
@@ -58,6 +59,13 @@ void PlaybackBridge::toggle() {
     if (available() && m_facade->current().id) m_facade->toggle();
 }
 void PlaybackBridge::play() { if (available() && hasTrack() && !m_facade->playing()) { m_facade->toggle(); refresh(); } }
+bool PlaybackBridge::requestExit(int decision){
+    if(!m_facade)return true;
+    if(QCoreApplication::instance()->property("relaxerNonInteractiveExit").toBool())decision=1;
+    QPointer<PlaybackBridge> guard(this);
+    const bool closed=m_facade->requestExit(static_cast<PlaybackFacade::ExitDecision>(decision));
+    if(guard)guard->refresh();return closed;
+}
 void PlaybackBridge::pause() { if (available() && m_facade->playing()) { m_facade->toggle(); refresh(); } }
 void PlaybackBridge::next() { if (available()) { beginTransition(1); m_facade->next(); refresh(); } }
 void PlaybackBridge::previous() { if (available()) { beginTransition(-1); m_facade->previous(); refresh(); } }

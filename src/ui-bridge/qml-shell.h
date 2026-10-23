@@ -44,6 +44,8 @@ class QmlShell final : public QObject {
     TranslationCoordinator *translationCoordinator() { return &m_translation; }
     LyricsSearchBridge *lyricsSearchBridge() { return &m_searchBridge; }
     QStringList warnings() const { return m_warnings; }
+  protected:
+    bool eventFilter(QObject *object,QEvent *event) override;
   private:
     PlaybackFacade m_facade;
     AppBridge m_appBridge;

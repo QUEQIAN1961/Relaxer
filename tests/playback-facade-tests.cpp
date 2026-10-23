@@ -279,7 +279,9 @@ class PlaybackFacadeTests : public QObject {
         QCOMPARE(timers[0]->thread(), library.thread());
         timers[0]->setInterval(20);
         QSignalSpy saved(facade.get(), &PlaybackFacade::saved);
-        QTRY_VERIFY(saved.size() >= 2);
+        QSignalSpy ticks(timers[0],&QTimer::timeout);
+        QTRY_VERIFY(ticks.size() >= 3);
+        QCOMPARE(saved.size(),1);
         QCOMPARE(audit.count(), qint64(saved.size()));
         QVERIFY(facade->shutdown());
         const auto count = audit.count();
@@ -424,7 +426,7 @@ class PlaybackFacadeTests : public QObject {
         else
             QVERIFY(ids.contains(facade.current().id));
     }
-    void shutdownFailureIsReportedOnce() {
+    void shutdownFailureCanRetryWithoutTeardown() {
         QTemporaryDir dir;
         Library library(dir.filePath("data"));
         QVERIFY(library.open());
@@ -438,8 +440,48 @@ class PlaybackFacadeTests : public QObject {
         QCOMPARE(saved.size(), 1);
         QVERIFY(!saved[0][0].toBool());
         QVERIFY(!facade.shutdown());
-        QCOMPARE(saved.size(), 1);
-        QVERIFY(facade.isShutdown());
+        QCOMPARE(saved.size(), 2);
+        QVERIFY(!facade.isShutdown());
+        QVERIFY(facade.findChild<QTimer *>("playbackPersistenceTimer")->isActive());
+        QVERIFY(!facade.requestExit(PlaybackFacade::ExitDecision::Cancel));
+        QVERIFY(audit.exec("DROP TRIGGER b9_fail_final"));
+        QVERIFY(facade.requestExit());QVERIFY(facade.isShutdown());
+        QCOMPARE(saved.size(),3);QVERIFY(saved.last().first().toBool());
+    }
+    void unchangedStateAcrossRealFourSecondCycles(){
+        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());AuditDatabase audit(library);
+        QVERIFY(audit.exec("CREATE TABLE b9_writes(id INTEGER)"));
+        QVERIFY(audit.exec("CREATE TRIGGER p3_insert AFTER INSERT ON settings WHEN NEW.key='queue' BEGIN INSERT INTO b9_writes VALUES(1); END"));
+        QVERIFY(audit.exec("CREATE TRIGGER p3_update AFTER UPDATE ON settings WHEN NEW.key='queue' BEGIN INSERT INTO b9_writes VALUES(1); END"));
+        PlaybackFacade facade(&library,nullptr,true);auto *timer=facade.findChild<QTimer *>("playbackPersistenceTimer");QVERIFY(timer);QCOMPARE(timer->interval(),4000);
+        QSignalSpy ticks(timer,&QTimer::timeout);QVERIFY(facade.save());QCOMPARE(audit.count(),qint64(1));
+        QTRY_VERIFY_WITH_TIMEOUT(ticks.size()>=3,14000);QCOMPARE(audit.count(),qint64(1));
+        QVERIFY(facade.shutdown());QCOMPARE(audit.count(),qint64(1));qInfo()<<"P3 real 4000ms timer cycles="<<ticks.size()<<"queue writes="<<audit.count();
+    }
+    void movingPositionPersistsAndFailedChangedSnapshotRetries(){
+        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto ids=seed(library);AuditDatabase audit(library);
+        QVERIFY(audit.exec("CREATE TABLE b9_writes(id INTEGER)"));
+        QVERIFY(audit.exec("CREATE TRIGGER p3_queue_insert AFTER INSERT ON settings WHEN NEW.key='queue' BEGIN INSERT INTO b9_writes VALUES(1); END"));
+        QVERIFY(audit.exec("CREATE TRIGGER p3_queue_update AFTER UPDATE ON settings WHEN NEW.key='queue' BEGIN INSERT INTO b9_writes VALUES(1); END"));
+        PlaybackFacade facade(&library,nullptr,true);facade.play(ids,ids[0]);QTRY_VERIFY(facade.playing());QTRY_VERIFY(facade.seekable());
+        const auto before=audit.count();QTRY_VERIFY_WITH_TIMEOUT(audit.count()>before,4500);QVERIFY(library.setting("position").toDouble()>0);
+        facade.toggle();QVERIFY(!facade.playing());const auto paused=audit.count();
+        auto *timer=facade.findChild<QTimer *>("playbackPersistenceTimer");QSignalSpy ticks(timer,&QTimer::timeout);
+        QTRY_VERIFY_WITH_TIMEOUT(ticks.size()>=2,9000);QCOMPARE(audit.count(),paused);
+        facade.seek(2500);QVERIFY(audit.count()>paused);
+        QVERIFY(audit.exec("CREATE TRIGGER p3_snapshot_fail BEFORE INSERT ON settings WHEN NEW.key='position' BEGIN SELECT RAISE(ABORT,'P3 snapshot'); END"));
+        facade.seek(3000);QVERIFY(!facade.save());QCOMPARE(library.setting("position").toInt(),2500);
+        const auto failedCount=audit.count();QVERIFY(audit.exec("DROP TRIGGER p3_snapshot_fail"));QVERIFY(facade.save());QCOMPARE(audit.count(),failedCount+1);
+        QCOMPARE(library.setting("position").toInt(),3000);QVERIFY(facade.shutdown());
+        PlaybackFacade restored(&library,nullptr,true);restored.restore();QCOMPARE(restored.queue().items,ids);QTRY_COMPARE(restored.position(),qint64(3000));QVERIFY(!restored.playing());
+        qInfo()<<"P3 moving/paused/seek/retry/restored SQL queue writes="<<audit.count();
+    }
+    void failedListeningSampleDoesNotConsumeItsRetryBaseline(){
+        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto ids=seed(library);AuditDatabase audit(library);PlaybackFacade facade(&library,nullptr,true);
+        auto &core=*facade.backend();PlaybackDiagnostics::session(core,ids[0],10000,80);
+        QVERIFY(audit.exec("CREATE TRIGGER p3_sample_fail BEFORE UPDATE ON sessions BEGIN SELECT RAISE(ABORT,'P3 sample'); END"));
+        QVERIFY(!PlaybackDiagnostics::sample(core,1000,1000,true));QCOMPARE(library.totalHeard(),qint64(0));
+        QVERIFY(audit.exec("DROP TRIGGER p3_sample_fail"));QVERIFY(PlaybackDiagnostics::sample(core,1000,1000,true));QCOMPARE(library.totalHeard(),qint64(1000));
     }
     void immediateDeletionFromNotificationIsSafe() {
         QTemporaryDir dir;

@@ -1473,11 +1473,23 @@ void Window::positionToast(){
     m_toastNotice->setStyleSheet(QString("QLabel#toastNotice{background:%1;color:%2;border:1px solid %3;border-radius:10px;}").arg(palette().color(QPalette::Base).name(),m_ink.name(),palette().color(QPalette::Mid).name()));
 }
 void Window::closeEvent(QCloseEvent *e) {
+    if(findChild<QMessageBox *>("exitSaveFailureDialog")){e->ignore();return;}
     saveWindowSize();
     if(!m_closePending&&!m_quitting&&m_tray&&m_library->setting("closeToTray",false).toBool()){
         hide();e->ignore();return;
     }
     if(!m_closePending&&m_appearancePage&&m_pages->currentWidget()==m_appearancePage&&!m_appearancePage->confirmLeave()){e->ignore();return;}
+    while(!m_player->requestExit()){
+        QMessageBox prompt(QMessageBox::Warning,QStringLiteral("退出前保存失败"),
+            QStringLiteral("播放状态未能保存。可以重试、仍然退出，或取消退出。\n")+m_player->exitError(),QMessageBox::NoButton,this);
+        prompt.setObjectName("exitSaveFailureDialog");
+        auto *retry=prompt.addButton(QStringLiteral("重试"),QMessageBox::AcceptRole);retry->setObjectName("exitSaveRetry");
+        auto *discard=prompt.addButton(QStringLiteral("仍然退出"),QMessageBox::DestructiveRole);discard->setObjectName("exitSaveAnyway");
+        auto *cancel=prompt.addButton(QStringLiteral("取消退出"),QMessageBox::RejectRole);cancel->setObjectName("exitSaveCancel");
+        prompt.setDefaultButton(cancel);prompt.exec();
+        if(prompt.clickedButton()==discard){m_player->requestExit(PlaybackFacade::ExitDecision::ExitAnyway);break;}
+        if(prompt.clickedButton()!=retry){m_player->requestExit(PlaybackFacade::ExitDecision::Cancel);m_closePending=false;m_quitting=false;e->ignore();return;}
+    }
     if(!m_importCoordinator->isIdle()){
         e->ignore();m_closePending=true;m_cancel->setEnabled(false);m_importLabel->setText("正在结束当前文件并安全关闭…");
         m_importCoordinator->shutdown();return;
@@ -1546,6 +1558,9 @@ bool Window::isDragPosition(const QPoint &pos) const {
     return pos.y()>=0&&pos.y()<24&&pos.x()>=6&&pos.x()<width()-6;
 }
 bool Window::eventFilter(QObject *object,QEvent *event){
+    if(object==qApp&&event->type()==QEvent::Quit&&qApp->property("relaxerInteractiveExit").toBool()&&!m_player->isShutdown()){
+        m_quitting=true;close();event->ignore();return true;
+    }
     if(event->type()==QEvent::ToolTip&&object->property("noHoverTip").toBool()){event->accept();return true;}
     if(event->type()==QEvent::Resize){auto *widget=qobject_cast<QWidget *>(object);if(widget&&widget->objectName()=="settingsCard")roundedMask(widget,14);if(widget==m_contentHost&&m_nowPage){m_nowPage->setGeometry(m_contentHost->rect());if(m_nextCompact)updateQueueGeometry();}}
     if(event->type()==QEvent::Wheel&&object->property("playlistScroll").toBool()&&m_scope>0&&m_playlistHeader){

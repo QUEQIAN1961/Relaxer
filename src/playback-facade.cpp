@@ -22,7 +22,7 @@ PlaybackFacade::PlaybackFacade(Library *library, QObject *parent, bool decodeOnl
 }
 PlaybackFacade::~PlaybackFacade() {
     disconnect(this, nullptr, nullptr, nullptr);
-    shutdown();
+    shutdown(true);
     // Release media/process children before QObject deletes other facade children.
     delete m_playback;
 }
@@ -142,16 +142,24 @@ bool PlaybackFacade::save() {
     if (isShutdown())
         return m_playback->shutdown();
     const bool ok = m_playback->save();
-    emit saved(ok);
+    if(!ok||m_playback->lastSaveWrote())emit saved(ok);
     return ok;
 }
-bool PlaybackFacade::shutdown() {
+bool PlaybackFacade::shutdown(bool force) {
     if (isShutdown() || m_shuttingDown)
-        return m_playback->shutdown();
+        return m_playback->isShutdown()?m_playback->shutdown():false;
     m_shuttingDown = true;
-    m_saveTimer.stop();
-    const bool ok = m_playback->shutdown();
-    emit saved(ok);
+    const bool ok = m_playback->shutdown(force);
+    if(isShutdown())m_saveTimer.stop();
+    else m_shuttingDown=false;
+    if(!ok||m_playback->lastSaveWrote())emit saved(ok);
     return ok;
+}
+bool PlaybackFacade::requestExit(ExitDecision decision){
+    if(decision==ExitDecision::Cancel)return false;
+    if(decision!=ExitDecision::Retry&&decision!=ExitDecision::ExitAnyway)return false;
+    QPointer<PlaybackFacade> guard(this);
+    shutdown(decision==ExitDecision::ExitAnyway);
+    return !guard||guard->isShutdown();
 }
 } // namespace relaxer

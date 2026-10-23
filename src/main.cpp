@@ -204,8 +204,9 @@ int main(int argc, char **argv) {
         return saved ? code : 8;
     };
     Window window(&lib);
+    app.setProperty("relaxerInteractiveExit",!parser.isSet("quit-after")&&!parser.isSet("screenshot"));
     window.installEventFilter(&diagnostics);
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, &window, [&] { window.playbackFacade()->shutdown(); });
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &window, [&] { window.playbackFacade()->shutdown(true); });
     window.show();
     diagnostics.mark("uiLoadedMs");
     diagnostics.mark("windowShownMs");
@@ -238,5 +239,5 @@ int main(int argc, char **argv) {
     }
     const int code = app.exec();
     diagnostics.mark("eventLoopReturnedMs");
-    return finish(code, window.playbackFacade()->shutdown());
+    return finish(code, window.playbackFacade()->shutdown(true));
 }

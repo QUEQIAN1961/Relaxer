@@ -24,6 +24,7 @@ class PlaybackBridge final : public QObject {
     Q_PROPERTY(int mode READ mode NOTIFY modeChanged)
     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
+    Q_PROPERTY(QString exitError READ exitError NOTIFY errorChanged)
   public:
     explicit PlaybackBridge(PlaybackFacade *facade, QObject *parent = nullptr, Library *library = nullptr);
     QString title() const { return m_metadata.id == m_state.track.id ? m_metadata.title : m_state.track.title; }
@@ -44,6 +45,8 @@ class PlaybackBridge final : public QObject {
     int mode() const { return int(m_state.mode); }
     bool available() const { return m_facade && !m_facade->isShutdown(); }
     QString error() const { return m_error; }
+    QString exitError() const { return m_facade?m_facade->exitError():QString(); }
+    Q_INVOKABLE bool requestExit(int decision=0);
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void play();
     Q_INVOKABLE void pause();

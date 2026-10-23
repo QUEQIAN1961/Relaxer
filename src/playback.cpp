@@ -102,7 +102,7 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     });
     connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](auto, const QString &e) { onError(e); });
 }
-Playback::~Playback() { shutdown(); }
+Playback::~Playback() { shutdown(true); }
 QAudioOutput *Playback::audioOutput() {
     if (!m_output) {
         m_output = std::make_unique<QAudioOutput>(this);
@@ -110,11 +110,14 @@ QAudioOutput *Playback::audioOutput() {
     }
     return m_output.get();
 }
-bool Playback::shutdown() {
+bool Playback::shutdown(bool force) {
     if (m_shutdown || m_shutdownInProgress) return m_shutdownSaved;
     m_shutdownInProgress = true;
-    m_timer.stop();
     m_shutdownSaved = save();
+    if(!m_shutdownSaved&&!force){m_shutdownInProgress=false;return false;}
+    // The final snapshot and listening sample precede irreversible teardown.
+    // A failed interactive attempt leaves the transport and timer available.
+    m_timer.stop();
     m_shutdown = true;
     ++m_playGeneration;
     m_autoStart = false; m_loading = false; m_restorePosition = -1;
@@ -143,7 +146,7 @@ bool Playback::sampleAt(qint64 now, qint64 position, bool isPlaying, bool finish
         ok = m_library->saveSession(m_session, delta, m_threshold, finishing);
     // Some backends publish position only every 500 ms. Keep the wall baseline
     // until media position advances, or real listening time would be lost.
-    if (position != m_lastPosition) {
+    if (ok && position != m_lastPosition) {
         m_lastPosition = position;
         m_lastWall = now;
     }
@@ -321,19 +324,24 @@ void Playback::setVolume(int v) {
 }
 bool Playback::saveQueue() {
     if (m_shutdown) return m_shutdownSaved;
+    m_lastSaveWrote=false;
     QJsonArray ids;
     for (auto t : m_queue.items) ids.append(double(t));
     // Same keys and representation; one existing storage transaction prevents
     // a failed periodic/final snapshot from leaving a partially updated queue.
-    const bool ok = m_library->setSettings({{"queue", ids}, {"current", double(m_queue.current())},
-        {"position", double(position())}, {"activeSession", double(m_session.id)}});
-    if (!ok) emit saveFailed(m_library->lastError());
+    const QJsonObject snapshot{{"queue", ids}, {"current", double(m_queue.current())},
+        {"position", double(position())}, {"activeSession", double(m_session.id)}};
+    if(m_haveSavedQueue&&snapshot==m_lastSavedQueue)return true;
+    const bool ok = m_library->setSettings(snapshot);
+    if(ok){m_lastSavedQueue=snapshot;m_haveSavedQueue=true;m_lastSaveWrote=true;}
+    else {m_saveError=m_library->lastError();emit saveFailed(m_saveError);}
     return ok;
 }
 bool Playback::save() {
     if (m_shutdown) return m_shutdownSaved;
+    m_saveError.clear();
     const bool sampled = sample();
-    if (!sampled) emit saveFailed(m_library->lastError());
+    if (!sampled){m_saveError=m_library->lastError();emit saveFailed(m_saveError);}
     const bool saved = saveQueue();
     return sampled && saved;
 }

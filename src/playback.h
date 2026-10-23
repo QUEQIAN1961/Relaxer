@@ -10,6 +10,7 @@
 #include <QRandomGenerator>
 #include <QSet>
 #include <QTimer>
+#include <QJsonObject>
 namespace relaxer {
 class Playback : public QObject {
     Q_OBJECT
@@ -27,7 +28,9 @@ class Playback : public QObject {
     void setVolume(int value);
     void restore();
     bool save();
-    bool shutdown();
+    bool shutdown(bool force=false);
+    bool lastSaveWrote() const { return m_lastSaveWrote; }
+    QString lastSaveError() const { return m_saveError; }
     bool isShutdown() const { return m_shutdown; }
     void forget(const QVector<qint64> &ids);
     Track current() const { return m_library->track(m_queue.current()); }
@@ -69,6 +72,9 @@ class Playback : public QObject {
     QPointer<QProcess> m_transcode;
     void load(qint64 id, bool autoplay, bool resume = false);
     bool m_shutdown = false, m_shutdownInProgress = false, m_shutdownSaved = true;
+    QJsonObject m_lastSavedQueue;
+    bool m_haveSavedQueue=false,m_lastSaveWrote=false;
+    QString m_saveError;
     bool sample(bool finishing = false, bool flush = false);
     bool sampleAt(qint64 now, qint64 position, bool isPlaying, bool finishing, bool flush);
     void finish();

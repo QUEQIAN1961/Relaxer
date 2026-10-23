@@ -6,6 +6,9 @@
 #include <QComboBox>
 #include <QSignalSpy>
 #include <QSpinBox>
+#include <QMessageBox>
+#include <QScopeGuard>
+#include <QQuickItem>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -42,6 +45,43 @@ struct Fixture {
 class QmlC4C5BridgeTests:public QObject {
     Q_OBJECT
 private slots:
+    void exitSaveDecision_data(){
+        QTest::addColumn<bool>("qml");QTest::addColumn<int>("decision");QTest::addColumn<bool>("appQuit");
+        for(bool qml:{false,true})for(int decision:{0,1,2})for(bool appQuit:{false,true})
+            QTest::newRow(qPrintable(QString("%1-%2-%3").arg(qml?"qml":"widgets").arg(decision).arg(appQuit?"app-quit":"window-close")))<<qml<<decision<<appQuit;
+    }
+    void exitSaveDecision(){
+        QFETCH(bool,qml);QFETCH(int,decision);QFETCH(bool,appQuit);
+        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());auto t=seed(library,"Exit fixture","p3-exit");QVERIFY(wave20(library.absolute(t.file)));
+        std::unique_ptr<QmlShell> shell;std::unique_ptr<Window> widgets;PlaybackFacade *facade=nullptr;
+        if(qml){shell=std::make_unique<QmlShell>(&library,nullptr,true);QVERIFY2(shell->load(),qPrintable(shell->warnings().join('\n')));facade=shell->facade();}
+        else {widgets=std::make_unique<Window>(&library);widgets->show();facade=widgets->playbackFacade();}
+        facade->play({t.id},t.id);QTRY_VERIFY(facade->seekable());QTRY_VERIFY(facade->playing());
+        QSqlQuery query(import_fixture::database(library));QVERIFY(query.exec("CREATE TRIGGER p3_fail_exit BEFORE INSERT ON settings WHEN NEW.key='position' BEGIN SELECT RAISE(ABORT,'P3 final save failure'); END"));
+        facade->seek(1200);QVERIFY(!facade->save());
+        const auto previous=qApp->property("relaxerInteractiveExit");qApp->setProperty("relaxerInteractiveExit",appQuit);
+        const auto restore=qScopeGuard([&]{qApp->setProperty("relaxerInteractiveExit",previous);});
+        auto drop=[&]{return query.exec("DROP TRIGGER p3_fail_exit");};
+        auto closeWindow=[&]{if(appQuit){QEvent quit(QEvent::Quit);QCoreApplication::sendEvent(qApp,&quit);}else if(qml)shell->window()->close();else widgets->close();};
+        const QString buttonName=decision==0?"exitSaveRetry":decision==1?"exitSaveAnyway":"exitSaveCancel";
+        if(qml){
+            closeWindow();QVERIFY(!facade->isShutdown());QObject *button=nullptr;
+            QTRY_VERIFY((button=shell->window()->findChild<QObject *>(buttonName))&&button->property("visible").toBool());
+            if(decision==0)QVERIFY(drop());QVERIFY(QMetaObject::invokeMethod(button,"clicked"));
+        }else{
+            bool clicked=false,dropped=false;QTimer answer;answer.setInterval(1);
+            connect(&answer,&QTimer::timeout,this,[&]{if(auto *box=qobject_cast<QMessageBox *>(QApplication::activeModalWidget())){
+                if(box->objectName()!="exitSaveFailureDialog")return;
+                if(decision==0)dropped=drop();if(auto *button=box->findChild<QPushButton *>(buttonName)){clicked=true;button->click();}
+            }});answer.start();closeWindow();answer.stop();QVERIFY(clicked);if(decision==0)QVERIFY(dropped);
+        }
+        if(decision==2){
+            QVERIFY(!facade->isShutdown());QVERIFY(facade->playing());QVERIFY(facade->findChild<QTimer *>("playbackPersistenceTimer")->isActive());
+            QVERIFY(drop());facade->toggle();QVERIFY(!facade->playing());facade->toggle();QTRY_VERIFY(facade->playing());
+            QVERIFY(facade->save());qApp->setProperty("relaxerInteractiveExit",false);
+            if(qml)shell->window()->close();else widgets->close();QTRY_VERIFY(facade->isShutdown());
+        }else {QTRY_VERIFY(facade->isShutdown());if(decision==1){QVERIFY(!facade->shutdown());QVERIFY(drop());}else QVERIFY(facade->shutdown());}
+    }
     void settingsDraftValidationAndWidgetsRoundTrip(){
         QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto schema=import_fixture::schema(library);
         {
