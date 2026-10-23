@@ -133,6 +133,33 @@ void emptyResponse(ControlledReply *reply) {
 class LyricsSearchTests final : public QObject {
     Q_OBJECT
   private slots:
+    void rankedFirstHitStopsFanout_data(){
+        QTest::addColumn<bool>("holdOthers");QTest::newRow("immediate-all")<<false;QTest::newRow("cancel-slow-inflight")<<true;
+    }
+    void rankedFirstHitStopsFanout(){
+        QFETCH(bool,holdOthers);QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());const auto t=seed(l);
+        ControlledNetwork net;net.responder=[&](ControlledReply *r){if(!holdOthers||r==net.replies.first())r->respond(200,json({record(t)}));};
+        LyricsSearchCoordinator c(&l,nullptr,QUrl("http://primary.test/api"),{},&net,providers());
+        QSignalSpy done(&c,&LyricsSearchCoordinator::finished);auto options=shortOptions();options.budgetMs=3000;options.requestTimeoutMs=1000;options.scoreDelayMs=100;
+        c.start({input(t)},options);QCOMPARE(net.urls.size(),3);int aborted=0;
+        for(const auto &reply:net.replies)connect(reply,&QNetworkReply::finished,this,[&,reply]{if(reply->aborted)++aborted;});
+        QTRY_COMPARE(done.size(),1);QCOMPARE(c.summary().saved,1);QCOMPARE(c.summary().automaticAccepted,1);
+        for(const auto &url:net.urls)qInfo().noquote()<<"P3 FIRST-HIT TRACE"<<url.host()<<url.path()<<url.query();
+        qInfo()<<"P3 FIRST-HIT actual_requests="<<net.urls.size()<<"aborted="<<aborted;
+        QCOMPARE(net.urls.size(),3);QCOMPARE(c.summary().activeRequests,0);QCOMPARE(aborted,holdOthers?2:0);
+    }
+    void automaticAcceptedRequiresPersistenceAndRetry(){
+        QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());const auto t=seed(l);
+        QSqlDatabase database;
+        for(const auto &name:QSqlDatabase::connectionNames())if(QSqlDatabase::database(name).databaseName()==l.absolute("relaxer.sqlite"))database=QSqlDatabase::database(name);
+        QSqlQuery q(database);QVERIFY(q.exec("CREATE TRIGGER p3_reject BEFORE UPDATE OF lyrics ON tracks BEGIN SELECT RAISE(ABORT,'P3 reject'); END"));
+        ControlledNetwork net;net.responder=[&](ControlledReply *r){r->respond(200,json({record(t)}),QNetworkReply::NoError,true);};
+        LyricsSearchCoordinator c(&l,nullptr,QUrl("http://mock.test/api"),{},&net);QSignalSpy done(&c,&LyricsSearchCoordinator::finished);
+        c.start({input(t)});QTRY_COMPARE(done.size(),1);QCOMPARE(c.summary().saved,0);QCOMPARE(c.summary().automaticAccepted,0);QVERIFY(l.track(t.id).lyrics.isEmpty());
+        QVERIFY(q.exec("DROP TRIGGER p3_reject"));c.start({input(t)});QTRY_COMPARE(done.size(),2);
+        QCOMPARE(c.summary().saved,1);QCOMPARE(c.summary().automaticAccepted,1);QCOMPARE(c.summary().finished,1);
+        c.noteManualSave();QCOMPARE(c.summary().automaticAccepted,1);QCOMPARE(c.summary().saved,2);
+    }
     void headlessEventTraceAndCompletedNetworkBudget(){
         QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());const auto t=seed(l);
         ControlledNetwork net;net.responder=[&](ControlledReply *r){QCOMPARE(r->request().rawHeader("User-Agent"),QByteArray(release::UserAgent));r->respond(200,json({record(t)}));};
@@ -721,6 +748,7 @@ class LyricsSearchTests final : public QObject {
         c.start({input(t)});
         QTRY_COMPARE(done.size(), 1);
         QCOMPARE(c.summary().saved, 0);
+        QCOMPARE(c.summary().automaticAccepted, 0);
         QVERIFY(l.track(t.id).lyrics.isEmpty());
         for (const auto &name : QSqlDatabase::connectionNames()) {
             auto db = QSqlDatabase::database(name);
@@ -739,6 +767,7 @@ class LyricsSearchTests final : public QObject {
         QTRY_COMPARE(done.size(), 2);
         QCOMPARE(c.summary().saved, 0);
         QCOMPARE(read(next.saveSnapshot.target.path), QByteArray("external protected bytes"));
+        QCOMPARE(c.summary().automaticAccepted, 0);
     }
     void wrongThreadStartCannotTouchSqlOrTransport() {
         QTemporaryDir d;

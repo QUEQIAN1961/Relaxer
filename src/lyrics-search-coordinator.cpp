@@ -655,6 +655,8 @@ LyricsQueryPlan LyricsSearchCoordinator::queryPlan(const LyricsSearchRequest &re
                            .match(input.match.artist);
     if (alias.hasMatch())
         add(input.match.title, alias.captured(1));
+    const auto explicitLead=LyricMatchPolicy::primaryArtist(input.match.artist);
+    if(!explicitLead.isEmpty())add(input.match.title,explicitLead);
     const auto lead = input.match.artist
                           .split(QRegularExpression("\\s*(?:/|、|&|\\bfeat\\.?\\b|\\bft\\.?\\b)\\s*",
                                                     QRegularExpression::CaseInsensitiveOption))
@@ -749,10 +751,16 @@ void LyricsSearchCoordinator::pumpQueries(const JobPtr &j) {
             finishOnline(j);
         return;
     }
-    if (!j->manual && !j->collected.isEmpty() && !rankingCurrent(j))
+    if (!j->manual && !j->collected.isEmpty() && !rankingCurrent(j)) {
         scheduleRanking(j);
-    if (j->active > 0 && !j->manual && rankingCurrent(j) && earlyStopReady(j))
+        // Let the current payload be assessed before replenishing this job's
+        // query/detail fan-out. Other songs and existing requests stay concurrent.
         return;
+    }
+    if (!j->manual && rankingCurrent(j) && earlyStopReady(j)) {
+        finishOnline(j);
+        return;
+    }
     if (j->active == 0 && !j->manual && !j->collected.isEmpty() && rankingCurrent(j)) {
         bool strong = false, conflict = false, instrumental = false, vocal = false;
         QString first;
@@ -783,6 +791,10 @@ void LyricsSearchCoordinator::pumpQueries(const JobPtr &j) {
         if (j->active == 0)
             setJobStatus(j, "正在准备网络");
         return;
+    }
+    while(j->active<m_requestLimit&&!j->deferredRequests.isEmpty()){
+        const auto pending=j->deferredRequests.takeFirst();request(j,pending.first,pending.second);
+        if(!live(j)||j->onlineFinished)return;
     }
     while (j->active < m_requestLimit && j->next < j->attempts.size()) {
         // A saturated/cooling source must not block other providers behind it in the queue.
@@ -827,6 +839,12 @@ void LyricsSearchCoordinator::pumpQueries(const JobPtr &j) {
 void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
     if (!live(j) || j->onlineFinished)
         return;
+    if(!j->manual&&!j->collected.isEmpty()&&!rankingCurrent(j)){
+        const auto pending=qMakePair(stage,retry);
+        if(!j->deferredRequests.contains(pending))j->deferredRequests.append(pending);
+        scheduleRanking(j);return;
+    }
+    if(!j->manual&&rankingCurrent(j)&&earlyStopReady(j)){finishOnline(j);return;}
     if (j->clock.isValid() && j->clock.elapsed() >= m_options.budgetMs) {
         j->completeResponses = false;
         finishOnline(j);
@@ -1249,10 +1267,17 @@ bool LyricsSearchCoordinator::cacheRankingCurrent(const JobPtr &j) const {
 }
 
 bool LyricsSearchCoordinator::earlyStopReady(const JobPtr &j) const {
-    for (const auto &item : j->readyAll)
-        if (!item.record["syncedLyrics"].toString().isEmpty() && item.confidentOriginal && item.credible)
-            return true;
-    return false;
+    if(!rankingCurrent(j))return false;
+    bool strong=false;QString first;
+    for(const auto &item:j->readyAll){
+        if(!item.confidentOriginal)continue;
+        if(item.record["instrumental"].toBool())return false;
+        const auto text=recordLyrics(item.record);
+        if(!first.isEmpty()&&!text.isEmpty()&&text!=first)return false;
+        if(!text.isEmpty())first=text;
+        strong|=!item.record["syncedLyrics"].toString().isEmpty()&&item.credible;
+    }
+    return strong;
 }
 
 void LyricsSearchCoordinator::scheduleRanking(const JobPtr &j) {
@@ -1373,8 +1398,8 @@ void LyricsSearchCoordinator::applyAccept(const JobPtr &j) {
                              : r["syncedLyrics"].toString().isEmpty() ? QString("已保存普通歌词")
                                                                       : QString("已保存滚动歌词")) +
                             suffix + (r["coverMatch"].toBool() ? QString(" · 已匹配原唱") : QString());
-        ++m_summary.automaticAccepted;
         if (store(j->original, data)) {
+            ++m_summary.automaticAccepted;
             ++m_saved;
             j->wantAccept = false;
             finishJob(j, status, LyricsSearchState::Saved);

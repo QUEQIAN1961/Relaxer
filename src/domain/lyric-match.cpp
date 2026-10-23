@@ -80,6 +80,18 @@ using lyric_match_detail::titleWithoutFeaturing;
 using lyric_match_detail::similarity;
 bool LyricMatchPolicy::knownArtist(const QString &s){return lyric_match_detail::knownArtist(s);}
 bool LyricMatchPolicy::sameArtist(const QString &a,const QString &b){return lyric_match_detail::sameArtist(a,b);}
+QString LyricMatchPolicy::primaryArtist(const QString &artist){
+    // Punctuation alone cannot distinguish a band name from a collaboration.
+    // Only explicit featuring/guest credits establish a leading identity.
+    static thread_local const QRegularExpression credit(
+        "^(.+?)\\s+(?:feat\\.?|ft\\.?|featuring|with|合作(?:艺人)?[:：]?|合唱[:：]?)\\s+(.+)$",
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match=credit.match(artist.trimmed());
+    if(!match.hasMatch())return {};
+    const auto lead=match.captured(1).trimmed(),guest=match.captured(2).trimmed();
+    if(!knownArtist(lead)||!knownArtist(guest))return {};
+    return lead;
+}
 QString LyricMatchPolicy::versionMark(const QString &s){return lyric_match_detail::versionMark(s);}
 QString LyricMatchPolicy::baseTitle(QString s){return lyric_match_detail::baseTitle(std::move(s));}
 Track LyricMatchPolicy::searchTrack(const Track &track) {
@@ -102,10 +114,17 @@ bool LyricMatchPolicy::confident(const Track &t,const QJsonObject &record) {
     const Track clean=searchTrack(t);
     const QString title=cleanTitle(record["trackName"].toString());
     const double seconds=record["duration"].toDouble(-1);
+    const auto sourceArtist=record["artistName"].toString();
+    const auto lead=primaryArtist(clean.artist);
+    const bool mainArtist=!lead.isEmpty()&&normalized(lead)==normalized(sourceArtist)&&
+        versionMark(clean.title+" "+clean.album).isEmpty()&&versionMark(title+" "+record["albumName"].toString()).isEmpty()&&
+        !clean.album.isEmpty()&&clean.album!="未知专辑"&&
+        normalized(clean.album)==normalized(record["albumName"].toString())&&
+        seconds>0&&qAbs(t.duration/1000.-seconds)<=1.;
     return !clean.title.isEmpty()&&
         normalized(titleWithoutFeaturing(clean.title))==normalized(titleWithoutFeaturing(title))&&
         versionMark(clean.title)==versionMark(title)&&
-        (clean.album.isEmpty()||clean.album=="未知专辑"||record["albumName"].toString().isEmpty()||versionMark(clean.title+" "+clean.album)==versionMark(title+" "+record["albumName"].toString()))&&sameArtist(clean.artist,record["artistName"].toString())&&
+        (clean.album.isEmpty()||clean.album=="未知专辑"||record["albumName"].toString().isEmpty()||versionMark(clean.title+" "+clean.album)==versionMark(title+" "+record["albumName"].toString()))&&(sameArtist(clean.artist,sourceArtist)||mainArtist)&&
         seconds>0&&qAbs(t.duration/1000.-seconds)<=qMin(4.,qMax(2.,t.duration/100000.));
 }
 double LyricMatchPolicy::matchScore(const Track &track,const QJsonObject &r) {

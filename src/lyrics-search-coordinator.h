@@ -148,6 +148,7 @@ class LyricsSearchCoordinator final : public QObject {
         int generation = 0, next = 0, active = 0, searchPass = 0;
         bool manual = false, completeResponses = true, onlineStarted = false;
         QVector<Attempt> attempts;
+        QList<QPair<int,int>> deferredRequests;
         QJsonArray collected;
         QSet<QString> keys;
         QStringList failures;

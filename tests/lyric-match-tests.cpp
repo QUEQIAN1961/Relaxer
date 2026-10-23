@@ -16,6 +16,31 @@ class LyricMatchTests:public QObject {
         return LyricMatchPolicy::rawLyricsAllowed(bytes,reason)&&LyricMatchPolicy::credibleLyrics(Lyrics::parse(bytes),f::track(row["track"].toObject()).duration,reason);
     }
   private slots:
+    void explicitPrimaryArtist_data(){
+        QTest::addColumn<QString>("artist");QTest::addColumn<QString>("candidate");QTest::addColumn<QString>("title");
+        QTest::addColumn<QString>("album");QTest::addColumn<double>("duration");QTest::addColumn<bool>("accepted");
+        auto row=[](const char *name,QString artist,QString candidate,QString title="Song",QString album="Album",double duration=200.,bool accepted=false){
+            QTest::newRow(name)<<artist<<candidate<<title<<album<<duration<<accepted;
+        };
+        row("featuring","Artist feat. Guest","Artist","Song","Album",200.,true);
+        row("ft","Artist ft. Guest","Artist","Song","Album",200.8,true);
+        row("with","Artist with Guest","Artist","Song","Album",200.,true);
+        row("chinese","歌手 合作 嘉宾","歌手","Song","Album",200.,true);
+        row("guest-only","Artist feat. Guest","Guest");row("swapped-order","Guest feat. Artist","Artist");
+        row("same-title-wrong-album","Artist feat. Guest","Artist","Song","Other Album");
+        row("wrong-title","Artist feat. Guest","Artist","Other Song");row("duration-conflict","Artist feat. Guest","Artist","Song","Album",203.);
+        row("live","Artist feat. Guest","Artist","Song (Live)");row("remix","Artist feat. Guest","Artist","Song (Remix)");row("cover","Artist feat. Guest","Artist","Song (Cover)");
+        row("wrong-singer","Artist feat. Guest","Wrong");row("empty-singer","","Artist");
+        row("comma-ambiguous","Artist, Guest","Artist");row("band-comma","Earth, Wind & Fire","Earth");
+        row("band-ampersand","Simon & Garfunkel","Simon");row("band-slash","AC/DC","AC");
+    }
+    void explicitPrimaryArtist(){
+        QFETCH(QString,artist);QFETCH(QString,candidate);QFETCH(QString,title);QFETCH(QString,album);QFETCH(double,duration);QFETCH(bool,accepted);
+        Track t;t.title="Song";t.artist=artist;t.album="Album";t.duration=200000;
+        QJsonObject r{{"trackName",title},{"artistName",candidate},{"albumName",album},{"duration",duration}};
+        QCOMPARE(LyricMatchPolicy::confident(t,r),accepted);
+        if(accepted){t.title="Song (Live)";r["trackName"]="Song (Live)";QVERIFY(!LyricMatchPolicy::confident(t,r));}
+    }
     void initTestCase(){QCOMPARE(f::root()["baseCommit"].toString(),QString("3a0dbd9cc67f6524c93ddf68b55ac2b3b403b4ec"));QCOMPARE(f::root()["cases"].toArray().size(),104);}
     void frozenBehavior_data(){QTest::addColumn<QJsonObject>("row");for(const auto &v:f::root()["cases"].toArray()){const auto row=v.toObject();QTest::newRow(qPrintable(row["id"].toString()))<<row;}}
     void frozenBehavior(){

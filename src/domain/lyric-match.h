@@ -12,6 +12,7 @@ class LyricMatchPolicy final {
     static QString cleanTitle(const QString &text);
     static bool knownArtist(const QString &artist);
     static bool sameArtist(const QString &a,const QString &b);
+    static QString primaryArtist(const QString &artist);
     static QString versionMark(const QString &title);
     static QString baseTitle(QString title);
     static Track searchTrack(const Track &track);
