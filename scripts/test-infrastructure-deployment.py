@@ -13,6 +13,18 @@ def main():
              ('testing-on-no-sqlite',['-DBUILD_TESTING=ON','-DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE'],1),
              ('import-only',['-DBUILD_TESTING=ON','-DRELAXER_IMPORT_ONLY=ON','-DCMAKE_DISABLE_FIND_PACKAGE_Qt6Widgets=TRUE'],0),
              ('queue-only-no-sqlite',['-DRELAXER_QUEUE_ONLY=ON','-DCMAKE_DISABLE_FIND_PACKAGE_SQLite3=TRUE'],0)]
+    legacy=out/'legacy-module';legacy.mkdir()
+    (legacy/'FindSQLite3.cmake').write_text('''# Controlled pre-4.3 imported-target surface; uses real installed C API.
+find_path(SQLite3_INCLUDE_DIR sqlite3.h)
+find_library(SQLite3_LIBRARY NAMES sqlite3)
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(SQLite3 REQUIRED_VARS SQLite3_INCLUDE_DIR SQLite3_LIBRARY)
+if(SQLite3_FOUND AND NOT TARGET SQLite::SQLite3)
+  add_library(SQLite::SQLite3 UNKNOWN IMPORTED)
+  set_target_properties(SQLite::SQLite3 PROPERTIES IMPORTED_LOCATION "${SQLite3_LIBRARY}" INTERFACE_INCLUDE_DIRECTORIES "${SQLite3_INCLUDE_DIR}")
+endif()
+''',encoding='utf-8')
+    configs.append(('legacy-sqlite-target-alias',['-DRELAXER_IMPORT_ONLY=ON','-DCMAKE_MODULE_PATH='+legacy.as_posix()],0))
     for name,flags,expected in configs:
         directory=out/name
         cmd=[cmake,'-S',args.source,'-B',directory,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_PREFIX_PATH='+args.qt.as_posix(),'-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH='+args.quick.as_posix(),*flags]
