@@ -61,7 +61,7 @@ class LyricsLookupDiagnostics final {
         return dialog.m_translationAssessments.contains(id);
     }
     static bool auditing(const LyricsLookup &dialog) {
-        return dialog.m_translationAuditInFlight||(dialog.m_translationAuditDebounce&&dialog.m_translationAuditDebounce->isActive());
+        return dialog.m_translationAuditInFlight||dialog.m_translationAuditPending||(dialog.m_translationAuditDebounce&&dialog.m_translationAuditDebounce->isActive());
     }
     static TranslationSummary preview(const LyricsLookup &dialog) { return dialog.aiSummary(); }
     static void refresh(LyricsLookup &dialog) { dialog.selectTrack(); }

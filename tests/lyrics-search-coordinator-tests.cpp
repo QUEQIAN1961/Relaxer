@@ -1,6 +1,7 @@
 #include "domain/lyric-match.h"
 #include "lyrics-search-coordinator.h"
 #include "release-version.h"
+#include "import-fixture.h"
 #include <QFile>
 #include <QJsonDocument>
 #include <QSemaphore>
@@ -11,6 +12,26 @@
 #include <QUrlQuery>
 #include <QtTest>
 #include <functional>
+#include "async-pool-gate.h"
+
+namespace relaxer {
+class LyricsSearchDiagnostics {
+public:
+    using Job=LyricsSearchCoordinator::JobPtr;
+    using Result=LyricsSearchCoordinator::RankResult;
+    static Job job(LyricsSearchCoordinator &c,qint64 id){return c.m_jobs.value(id);}
+    static bool captured(const Job &j){return j&&j->scoreInFlight&&!j->collected.isEmpty();}
+    static bool ready(const Job &j){return j->readyValid;}
+    static Result capture(const Job &j){
+        LyricsSearchCoordinator::ScoreSnap s;s.payload=j->collected;s.original=j->original;s.match=j->match;
+        s.id=j->original.id;s.hash=j->original.hash;s.fpO=LyricsSearchCoordinator::trackContext(j->original);s.fpM=LyricsSearchCoordinator::trackContext(j->match);
+        s.generation=j->generation;s.epoch=j->collectionEpoch;s.timedRequired=j->input.requireTimed;
+        return LyricsSearchCoordinator::computeRank(s);
+    }
+    static void deliver(LyricsSearchCoordinator &c,const Job &j,const Result &r){c.applyRanking(j,r);}
+    static void fingerprintChange(const Job &j){j->match.title+=" changed";}
+};
+}
 
 using namespace relaxer;
 namespace {
@@ -643,6 +664,46 @@ class LyricsSearchTests final : public QObject {
                 terminals.insert(e.taskId);
             }
         }
+    }
+    void staleRankingNeverPublishesBeforeFreshResult_data(){
+        QTest::addColumn<QString>("kind");
+        for(const auto *kind:{"ABA","cancelled","epoch","payload","fingerprint","current"})QTest::newRow(kind)<<QString::fromLatin1(kind);
+    }
+    void staleRankingNeverPublishesBeforeFreshResult(){
+        QFETCH(QString,kind);QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());const auto a=seed(l,"A","a"),b=seed(l,"B","b");
+        AsyncPoolGate gate(LyricsSearchCoordinator::computePool());QVERIFY(gate.entered());
+        ControlledNetwork net;net.responder=[&](ControlledReply *r){r->respond(200,json({record(a,"Stale A","Stale second")}));};
+        LyricsSearchCoordinator c(&l,nullptr,QUrl("http://mock.test/api"),{},&net);auto options=shortOptions();options.budgetMs=10000;
+        c.start({input(a,true)},options);QTRY_VERIFY(LyricsSearchDiagnostics::captured(LyricsSearchDiagnostics::job(c,a.id)));
+        const auto old=LyricsSearchDiagnostics::job(c,a.id);auto result=LyricsSearchDiagnostics::capture(old);
+        if(kind=="ABA"){
+            c.stop();c.start({input(b,true)},options);c.stop();
+            net.responder=[&](ControlledReply *r){r->respond(200,json({record(a,"Fresh A","Fresh second")}));};
+            c.start({input(a,true)},options);QTRY_VERIFY(LyricsSearchDiagnostics::captured(LyricsSearchDiagnostics::job(c,a.id)));
+        }else if(kind=="cancelled")c.stop();
+        else if(kind=="epoch")++result.epoch;
+        else if(kind=="payload")result.payload.append(record(b));
+        else if(kind=="fingerprint")LyricsSearchDiagnostics::fingerprintChange(old);
+        else if(kind=="current"){
+            // A separate valid SQL call changes the stored fingerprint while
+            // the captured result still matches the in-memory job snapshot.
+            QSqlQuery q(import_fixture::database(l));q.prepare("UPDATE tracks SET title=? WHERE id=?");q.addBindValue("DB changed");q.addBindValue(a.id);QVERIFY(q.exec());
+        }
+        QCoreApplication::sendPostedEvents();QCoreApplication::processEvents();
+        QSignalSpy publications(&c,&LyricsSearchCoordinator::candidatesChanged),terminals(&c,&LyricsSearchCoordinator::taskFinished);
+        const auto revision=c.candidates(a.id).revision;bool delivered=false;
+        QTimer::singleShot(0,&c,[&]{LyricsSearchDiagnostics::deliver(c,old,result);delivered=true;});
+        QTRY_VERIFY(delivered);QCoreApplication::sendPostedEvents();QCoreApplication::processEvents();
+        QCOMPARE(publications.size(),0);QCOMPARE(c.candidates(a.id).revision,revision);
+        QVERIFY(old->readyRanked.isEmpty()||kind=="current"); // precise apply boundary before current() rejection
+        if(kind!="current")QVERIFY(!LyricsSearchDiagnostics::ready(old));
+        QCOMPARE(terminals.size(),kind=="current"?1:0);QVERIFY(l.track(a.id).lyrics.isEmpty());QVERIFY(l.track(b.id).lyrics.isEmpty());
+        if(kind=="ABA"){
+            const auto fresh=LyricsSearchDiagnostics::job(c,a.id);const auto correct=LyricsSearchDiagnostics::capture(fresh);
+            LyricsSearchDiagnostics::deliver(c,fresh,correct);QCoreApplication::sendPostedEvents();QCoreApplication::processEvents();
+            QCOMPARE(publications.size(),1);QVERIFY(c.candidates(a.id).revision>revision);QVERIFY(c.candidates(a.id).records.first().toObject()["syncedLyrics"].toString().contains("Fresh A"));
+        }
+        c.stop();
     }
     void cancellationRejectsLateSuccessAndReleasesSlots() {
         QTemporaryDir d;

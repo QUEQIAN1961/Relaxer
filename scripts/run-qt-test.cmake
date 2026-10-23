@@ -7,6 +7,7 @@ get_filename_component(report_directory "${RELAXER_TEST_LOG}" DIRECTORY)
 file(MAKE_DIRECTORY "${report_directory}")
 file(REMOVE "${RELAXER_TEST_LOG}")
 get_filename_component(report_name "${RELAXER_TEST_LOG}" NAME)
+message("QtTest starting: executable=${RELAXER_TEST_EXECUTABLE}; platform=$ENV{QT_QPA_PLATFORM}; pluginPath=$ENV{QT_PLUGIN_PATH}; qpaPluginPath=$ENV{QT_QPA_PLATFORM_PLUGIN_PATH}")
 execute_process(
   COMMAND "${RELAXER_TEST_EXECUTABLE}" -v1 -o "${report_name},txt" -o "-,txt"
   WORKING_DIRECTORY "${report_directory}"

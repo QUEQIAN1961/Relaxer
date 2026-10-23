@@ -10,6 +10,7 @@
 #include <QSqlDriver>
 #include <sqlite3.h>
 #include <QScopeGuard>
+#include "async-pool-gate.h"
 
 namespace relaxer {
 class LyricsLookupDiagnostics {
@@ -18,7 +19,11 @@ public:
     static void status(LyricsLookup &dialog,int row){dialog.setRowStatus(row,"Synthetic status transition");}
     static void audit(LyricsLookup &dialog){dialog.startTranslationCacheAudit();}
     static void requestAudit(LyricsLookup &dialog){dialog.requestTranslationCacheAudit();}
-    static bool auditing(const LyricsLookup &dialog){return dialog.m_translationAuditInFlight;}
+    static bool auditing(const LyricsLookup &dialog){return dialog.m_translationAuditInFlight||dialog.m_translationAuditPending||(dialog.m_translationAuditDebounce&&dialog.m_translationAuditDebounce->isActive());}
+    static quint64 revision(const LyricsLookup &dialog){return dialog.m_translationAssessmentRevision;}
+    static bool inFlight(const LyricsLookup &dialog){return dialog.m_translationAuditInFlight;}
+    static bool pending(const LyricsLookup &dialog){return dialog.m_translationAuditPending;}
+    static auto cancel(const LyricsLookup &dialog){return dialog.m_translationAuditCancel;}
     static QJsonObject work(const LyricsLookup &dialog){
         const auto &m=dialog.m_filterMetrics;
         return {{"full_passes",double(m.fullPasses)},{"row_visits",double(m.rowVisits)},{"assessments",double(m.assessments)},
@@ -32,6 +37,31 @@ using namespace relaxer;
 class TranslationFilterPerformanceTests : public QObject {
     Q_OBJECT
 private slots:
+    void auditWaitIncludesDebounceWorkerApplicationReentryAndClose() {
+        QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());Track track;
+        track.hash="audit-phases";track.title="Audit phases";track.file="Music/fixture.mid";const auto id=library.insert(track);QVERIFY(id>0);
+        QVERIFY(library.saveLyrics(id,"[00:01.00]Hello my friend\n[00:02.00]Good morning"));
+        auto dialog=std::make_unique<LyricsLookup>(&library,QVector<qint64>{id},nullptr,QUrl("http://127.0.0.1:9/api"));
+        auto *filter=dialog->findChild<QCheckBox *>("lyricsMissingTranslationOnly");QVERIFY(filter);filter->setChecked(true);
+        QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(*dialog),5000);
+        AsyncPoolGate gate(LyricsSearchCoordinator::computePool());QVERIFY(gate.entered());
+        LyricsLookupDiagnostics::reset(*dialog);const auto before=LyricsLookupDiagnostics::revision(*dialog);
+        LyricsLookupDiagnostics::requestAudit(*dialog);QVERIFY(LyricsLookupDiagnostics::auditing(*dialog));
+        QVERIFY(!LyricsLookupDiagnostics::inFlight(*dialog));
+        QTRY_VERIFY_WITH_TIMEOUT(LyricsLookupDiagnostics::inFlight(*dialog),5000);
+        QCOMPARE(LyricsLookupDiagnostics::revision(*dialog),before);
+        LyricsLookupDiagnostics::audit(*dialog);QVERIFY(LyricsLookupDiagnostics::pending(*dialog));
+        const auto path=library.absolute(library.track(id).lyrics);QFile changed(path);QVERIFY(changed.open(QIODevice::WriteOnly|QIODevice::Truncate));changed.write(QStringLiteral("你好世界").toUtf8());changed.close();
+        // Refresh while the old snapshot is queued; the pending follow-up must
+        // apply a current revision rather than report completion in between.
+        dialog->findChild<QPushButton *>("lyricsRefreshTranslationFilter")->click();
+        gate.release();QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(*dialog),5000);
+        QVERIFY(LyricsLookupDiagnostics::revision(*dialog)>before);
+        QCOMPARE(LyricsLookupDiagnostics::work(*dialog)["audit_passes"].toInt(),2);
+        QVERIFY(dialog->findChild<QListWidget *>("lyricsTracks")->item(0)->isHidden());
+        const auto token=LyricsLookupDiagnostics::cancel(*dialog);LyricsLookupDiagnostics::requestAudit(*dialog);
+        QVERIFY(LyricsLookupDiagnostics::auditing(*dialog));dialog.reset();QVERIFY(token->load());
+    }
     void thousandSongsAndTwoHundredStatusTransitions_data() {
         QTest::addColumn<int>("songs");
         QTest::newRow("100")<<100;
@@ -70,8 +100,11 @@ private slots:
         LyricsLookupDiagnostics::reset(*dialog);QElapsedTimer auditClock;auditClock.start();int guiHeartbeats=0;QTimer heartbeat;
         heartbeat.setInterval(1);connect(&heartbeat,&QTimer::timeout,&heartbeat,[&]{++guiHeartbeats;});heartbeat.start();
         for(int i=0;i<20;++i)LyricsLookupDiagnostics::requestAudit(*dialog);
+        QVERIFY(LyricsLookupDiagnostics::auditing(*dialog));
+        const auto initialRevision=LyricsLookupDiagnostics::revision(*dialog);
         QTRY_VERIFY_WITH_TIMEOUT(LyricsLookupDiagnostics::work(*dialog)["audit_passes"].toInt()>0,5000);
         QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(*dialog),5000);heartbeat.stop();
+        QVERIFY(LyricsLookupDiagnostics::revision(*dialog)>initialRevision);
         auto auditWork=LyricsLookupDiagnostics::work(*dialog);auditWork["elapsed_ms"]=double(auditClock.nsecsElapsed())/1e6;auditWork["gui_heartbeat_events"]=guiHeartbeats;result["activation_audit"]=auditWork;
         auto *rows=dialog->findChild<QListWidget *>("lyricsTracks");QVERIFY(rows);QCOMPARE(rows->count(),songs);
         for(int i=0;i<rows->count();++i){QVERIFY(!rows->item(i)->isHidden());QCOMPARE(rows->item(i)->data(Qt::UserRole+4).toString(),QStringLiteral("待判断"));}
@@ -84,8 +117,10 @@ private slots:
         }
         LyricsLookupDiagnostics::reset(*dialog);auditClock.restart();guiHeartbeats=0;heartbeat.start();
         for(int i=0;i<20;++i)LyricsLookupDiagnostics::requestAudit(*dialog);
+        const auto changedRevision=LyricsLookupDiagnostics::revision(*dialog);
         QTRY_VERIFY_WITH_TIMEOUT(LyricsLookupDiagnostics::work(*dialog)["audit_passes"].toInt()>0,5000);
         QTRY_VERIFY_WITH_TIMEOUT(!LyricsLookupDiagnostics::auditing(*dialog),5000);heartbeat.stop();
+        QVERIFY(LyricsLookupDiagnostics::revision(*dialog)>changedRevision);
         auto changedWork=LyricsLookupDiagnostics::work(*dialog);changedWork["elapsed_ms"]=double(auditClock.nsecsElapsed())/1e6;changedWork["gui_heartbeat_events"]=guiHeartbeats;result["content_change_reassessment"]=changedWork;
         for(int i=0;i<rows->count();++i)QVERIFY(rows->item(i)->isHidden());
         QElapsedTimer closing;closing.start();dialog.reset();result["close_elapsed_ms"]=double(closing.nsecsElapsed())/1e6;
@@ -105,5 +140,6 @@ private slots:
         }
     }
 };
-QTEST_MAIN(TranslationFilterPerformanceTests)
+#include "gui-test-main.h"
+RELAXER_GUI_TEST_MAIN(TranslationFilterPerformanceTests)
 #include "translation-filter-performance-tests.moc"

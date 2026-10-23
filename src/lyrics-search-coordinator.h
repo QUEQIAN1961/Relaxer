@@ -112,6 +112,9 @@ class LyricsSearchCoordinator final : public QObject {
     void finished(const relaxer::LyricsSearchSummary &summary);
 
   private:
+    // Test diagnostics can deliver captured results in a controlled order.
+    // No runtime hook, dispatch change, or additional state.
+    friend class LyricsSearchDiagnostics;
     struct RankItem {
         QJsonObject record;
         double score = 0;

@@ -46,11 +46,16 @@ private slots:
     void directWindowDestructionDoesNotBlockWorkerCleanup(){
         QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());const auto path=directory.filePath("fixture.mid");QVERIFY(import_fixture::midi(path));
         auto window=std::make_unique<Window>(&library);window->playback()->media()->setAudioOutput(nullptr);window->show();
-        auto *co=window->findChild<ImportCoordinator *>("importCoordinator");QSignalSpy done(co,&ImportCoordinator::finished);
+        QPointer<ImportCoordinator> co=window->findChild<ImportCoordinator *>("importCoordinator");QVERIFY(co);
         window->importSources({path});QVERIFY(co->isBusy());QElapsedTimer timer;timer.start();window.reset();QVERIFY(timer.elapsed()<1000);
-        // The separate service tests assert actual worker and thread deletion.
-        QCoreApplication::processEvents();QCOMPARE(done.size(),0);
+        QVERIFY(co.isNull());
+        // This GUI test owns the production Window/destruction latency boundary.
+        // Controlled worker completion, a surviving SQLite observer, positive
+        // writes and no late writes are covered by ImportCoordinatorTests::
+        // destructionCancelsWithoutBlockingAndReleasesWorkerAndThread.
+        // A spy disconnected by QObject destruction cannot prove that property.
     }
 };
-QTEST_MAIN(ImportWidgetsTests)
+#include "gui-test-main.h"
+RELAXER_GUI_TEST_MAIN(ImportWidgetsTests)
 #include "import-widgets-tests.moc"

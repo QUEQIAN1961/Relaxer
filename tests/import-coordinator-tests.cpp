@@ -64,9 +64,14 @@ private slots:
         QTRY_COMPARE(done.size(),1);QCOMPARE(ready.size(),1);QVERIFY(co.isIdle());QVERIFY(summary(done).cancelled);
         co.shutdown();QCOMPARE(ready.size(),1);QCOMPARE(co.start({{"new.mid"}}),quint64(0));
     }
-    void rejectsForeignCallingThreadAndLibraryAffinity(){
-        QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());ImportCoordinator co(&library);
+    void rejectsForeignCallingThreadAndLibraryAffinityBeforeWork(){
+        QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());ControlledCoordinator co(&library);co.refuse=true;
+        // A factory that refuses work keeps the negative control safe even if
+        // a mutant removes the calling-thread guard. The rejection reason must
+        // still prove the guard, rather than merely observing a zero task ID.
+        QSignalSpy rejected(&co,&ImportCoordinator::requestRejected);
         quint64 result=999;std::thread foreign([&]{result=co.start({{"test.mid"}});});foreign.join();QCOMPARE(result,quint64(0));QVERIFY(co.isIdle());
+        QCOMPARE(rejected.size(),1);QVERIFY(rejected.first().first().toString().contains(QStringLiteral("归属线程")));
         QThread other;ImportCoordinator wrong(&library);wrong.moveToThread(&other); // No SQL connection is moved.
         QCOMPARE(wrong.start({{"test.mid"}}),quint64(0));
         // Move the service back from its own thread before stack destruction.
@@ -103,7 +108,7 @@ private slots:
         ImportCoordinator co(&library);QSignalSpy done(&co,&ImportCoordinator::finished);QVERIFY(co.start({{good,bad},0,1}));QTRY_COMPARE_WITH_TIMEOUT(done.size(),1,20000);
         const auto report=summary(done);QCOMPARE(report.added,1);QCOMPARE(report.failed,1);QVERIFY(report.partialSuccess);QCOMPARE(library.tracks().size(),1);QVERIFY(QFileInfo::exists(good));
     }
-    void sqlFailureIsLocalAndActualWritesStayOnLibraryThread(){
+    void sqliteTriggerObservesActualWritesOnLibraryThreadAndLocalFailure(){
         QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
         auto db=import_fixture::database(library);auto handle=db.driver()->handle();QVERIFY(handle.isValid());auto *native=*static_cast<sqlite3 **>(handle.data());
         struct Probe {QThread *owner;int calls=0;bool correct=true;} probe{library.thread()};
@@ -111,9 +116,11 @@ private slots:
         QCOMPARE(sqlite3_create_function_v2(native,"b6_owner_thread",0,SQLITE_UTF8,&probe,callback,nullptr,nullptr,nullptr),SQLITE_OK);
         QSqlQuery query(db);QVERIFY(query.exec("CREATE TRIGGER b6_owner BEFORE INSERT ON tracks BEGIN SELECT b6_owner_thread(); END"));
         QVERIFY(query.exec("CREATE TRIGGER b6_reject BEFORE INSERT ON tracks WHEN NEW.title='reject' BEGIN SELECT RAISE(ABORT,'B6 injected insert failure'); END"));
-        ControlledCoordinator co(&library);co.script=[](Importer &w,const auto &){w.scanned(3,0,true);w.imported(success("first"));w.imported(success("bad","reject"));w.imported(success("last"));w.finished(false);};
+        std::atomic_bool workerWasForeign{false};auto *owner=library.thread();
+        ControlledCoordinator co(&library);co.script=[&](Importer &w,const auto &){workerWasForeign.store(QThread::currentThread()!=owner);w.scanned(3,0,true);w.imported(success("first"));w.imported(success("bad","reject"));w.imported(success("last"));w.finished(false);};
         QSignalSpy done(&co,&ImportCoordinator::finished);QVERIFY(co.start({{"fixture"}}));QTRY_COMPARE(done.size(),1);const auto report=summary(done);
-        QCOMPARE(report.added,2);QCOMPARE(report.failed,1);QVERIFY(report.partialSuccess);QCOMPARE(library.tracks().size(),2);QVERIFY(probe.calls>=2);QVERIFY(probe.correct);QVERIFY(report.errors.join('\n').contains("B6 injected"));
+        QCOMPARE(report.added,2);QCOMPARE(report.failed,1);QVERIFY(report.partialSuccess);QCOMPARE(library.tracks().size(),2);QVERIFY(probe.calls>=2);QVERIFY(probe.correct);QVERIFY(workerWasForeign.load());QVERIFY(report.errors.join('\n').contains("B6 injected"));
+        qInfo()<<"D-R5-08 actual SQLite trigger callbacks"<<probe.calls<<"all on Library thread; producer on separate real QThread";
     }
     void targetPlaylistIsFixedAndDeletedTargetDoesNotLoseSong(){
         QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());const auto target=library.createPlaylist("delete during import"),other=library.createPlaylist("other");
@@ -149,12 +156,24 @@ private slots:
         const auto id=co.start({{"fixture"}});QVERIFY(gate.reached.tryAcquire(1,5000));QVERIFY(co.cancel(id));QTRY_COMPARE(done.size(),1);QVERIFY(summary(done).cancelled);
     }
     void destructionCancelsWithoutBlockingAndReleasesWorkerAndThread(){
-        QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());auto co=std::make_unique<ControlledCoordinator>(&library);Gate gate;
+        QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());
+        // This observer outlives both coordinators and workers. A real SQLite
+        // trigger distinguishes an absent business write from a disconnected spy.
+        auto db=import_fixture::database(library);auto handle=db.driver()->handle();QVERIFY(handle.isValid());auto *native=*static_cast<sqlite3 **>(handle.data());
+        int writes=0;QCOMPARE(sqlite3_create_function_v2(native,"p3_write_observer",0,SQLITE_UTF8,&writes,
+            +[](sqlite3_context *ctx,int,sqlite3_value **){++*static_cast<int *>(sqlite3_user_data(ctx));sqlite3_result_int(ctx,1);},nullptr,nullptr,nullptr),SQLITE_OK);
+        auto detach=qScopeGuard([&]{sqlite3_create_function_v2(native,"p3_write_observer",0,SQLITE_UTF8,nullptr,nullptr,nullptr,nullptr,nullptr);});
+        QSqlQuery query(db);QVERIFY(query.exec("CREATE TRIGGER p3_observe BEFORE INSERT ON tracks BEGIN SELECT p3_write_observer(); END"));
+        int callbacks=0;
+        {ControlledCoordinator positive(&library);positive.script=[](Importer &w,const auto &){w.imported(success("positive-control"));w.finished(false);};
+         connect(&positive,&ImportCoordinator::finished,this,[&]{++callbacks;});QVERIFY(positive.start({{"positive"}}));QTRY_COMPARE(callbacks,1);QCOMPARE(writes,1);}
+        auto co=std::make_unique<ControlledCoordinator>(&library);Gate gate;
         auto release=qScopeGuard([&]{gate.released.release();});co->script=[&](Importer &w,const auto &token){gate.wait(token);w.imported(success("must-not-write-after-destruction"));w.finished(true);};
-        int callbacks=0;connect(co.get(),&ImportCoordinator::finished,this,[&]{++callbacks;});QVERIFY(co->start({{"fixture"}}));QVERIFY(gate.reached.tryAcquire(1,5000));
+        connect(co.get(),&ImportCoordinator::finished,this,[&]{++callbacks;});QVERIFY(co->start({{"fixture"}}));QVERIFY(gate.reached.tryAcquire(1,5000));
         auto worker=co->lastWorker;QPointer<QThread> thread=worker->thread();auto destroyed=co->destroyed;
         QElapsedTimer timer;timer.start();co.reset();QVERIFY(timer.elapsed()<1000);
-        QTRY_COMPARE(destroyed->load(),1);QTRY_VERIFY(worker.isNull());QTRY_VERIFY(thread.isNull());QCOMPARE(callbacks,0);QVERIFY(library.tracks().isEmpty());
+        QTRY_COMPARE(destroyed->load(),1);QTRY_VERIFY(worker.isNull());QTRY_VERIFY(thread.isNull());QCOMPARE(callbacks,1);QCOMPARE(writes,1);QCOMPARE(library.tracks().size(),1);
+        QCOMPARE(library.tracks().first().hash,QStringLiteral("positive-control"));
     }
     void backendReturnOrExceptionCannotStrandThread_data(){QTest::addColumn<bool>("throws");QTest::newRow("missing-finished")<<false;QTest::newRow("exception")<<true;}
     void backendReturnOrExceptionCannotStrandThread(){
