@@ -753,9 +753,9 @@ void LyricsSearchCoordinator::pumpQueries(const JobPtr &j) {
     }
     if (!j->manual && !j->collected.isEmpty() && !rankingCurrent(j)) {
         scheduleRanking(j);
-        // Let the current payload be assessed before replenishing this job's
-        // query/detail fan-out. Other songs and existing requests stay concurrent.
-        return;
+        // Await credibility for a possible timed match before replenishing this
+        // job. Clearly unrelated candidates still allow immediate fallback.
+        if(awaitingEarlyStopRank(j))return;
     }
     if (!j->manual && rankingCurrent(j) && earlyStopReady(j)) {
         finishOnline(j);
@@ -839,7 +839,7 @@ void LyricsSearchCoordinator::pumpQueries(const JobPtr &j) {
 void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
     if (!live(j) || j->onlineFinished)
         return;
-    if(!j->manual&&!j->collected.isEmpty()&&!rankingCurrent(j)){
+    if(awaitingEarlyStopRank(j)){
         const auto pending=qMakePair(stage,retry);
         if(!j->deferredRequests.contains(pending))j->deferredRequests.append(pending);
         scheduleRanking(j);return;
@@ -1278,6 +1278,17 @@ bool LyricsSearchCoordinator::earlyStopReady(const JobPtr &j) const {
         strong|=!item.record["syncedLyrics"].toString().isEmpty()&&item.credible;
     }
     return strong;
+}
+bool LyricsSearchCoordinator::awaitingEarlyStopRank(const JobPtr &j) const {
+    if(j->manual||rankingCurrent(j))return false;
+    // Only a possible timed automatic match merits a per-song ranking barrier.
+    // Obviously unrelated metadata must not delay relaxed fallback queries.
+    // This check never accepts or stops a job: async credibility and freshness
+    // validation still decide whether earlyStopReady can finish it.
+    for(const auto &value:j->collected){const auto r=value.toObject();
+        if(!r["instrumental"].toBool()&&!r["syncedLyrics"].toString().isEmpty()&&confident(j->original,r))return true;
+    }
+    return false;
 }
 
 void LyricsSearchCoordinator::scheduleRanking(const JobPtr &j) {

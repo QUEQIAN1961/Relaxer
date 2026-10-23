@@ -229,7 +229,7 @@ class PhaseBStorageTests final : public QObject {
         lock = {};
         QSqlDatabase::removeDatabase(name);
     }
-    void finalSaveFailureRemainsFrozenWithoutNewInteraction() {
+    void finalSaveFailureCanBeCancelledAndRetried() {
         QTemporaryDir dir;
         Library library(dir.filePath("data"));
         QVERIFY(library.open());
@@ -240,17 +240,18 @@ class PhaseBStorageTests final : public QObject {
         QVERIFY(sql(db, "CREATE TEMP TRIGGER rc_final_abort BEFORE INSERT ON settings BEGIN SELECT "
                         "RAISE(ABORT,'RC final ABORT'); END"));
         QVERIFY(!player.shutdown());
-        QVERIFY(player.isShutdown());
+        QVERIFY(!player.isShutdown());
         QCOMPARE(saved.size(), 1);
         QVERIFY(!saved[0][0].toBool());
         QCOMPARE(library.setting("position").toInt(), 817);
+        QVERIFY(!player.requestExit(PlaybackFacade::ExitDecision::Cancel));
+        QVERIFY(player.findChild<QTimer *>("playbackPersistenceTimer")->isActive());
         QVERIFY(sql(db, "DROP TRIGGER rc_final_abort"));
-        QVERIFY(!player.save());
-        QVERIFY(!player.shutdown());
-        QCOMPARE(saved.size(), 1);
-        QCOMPARE(library.setting("position").toInt(), 817);
-        qInfo() << "D-R8-02 reproduced: durable prior snapshot intact; final snapshot not retried after "
-                   "shutdown; no new modal contract";
+        QVERIFY(player.requestExit());QVERIFY(player.isShutdown());
+        QVERIFY(player.save());QVERIFY(player.shutdown());
+        QCOMPARE(saved.size(), 2);QVERIFY(saved.last().first().toBool());
+        QCOMPARE(library.setting("position").toInt(), 0);
+        qInfo() << "D-R8-02: failure kept prior durable snapshot; cancel preserved availability; retry committed before teardown";
     }
     void playbackDatabaseErrorDoesNotCorruptLibrary() {
         QTemporaryDir dir;
@@ -266,11 +267,15 @@ class PhaseBStorageTests final : public QObject {
         auto db = import_fixture::database(library);
         QVERIFY(sql(db, "CREATE TEMP TRIGGER rc_play_abort BEFORE INSERT ON settings BEGIN SELECT "
                         "RAISE(ABORT,'RC playing ABORT'); END"));
+        const auto durablePosition=library.setting("position");
+        player.seek(1500); // A changed snapshot must reach the injected SQL fault.
         QVERIFY(!player.save());
+        QCOMPARE(library.setting("position"),durablePosition);
         QCOMPARE(library.tracks().size(), 3);
         QCOMPARE(player.queue().items, ids);
         QVERIFY(sql(db, "DROP TRIGGER rc_play_abort"));
         QVERIFY(player.save());
+        QCOMPARE(library.setting("position").toInt(),1500);
         for (const auto &track : library.tracks())
             QVERIFY(QFileInfo::exists(library.absolute(track.file)));
     }

@@ -198,6 +198,7 @@ class LyricsSearchCoordinator final : public QObject {
     bool rankingCurrent(const JobPtr &job) const;
     bool cacheRankingCurrent(const JobPtr &job) const;
     bool earlyStopReady(const JobPtr &job) const;
+    bool awaitingEarlyStopRank(const JobPtr &job) const;
     void appendCollected(const JobPtr &job, const QJsonObject &record);
     static QString trackContext(const Track &track);
     void finishOnline(const JobPtr &job);

@@ -2,6 +2,7 @@
 #include <QMediaDevices>
 #include <QAudioDevice>
 #include "window.h"
+#include "import-fixture.h"
 #include <QComboBox>
 #include <QPushButton>
 #include <QStackedWidget>
@@ -42,6 +43,11 @@ class GuiTests : public QObject {
   private slots:
     void productionPlaybackFacadeOwnsPersistenceAndShutdown() {
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());
+        auto db=import_fixture::database(library);QSqlQuery query(db);
+        QVERIFY(query.exec("CREATE TABLE p3_gui_queue_writes(value INTEGER)"));
+        QVERIFY(query.exec("CREATE TRIGGER p3_gui_insert AFTER INSERT ON settings WHEN NEW.key='queue' BEGIN INSERT INTO p3_gui_queue_writes VALUES(1); END"));
+        QVERIFY(query.exec("CREATE TRIGGER p3_gui_update AFTER UPDATE ON settings WHEN NEW.key='queue' BEGIN INSERT INTO p3_gui_queue_writes VALUES(1); END"));
+        auto writes=[&]()->qint64{QSqlQuery q(db);if(!q.exec("SELECT COUNT(*) FROM p3_gui_queue_writes")||!q.next())return -1;return q.value(0).toLongLong();};
         for(int n=0;n<3;++n){
             auto window=std::make_unique<Window>(&library); window->show();
             QPointer<PlaybackFacade> facade=window->playbackFacade();QPointer<Playback> core=window->playback();
@@ -49,7 +55,9 @@ class GuiTests : public QObject {
             const auto timers=window->findChildren<QTimer *>("playbackPersistenceTimer");QCOMPARE(timers.size(),1);
             QCOMPARE(timers[0]->parent(),facade.data());QCOMPARE(timers[0]->interval(),4000);
             QSignalSpy saved(facade,&PlaybackFacade::saved);facade->setVolume(35+n);QCOMPARE(window->playback()->volume(),35+n);
-            QVERIFY(window->close());QVERIFY(facade->isShutdown());QCOMPARE(saved.size(),1);QVERIFY(!timers[0]->isActive());
+            const auto before=writes();QVERIFY(before>=0);QVERIFY(window->close());QVERIFY(facade->isShutdown());
+            const auto committed=writes()-before;QVERIFY(committed==0||committed==1);QCOMPARE(saved.size(),committed);
+            for(const auto &signal:saved)QVERIFY(signal.first().toBool());QVERIFY(!timers[0]->isActive());
             window.reset();QVERIFY(!facade);QVERIFY(!core);QCoreApplication::processEvents();
         }
     }

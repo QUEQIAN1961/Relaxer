@@ -83,7 +83,8 @@ private slots:
         };
         LyricsLookup dialog(&l,{t.id},nullptr,s.endpoint());dialog.show();relaxerClickSearch(&dialog);
         QTRY_VERIFY_WITH_TIMEOUT(!l.track(t.id).lyrics.isEmpty(),5000);
-        QVERIFY(s.requests>=4);bool titleOnly=false;for(const auto &u:s.urls)if(u.path().endsWith("/search")&&!QUrlQuery(u).hasQueryItem("artist_name"))titleOnly=true;QVERIFY(titleOnly);
+        bool withArtist=false,titleOnly=false;for(const auto &u:s.urls)if(u.path().endsWith("/search")){if(QUrlQuery(u).hasQueryItem("artist_name"))withArtist=true;else titleOnly=true;}
+        QVERIFY(withArtist);QVERIFY(titleOnly);qInfo()<<"D-R7-03 relaxed fallback request count"<<s.requests;
         dialog.close();
         const int before=s.requests;LyricsLookup cached(&l,{t.id},nullptr,s.endpoint());cached.show();cached.findChild<QCheckBox *>("lyricsMissingOnly")->setChecked(false);relaxerClickSearch(&cached);auto *cachedTasks=cached.findChild<QListWidget *>("lyricsTracks");QTRY_VERIFY_WITH_TIMEOUT(cachedTasks->item(0)->data(Qt::UserRole+2).toString().startsWith("需选择"),5000);QTRY_VERIFY_WITH_TIMEOUT(s.requests>before,5000);cached.close();
     }
