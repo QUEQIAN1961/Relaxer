@@ -1,7 +1,7 @@
 <RCC><qresource prefix="/qml">
   <file>Main.qml</file><file>components/HintBubble.qml</file><file>components/RoundMenuItem.qml</file><file>components/RoundMenu.qml</file><file>components/UiText.qml</file>
   <file>theme/qmldir</file><file>theme/Theme.qml</file>
-  <file>components/ShellButton.qml</file><file>components/NavigationButton.qml</file>
+  <file>components/ShellButton.qml</file><file>components/ColorSwatch.qml</file><file>components/NavigationButton.qml</file>
   <file>components/EmptyState.qml</file><file>components/PlayerBar.qml</file>
   <file>components/TrackList.qml</file><file>pages/PlaylistsPage.qml</file>
   <file>pages/QueuePage.qml</file>

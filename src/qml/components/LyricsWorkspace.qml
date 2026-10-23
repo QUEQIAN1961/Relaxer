@@ -16,7 +16,20 @@ Page {
     function open() { aboutToShow(); visible = true; forceActiveFocus() }
     function close() { visible = false; closed() }
     padding: 18
-    spacing: 12
+    topPadding: 6; bottomPadding: 6
+    spacing: 8
+    component FilterToggle: CheckBox {
+        id: control
+        implicitHeight: 28; padding: 0; spacing: 3; font.pixelSize: 13
+        implicitWidth: contentItem.implicitWidth
+        indicator: Rectangle {
+            x: 0; anchors.verticalCenter: parent.verticalCenter; width: 14; height: 14; radius: 3
+            color: control.checked ? Theme.accent : Theme.card
+            border.color: control.activeFocus ? Theme.accent : Theme.border
+            UiText { anchors.centerIn: parent; text: "✓"; visible: control.checked; color: Theme.accentText; font.pixelSize: 12 }
+        }
+        contentItem: UiText { leftPadding: 17; text: control.text; font: control.font; color: Theme.text; verticalAlignment: Text.AlignVCenter }
+    }
     property var selectedTracks: []
     property int targetRevision: 0
     ListModel { id: targetRows }
@@ -82,6 +95,35 @@ Page {
         translationBridge.setTargetTrack(key)
         updateQuery()
     }
+    function advancePending(savedTarget) {
+        let previous = -1
+        for (let i = 0; i < targetRows.count; ++i)
+            if (targetRows.get(i).trackKey === savedTarget) { previous = i; break }
+        for (let step = 1; step <= targetRows.count; ++step) {
+            const index = (previous + step) % targetRows.count
+            const row = targetRows.get(index)
+            if (row.trackKey !== savedTarget && acceptsRow(row) && row.searchState === "choice") {
+                chooseTarget(row.trackKey)
+                previewTabs.currentIndex = 0
+                candidates.positionViewAtBeginning()
+                tracks.positionViewAtIndex(index, ListView.Contain)
+                return
+            }
+        }
+        localStatus = "已完成当前列表中的待确认歌词。"
+    }
+    function commitSelection(key, target) {
+        if (target !== lyricsSearchBridge.targetTrackKey || key !== lyricsSearchBridge.selectedKey) return
+        if (!lyricsSearchBridge.saveSelected(key, true)) return
+        if (translationBridge.taskKey.length) translationBridge.discard()
+        advancePending(target)
+    }
+    function applySelection() {
+        const key = lyricsSearchBridge.selectedKey, target = lyricsSearchBridge.targetTrackKey
+        if (taskNeedsAction) {
+            replaceConfirm.exactKey = key; replaceConfirm.exactTarget = target; replaceConfirm.open()
+        } else commitSelection(key, target)
+    }
     function requestClose() {
         if (taskNeedsAction && !allowClose) leaveConfirm.open()
         else close()
@@ -120,10 +162,10 @@ Page {
     }
     background: Rectangle { color: Theme.background }
     header: Item {
-        implicitHeight: 45
+        implicitHeight: 46
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 12
-            ShellButton { objectName: "lyricsWorkspaceClose"; text: "‹ 返回"; flat: true; implicitHeight: 36; Accessible.name: "返回上一页"; onClicked: workspace.requestClose() }
+            ShellButton { objectName: "lyricsWorkspaceClose"; text: "‹ 返回"; flat: true; implicitHeight: 30; Accessible.name: "返回上一页"; onClicked: workspace.requestClose() }
             Label { text: "查找歌词"; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
             Item { Layout.preferredWidth: 126 }
         }
@@ -137,16 +179,16 @@ Page {
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 10; spacing: 8
                 Label { text: "歌曲 · " + workspace.visibleKeys().length + (multiSelect.checked ? " · 已选 " + workspace.searchKeys().length : ""); color: Theme.text; font.weight: Font.DemiBold }
-                CheckBox { id: missingLyrics; objectName: "lyricsMissingOnly"; text: "仅显示无歌词"; implicitHeight: 28; onToggled: if (checked) missingTranslation.checked = false }
-                CheckBox { id: missingTranslation; objectName: "lyricsMissingTranslationOnly"; text: "仅显示缺失翻译"; implicitHeight: 28; onToggled: if (checked) missingLyrics.checked = false }
                 RowLayout {
-                    Layout.fillWidth: true; spacing: 2
-                    CheckBox { id: multiSelect; objectName: "lyricsMultiSelect"; text: "多选"; implicitHeight: 30; onToggled: if (!checked) workspace.selectedTracks = [] }
-                    ShellButton { objectName: "lyricsSelectAll"; text: "全选"; flat: true; implicitHeight: 30; visible: multiSelect.checked; onClicked: workspace.selectedTracks = workspace.visibleKeys() }
-                    ShellButton { objectName: "lyricsClearSelection"; text: "清空"; flat: true; implicitHeight: 30; visible: multiSelect.checked; onClicked: workspace.selectedTracks = [] }
+                  objectName: "lyricsFilterRow"; Layout.fillWidth: true; spacing: 3
+                FilterToggle { id: missingLyrics; objectName: "lyricsMissingOnly"; text: "无歌词"; onToggled: if (checked) missingTranslation.checked = false }
+                FilterToggle { id: missingTranslation; objectName: "lyricsMissingTranslationOnly"; text: "无翻译"; onToggled: if (checked) missingLyrics.checked = false }
+                FilterToggle { id: multiSelect; objectName: "lyricsMultiSelect"; text: checked ? "取消" : "多选"; onToggled: if (!checked) workspace.selectedTracks = [] }
+                ShellButton { objectName: "lyricsSelectAll"; text: "全选"; flat: true; font.pixelSize: 13; leftPadding: 4; rightPadding: 4; implicitWidth: 38; implicitHeight: 28; visible: multiSelect.checked; onClicked: workspace.selectedTracks = workspace.visibleKeys() }
+                Item { Layout.fillWidth: true }
                 }
                 ListView {
-                    objectName: "lyricsTargetTracks"
+                    id: tracks; objectName: "lyricsTargetTracks"
                     Layout.fillWidth: true; Layout.fillHeight: true
                     clip: true; model: targetRows
                     boundsBehavior: Flickable.StopAtBounds
@@ -211,7 +253,7 @@ Page {
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
-                CheckBox { id: syncedOnly; objectName: "lyricsSyncedOnly"; text: "只看滚动歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
+                CheckBox { id: syncedOnly; objectName: "lyricsSyncedOnly"; onToggled: lyricsSearchBridge.selectRecommended(checked); text: "只看滚动歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
                 CheckBox { id: replaceExisting; objectName: "lyricsReplace"; text: "替换已有歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
             }
             Label { text: "候选版本"; color: Theme.text; font.weight: Font.DemiBold }
@@ -253,10 +295,20 @@ Page {
                     Label { anchors.centerIn: parent; width: parent.width - 24; visible: candidates.count === 0; text: lyricsSearchBridge.busy ? "正在查找候选版本…" : "暂无候选版本\n可修改歌名或歌手后搜索，也可以导入或粘贴本地歌词。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
                 }
             }
-            ShellButton {
-                objectName: "lyricsApplyButton"; Layout.fillWidth: true; implicitHeight: 34; text: "使用选中版本"
-                enabled: lyricsSearchBridge.selectedKey.length > 0
-                onClicked: { replaceConfirm.exactKey = lyricsSearchBridge.selectedKey; replaceConfirm.exactTarget = lyricsSearchBridge.targetTrackKey; replaceConfirm.open() }
+            RowLayout {
+                objectName: "lyricsApplyRow"; Layout.fillWidth: true; spacing: 8
+                ShellButton {
+                    objectName: "lyricsInstrumentalButton"; Layout.fillWidth: true; Layout.preferredWidth: 35; Layout.minimumWidth: 0
+                    implicitHeight: 34; text: "标记为纯音乐"; font.pixelSize: workspace.compact ? 12 : 13; leftPadding: 5; rightPadding: 5
+                    enabled: workspace.sourceActionsEnabled
+                    onClicked: { instrumentalConfirm.exactTarget = lyricsSearchBridge.targetTrackKey; instrumentalConfirm.open() }
+                }
+                ShellButton {
+                    objectName: "lyricsApplyButton"; Layout.fillWidth: true; Layout.preferredWidth: 65; Layout.minimumWidth: 0
+                    implicitHeight: 34; text: "使用选中版本"; leftPadding: 5; rightPadding: 5
+                    enabled: lyricsSearchBridge.selectedKey.length > 0
+                    onClicked: workspace.applySelection()
+                }
             }
         }
         ColumnLayout {
@@ -318,7 +370,7 @@ Page {
         }
     }
     footer: Item {
-        implicitHeight: 45
+        implicitHeight: 28
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 18
             Label { Layout.fillWidth: true; text: workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 13; wrapMode: Text.Wrap }
@@ -329,7 +381,6 @@ Page {
         id: moreMenu
         RoundMenuItem { text: "导入本地歌词…"; onTriggered: { workspace.fileTargetKey = lyricsSearchBridge.targetTrackKey; localLyrics.open() } }
         RoundMenuItem { text: "粘贴歌词…"; onTriggered: { pasteDialog.exactTarget = lyricsSearchBridge.targetTrackKey; pasted.text = ""; pasteDialog.open() } }
-        RoundMenuItem { text: "标记为纯音乐…"; onTriggered: { instrumentalConfirm.exactTarget = lyricsSearchBridge.targetTrackKey; instrumentalConfirm.open() } }
     }
     RoundMenu {
         id: browserMenu
@@ -370,13 +421,12 @@ Page {
         onAccepted: translationBridge.discard()
     }
     ConfirmDialog {
-        id: replaceConfirm; parent: workspace.parent; property string exactKey: ""; property string exactTarget: "0"
+        id: replaceConfirm; objectName: "lyricsTranslationConflict"; parent: workspace.parent; property string exactKey: ""; property string exactTarget: "0"
         anchors.centerIn: parent; width: Math.min(460, parent.width - 40); modal: true; title: "使用所选歌词版本？"; standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Label { text: "所选版本会替换这首歌的本地歌词。该歌曲的翻译任务或未保存预览会被放弃；已经发送的请求可能仍产生费用。"; wrapMode: Text.Wrap }
         onAccepted: {
             if (exactTarget !== lyricsSearchBridge.targetTrackKey || exactKey !== lyricsSearchBridge.selectedKey) return
-            if (translationBridge.taskKey.length) translationBridge.discard()
-            lyricsSearchBridge.saveSelected(exactKey, true)
+            workspace.commitSelection(exactKey, exactTarget)
         }
     }
     ConfirmDialog {
@@ -398,6 +448,6 @@ Page {
         id: instrumentalConfirm; parent: workspace.parent; property string exactTarget: "0"
         anchors.centerIn: parent; width: Math.min(440, parent.width - 40); modal: true; title: "确认为纯音乐？"; standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Label { text: "仅在确定没有人声歌词时使用。这会把本地歌词替换为纯音乐标记。"; wrapMode: Text.Wrap }
-        onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey) lyricsSearchBridge.markInstrumental(true)
+        onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey && lyricsSearchBridge.markInstrumental(true)) workspace.advancePending(exactTarget)
     }
 }

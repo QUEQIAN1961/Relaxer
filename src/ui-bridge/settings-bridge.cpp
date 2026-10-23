@@ -2,6 +2,9 @@
 #include "appearance-image.h"
 #include "shortcuts.h"
 #include <QColor>
+#include <QColorDialog>
+#include <QApplication>
+#include <QWindow>
 #include <QDesktopServices>
 #include <QFile>
 #include <QJsonDocument>
@@ -62,6 +65,7 @@ SettingsBridge::SettingsBridge(Library *library, QObject *parent, SystemThemeRea
     }
 }
 SettingsBridge::~SettingsBridge() {
+    delete m_colorDialog.data();
     if (m_fontId >= 0) QFontDatabase::removeApplicationFont(m_fontId);
 }
 
@@ -115,9 +119,8 @@ QVariantMap SettingsBridge::palette() const {
         border = mixed(ink, background, .16);
         card = dark ? background.lighter(115) : background.darker(103);
     }
-    QColor footer(card);
+    QColor footer(custom && appearance["customFooter"].toBool() ? color("footer", card) : card);
     if (imageMode) footerImage = shareFooter ? (shareLR ? leftImage : rightImage) : image("Footer");
-    else if (custom && appearance["customFooter"].toBool()) footer = color("footer", card);
     const auto progress = custom ? m_appearance.withProgressColors(appearance) : QJsonObject();
     const bool manual = progress["customProgressColors"].toBool();
     const auto progressFill = custom ? progress[manual ? "progressFill" : "recommendedProgressFill"].toString() : accent.name();
@@ -270,6 +273,8 @@ bool SettingsBridge::saveShortcuts(const QVariantMap &configuration) {
 }
 
 void SettingsBridge::beginAppearance(const QString &id) {
+    ++m_appearanceSession;
+    if (m_colorDialog) m_colorDialog->reject();
     auto appearance = m_appearance.active(); m_activeAppearanceId = m_appearance.state()["active"].toString();
     if (!id.isEmpty()) {
         for (const auto &item : m_appearance.state()["items"].toArray())
@@ -317,11 +322,50 @@ bool SettingsBridge::setAppearanceMode(int mode) {
     m_appearanceMode = mode; if (mode >= 3) m_appearanceDraft["mode"] = mode == 4 ? "image" : "palette";
     m_appearanceDirty = true; previewAppearance(); return true;
 }
+bool SettingsBridge::chooseAppearanceColor(const QString &key, QObject *ownerWindow) {
+    const QStringList colors{"left", "right", "accent", "leftInk", "rightInk", "muted", "footer", "progressFill", "progressTrack"};
+    auto *owner = qobject_cast<QWindow *>(ownerWindow);
+    if (!colors.contains(key) || !owner || !qobject_cast<QApplication *>(QCoreApplication::instance())) return false;
+    if (m_colorDialog) { m_colorDialog->raise(); m_colorDialog->activateWindow(); return false; }
+    auto *dialog = new QColorDialog(QColor(m_appearanceDraft[key].toString()));
+    m_colorDialog = dialog;
+    dialog->setObjectName("appearanceFullColorDialog");
+    dialog->setWindowTitle("选择颜色");
+    dialog->setOption(QColorDialog::DontUseNativeDialog);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowModality(Qt::ApplicationModal);
+    // Reuse the same complete Widgets chooser as the legacy appearance editor:
+    // basic/custom colors, screen picker, HSV, RGB and HTML input.
+    const auto look = palette();
+    QPalette colorsPalette = QApplication::palette();
+    colorsPalette.setColor(QPalette::Window, QColor(look["background"].toString()));
+    colorsPalette.setColor(QPalette::Base, QColor(look["background"].toString()));
+    colorsPalette.setColor(QPalette::Button, QColor(look["card"].toString()));
+    for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
+        colorsPalette.setColor(role, QColor(look["text"].toString()));
+    colorsPalette.setColor(QPalette::Highlight, QColor(look["accent"].toString()));
+    colorsPalette.setColor(QPalette::HighlightedText, QColor(look["accentText"].toString()));
+    dialog->setPalette(colorsPalette);
+    dialog->setFont(owner->property("font").value<QFont>());
+    dialog->winId();
+    dialog->windowHandle()->setTransientParent(owner);
+    const auto session = m_appearanceSession;
+    connect(dialog, &QColorDialog::colorSelected, this, [this, key, session](const QColor &color) {
+        if (session == m_appearanceSession && color.isValid()) editAppearance(key, color.name());
+    });
+    connect(dialog, &QDialog::finished, this, [this, dialog] {
+        if (m_colorDialog == dialog) m_colorDialog = nullptr;
+    });
+    dialog->open();
+    return true;
+}
 void SettingsBridge::resetAppearance() {
     m_appearanceDraft = m_appearance.withProgressColors(AppearanceStore::defaults()); m_appearanceMode = 3;
     m_appearanceDirty = true; previewAppearance();
 }
 void SettingsBridge::discardAppearance() {
+    ++m_appearanceSession;
+    if (m_colorDialog) m_colorDialog->reject();
     m_preview = {}; m_appearanceDirty = false; emit appearanceChanged(); emit settingsChanged();
 }
 bool SettingsBridge::saveAppearance(bool overwrite) {

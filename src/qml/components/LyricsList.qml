@@ -8,7 +8,7 @@ Item {
     property bool manualScroll: false
     property bool reduceMotion: settingsBridge.values.reduceMotion
     readonly property int previewIndex: {
-        const center = list.contentY + list.mapFromItem(panel, 0, panel.height / 2).y
+        const center = list.contentY + list.height / 2
         let nearest = -1, distance = Number.MAX_VALUE
         const items = list.contentItem.children
         for (let i = 0; i < items.length; ++i) {
@@ -82,7 +82,9 @@ Item {
                 required property string translation
                 required property bool current
                 required property bool played
-                readonly property real activeScale: current ? 1.2 : 1
+                readonly property bool scrollSelected: panel.manualScroll && panel.previewIndex === index
+                readonly property bool emphasized: panel.manualScroll ? scrollSelected : current
+                readonly property real activeScale: emphasized ? 1.2 : 1
                 width: list.width
                 // Reserve enlarged geometry up front: the font-scale animation
                 // never changes the height of every following lyric row.
@@ -92,7 +94,7 @@ Item {
                     width: Math.max(1, row.width / 1.2 - 24)
                     anchors.centerIn: parent; spacing: 8
                     scale: row.activeScale; transformOrigin: Item.Center
-                    opacity: row.current ? 1 : row.played ? 0.62 : 0.4
+                    opacity: row.emphasized ? 1 : row.played ? 0.62 : 0.4
                     Behavior on scale { NumberAnimation { duration: panel.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
                     Behavior on opacity { NumberAnimation { duration: panel.reduceMotion ? 0 : 180 } }
                     UiText {
@@ -107,26 +109,33 @@ Item {
                         width: parent.width; text: row.translation; textFormat: Text.PlainText
                         visible: settingsBridge.values.showLyricTranslation && text.length > 0
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
-                        color: Theme.secondary; font.pixelSize: 17
+                        color: row.scrollSelected ? Theme.text : Theme.secondary; font.pixelSize: 17
                     }
                 }
                 TapHandler { onTapped: if (lyricsModel.seekRow(row.index)) panel.returnCurrent() }
             }
           }
+          Rectangle {
+              objectName: "lyricsPreviewGuide"
+              visible: panel.manualScroll && lyricsModel.timed && panel.previewIndex >= 0
+              anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+              anchors.leftMargin: previewTime.width + 12; anchors.rightMargin: 20
+              height: 1; color: Theme.text; opacity: .28
+          }
+          ShellButton {
+              id: previewTime; objectName: "lyricsPreviewTime"
+              anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+              z: 3; visible: panel.manualScroll && lyricsModel.timed && panel.previewIndex >= 0
+              text: {
+                  const ms = panel.previewIndex >= 0 ? Number(lyricsModel.timestampAt(panel.previewIndex)) : 0
+                  return Math.floor(ms / 60000) + ":" + String(Math.floor(ms / 1000) % 60).padStart(2, "0") + "  ▶"
+              }
+              Accessible.name: "播放中线对应歌词 " + text
+              onClicked: { const index = panel.previewIndex; if (lyricsModel.seekRow(index)) panel.returnCurrent() }
+          }
           // A viewport sibling: ListView's contentItem may have zero width.
           MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; onWheel: wheel => { panel.takeOver(); wheel.accepted = false } }
           EmptyState { anchors.centerIn: parent; width: Math.min(parent.width - 20, 420); visible: lyricsModel.count === 0; heading: lyricsModel.loading ? "正在读取" : "让音乐，留一点空白"; description: lyricsModel.status }
         }
-    }
-    ShellButton {
-        objectName: "lyricsPreviewTime"
-        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-        z: 3; visible: panel.manualScroll && lyricsModel.timed && panel.previewIndex >= 0
-        text: {
-            const ms = panel.previewIndex >= 0 ? Number(lyricsModel.timestampAt(panel.previewIndex)) : 0
-            return Math.floor(ms / 60000) + ":" + String(Math.floor(ms / 1000) % 60).padStart(2, "0") + "  ▶"
-        }
-        Accessible.name: "播放中线对应歌词 " + text
-        onClicked: { const index = panel.previewIndex; if (lyricsModel.seekRow(index)) panel.returnCurrent() }
     }
 }

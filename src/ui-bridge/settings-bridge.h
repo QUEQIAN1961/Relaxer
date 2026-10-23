@@ -7,7 +7,10 @@
 #include <QVariantMap>
 #include <QVariantList>
 #include <QUrl>
+#include <QPointer>
 #include <functional>
+
+class QColorDialog;
 
 namespace relaxer {
 class SettingsBridge final : public QObject {
@@ -61,6 +64,7 @@ public:
     Q_INVOKABLE bool saveShortcuts(const QVariantMap &configuration);
     Q_INVOKABLE void beginAppearance(const QString &id = {});
     Q_INVOKABLE bool editAppearance(const QString &key, const QVariant &value);
+    Q_INVOKABLE bool chooseAppearanceColor(const QString &key, QObject *ownerWindow);
     Q_INVOKABLE bool setAppearanceMode(int mode);
     Q_INVOKABLE void resetAppearance();
     Q_INVOKABLE void discardAppearance();
@@ -88,6 +92,8 @@ private:
     QString m_status;
     int m_fontId = -1;
     QString m_fontFamily;
+    QPointer<QColorDialog> m_colorDialog;
+    quint64 m_appearanceSession = 0;
     void message(const QString &value);
     QString validatePreference(const QString &key, const QJsonValue &value) const;
     QString validate(const QJsonObject &value) const;

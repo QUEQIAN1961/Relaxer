@@ -5,12 +5,11 @@ import QtQuick.Dialogs
 import "../components"
 import "../theme"
 
-ColumnLayout {
+Item {
     id: page
     objectName: "appearancePage"
     signal backRequested()
     signal leaveRejected()
-    property string colorKey: "left"
     property string imageKey: "sourceLeft"
     property string renameId: ""
     property string removeId: ""
@@ -18,7 +17,6 @@ ColumnLayout {
     Layout.fillHeight: true
     Layout.minimumWidth: 0
     Layout.minimumHeight: 0
-    spacing: 16
 
     function requestBack() {
         if (settingsBridge.appearanceDirty) unsaved.open()
@@ -30,57 +28,37 @@ ColumnLayout {
         return true
     }
     function chooseColor(key) {
-        colorKey = key
-        colorPicker.selectedColor = settingsBridge.appearanceDraft[key] || "#ffffff"
-        colorPicker.open()
+        settingsBridge.chooseAppearanceColor(key, page.Window.window)
     }
     function chooseImage(key) { imageKey = key; imagePicker.open() }
     onVisibleChanged: if (!visible) settingsBridge.discardAppearance()
 
-    RowLayout {
-        Layout.fillWidth: true
-        ShellButton { objectName: "appearanceBack"; text: "返回设置"; onClicked: page.requestBack() }
-        UiText { Layout.fillWidth: true; text: "自定义外观"; color: Theme.text; font.pixelSize: 25; font.weight: Font.DemiBold }
-    }
-    Flow {
-        Layout.fillWidth: true
-        spacing: 8
+    ColumnLayout {
+      anchors.fill: parent; anchors.leftMargin: 34; anchors.rightMargin: 34
+      anchors.topMargin: 6; anchors.bottomMargin: 16; spacing: 18
+      RowLayout {
+        objectName: "appearanceToolbar"; Layout.fillWidth: true; spacing: 8
+        ShellButton { objectName: "appearanceBack"; text: "返回设置"; font.pixelSize: 14; onClicked: page.requestBack() }
+        UiText { Layout.fillWidth: true; Layout.minimumWidth: 0; text: "自定义外观"; color: Theme.text; font.pixelSize: 23; font.weight: Font.DemiBold; elide: Text.ElideRight }
+        ShellButton { objectName: "appearanceNewSave"; text: "新建并保存"; font.pixelSize: 14; visible: settingsBridge.appearanceMode >= 3; onClicked: if (settingsBridge.saveAppearance(false)) page.backRequested() }
+        ShellButton { objectName: "appearanceOverwriteSave"; text: "覆盖并保存"; font.pixelSize: 14; visible: settingsBridge.appearanceMode >= 3; enabled: settingsBridge.activeAppearanceId.length > 0; onClicked: if (settingsBridge.saveAppearance(true)) page.backRequested() }
+        ShellButton { objectName: "appearanceSavePreset"; text: "保存并退出"; font.pixelSize: 14; visible: settingsBridge.appearanceMode < 3; onClicked: if (settingsBridge.saveAppearance(false)) page.backRequested() }
+        ShellButton { objectName: "appearanceReset"; text: "恢复默认配色"; font.pixelSize: 14; onClicked: settingsBridge.resetAppearance() }
+      }
+      RowLayout {
+        Layout.fillWidth: true; spacing: 18
         Repeater {
             model: ["浅色", "深色", "跟随系统", "调色盘", "图片"]
             delegate: ShellButton {
                 required property string modelData
                 required property int index
                 objectName: "appearanceMode" + index
-                text: modelData
-                primary: settingsBridge.appearanceMode === index
+                Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0
+                text: modelData; primary: settingsBridge.appearanceMode === index
                 onClicked: settingsBridge.setAppearanceMode(index)
             }
         }
-    }
-    Flow {
-        Layout.fillWidth: true
-        spacing: 8
-        ShellButton {
-            objectName: "appearanceNewSave"
-            text: "新建并保存"
-            visible: settingsBridge.appearanceMode >= 3
-            onClicked: if (settingsBridge.saveAppearance(false)) page.backRequested()
-        }
-        ShellButton {
-            objectName: "appearanceOverwriteSave"
-            text: "覆盖并保存"
-            visible: settingsBridge.appearanceMode >= 3
-            enabled: settingsBridge.activeAppearanceId.length > 0
-            onClicked: if (settingsBridge.saveAppearance(true)) page.backRequested()
-        }
-        ShellButton {
-            objectName: "appearanceSavePreset"
-            text: "保存并退出"
-            visible: settingsBridge.appearanceMode < 3
-            onClicked: if (settingsBridge.saveAppearance(false)) page.backRequested()
-        }
-        ShellButton { text: "恢复默认配色"; onClicked: settingsBridge.resetAppearance() }
-    }
+      }
     ScrollView {
         id: scroll
         objectName: "appearanceScroll"
@@ -95,68 +73,71 @@ ColumnLayout {
                 visible: settingsBridge.appearanceMode >= 3
                 Layout.fillWidth: true
                 spacing: 14
-                Flow {
+                RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
                     Repeater {
                         model: [{key:"left",name:"左侧底色"},{key:"right",name:"右侧底色"},{key:"accent",name:"主题色"}]
-                        delegate: ShellButton {
+                        delegate: ColorSwatch {
                             required property var modelData
                             objectName: "appearanceColor-" + modelData.key
-                            text: modelData.name + "  " + settingsBridge.appearanceDraft[modelData.key]
+                            caption: modelData.name; swatchColor: settingsBridge.appearanceDraft[modelData.key] || "#ffffff"
                             onClicked: page.chooseColor(modelData.key)
                         }
                     }
                 }
                 CheckBox { text: "自定义文字颜色"; checked: !!settingsBridge.appearanceDraft.customText; onClicked: settingsBridge.editAppearance("customText", checked) }
-                Flow {
+                RowLayout {
                     visible: !!settingsBridge.appearanceDraft.customText
                     Layout.fillWidth: true
                     spacing: 8
                     Repeater {
                         model: [{key:"leftInk",name:"左侧文字"},{key:"rightInk",name:"右侧主要文字"},{key:"muted",name:"右侧小字"}]
-                        delegate: ShellButton {
+                        delegate: ColorSwatch {
                             required property var modelData
                             objectName: "appearanceColor-" + modelData.key
-                            text: modelData.name + "  " + settingsBridge.appearanceDraft[modelData.key]
+                            caption: modelData.name; swatchColor: settingsBridge.appearanceDraft[modelData.key] || "#ffffff"
                             onClicked: page.chooseColor(modelData.key)
                         }
                     }
                 }
-                CheckBox { text: "右侧小字加粗"; checked: !!settingsBridge.appearanceDraft.mutedBold; onClicked: settingsBridge.editAppearance("mutedBold", checked) }
                 CheckBox {
                     objectName: "appearanceCustomProgressColors"
                     text: "自定义进度条颜色"
                     checked: !!settingsBridge.appearanceDraft.customProgressColors
                     onClicked: settingsBridge.editAppearance("customProgressColors", checked)
                 }
-                Flow {
+                RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
                     enabled: !!settingsBridge.appearanceDraft.customProgressColors
                     Repeater {
                         model: [{key:"progressFill",name:"已填充与滑块"},{key:"progressTrack",name:"未填充"}]
-                        delegate: ShellButton {
+                        delegate: ColorSwatch {
                             required property var modelData
-                            text: modelData.name + "  " + settingsBridge.appearanceDraft[modelData.key]
+                            objectName: "appearanceColor-" + modelData.key
+                            caption: modelData.name
+                            swatchColor: settingsBridge.appearanceDraft[settingsBridge.appearanceDraft.customProgressColors ? modelData.key : modelData.key === "progressFill" ? "recommendedProgressFill" : "recommendedProgressTrack"] || "#ffffff"
                             onClicked: page.chooseColor(modelData.key)
                         }
                     }
                 }
                 UiText { Layout.fillWidth: true; text: "同时用于歌曲进度条和音量条；未勾选时使用推荐颜色。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
                 CheckBox {
-                    visible: settingsBridge.appearanceMode === 3
+                    visible: settingsBridge.appearanceMode >= 3
                     objectName: "appearanceCustomFooter"
                     text: "自定义底栏颜色"
                     checked: !!settingsBridge.appearanceDraft.customFooter
                     onClicked: settingsBridge.editAppearance("customFooter", checked)
                 }
-                ShellButton {
-                    visible: settingsBridge.appearanceMode === 3
+                ColorSwatch {
+                    objectName: "appearanceColor-footer"
+                    visible: settingsBridge.appearanceMode >= 3
                     enabled: !!settingsBridge.appearanceDraft.customFooter
-                    text: "底栏颜色  " + settingsBridge.appearanceDraft.footer
+                    caption: "底栏颜色"; swatchColor: settingsBridge.appearanceDraft.footer || "#ffffff"
                     onClicked: page.chooseColor("footer")
                 }
+                CheckBox { text: "右侧小字加粗"; checked: !!settingsBridge.appearanceDraft.mutedBold; onClicked: settingsBridge.editAppearance("mutedBold", checked) }
                 ColumnLayout {
                     Layout.fillWidth: true
                     visible: settingsBridge.appearanceMode === 4
@@ -180,7 +161,7 @@ ColumnLayout {
                     }
                     CheckBox {
                         objectName: "appearanceShareFooter"
-                        text: "底栏与页面共用图片"
+                        text: "底栏与页面共用图片（连续铺图）"
                         checked: !!settingsBridge.appearanceDraft.shareFooter
                         onClicked: settingsBridge.editAppearance("shareFooter", checked)
                     }
@@ -192,20 +173,35 @@ ColumnLayout {
                         ShellButton { text: "选择图片"; onClicked: page.chooseImage("sourceFooter") }
                     }
                 }
-                Repeater {
-                    model: [{key:"blurLeft",name:"左侧模糊"},{key:"blurRight",name:"右侧模糊"},{key:"blurExpanded",name:"展开播放背景模糊"}]
-                    delegate: RowLayout {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        visible: settingsBridge.appearanceMode === 4 || modelData.key === "blurExpanded"
-                        UiText { text: modelData.name; Layout.preferredWidth: 140; color: Theme.secondary }
-                        Slider {
-                            Layout.fillWidth: true
-                            from: 0; to: 50; stepSize: 0.1
-                            value: settingsBridge.appearanceDraft[modelData.key] || 0
-                            onMoved: settingsBridge.editAppearance(modelData.key, value)
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    Repeater {
+                        model: [{key:"blurLeft",name:"左侧列表模糊"},{key:"blurRight",name:"右侧列表模糊"},{key:"blurExpanded",name:"展开播放背景模糊"}]
+                        delegate: ColumnLayout {
+                            required property var modelData
+                            Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0
+                            visible: settingsBridge.appearanceMode === 4 || modelData.key === "blurExpanded"
+                            UiText { Layout.fillWidth: true; text: modelData.name; color: Theme.secondary; wrapMode: Text.Wrap }
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: 6
+                                Slider {
+                                    Layout.fillWidth: true; Layout.minimumWidth: 20
+                                    from: 0; to: 50; stepSize: 0.1
+                                    value: settingsBridge.appearanceDraft[modelData.key] || 0
+                                    onMoved: settingsBridge.editAppearance(modelData.key, value)
+                                }
+                                SpinBox {
+                                    objectName: "appearanceBlur-" + modelData.key
+                                    Layout.preferredWidth: 94; implicitHeight: 36
+                                    from: 0; to: 500; editable: true
+                                    value: Math.round(Number(settingsBridge.appearanceDraft[modelData.key] || 0) * 10)
+                                    validator: DoubleValidator { bottom: 0; top: 50; decimals: 1 }
+                                    textFromValue: function(value, locale) { return Number(value / 10).toLocaleString(locale, 'f', 1) }
+                                    valueFromText: function(text, locale) { return Math.round(Number.fromLocaleString(locale, text) * 10) }
+                                    onValueModified: settingsBridge.editAppearance(modelData.key, value / 10)
+                                }
+                            }
                         }
-                        UiText { text: Number(settingsBridge.appearanceDraft[modelData.key] || 0).toFixed(1); Layout.preferredWidth: 35; color: Theme.text }
                     }
                 }
             }
@@ -269,10 +265,11 @@ ColumnLayout {
             Item { Layout.preferredHeight: 16 }
         }
     }
-    ColorDialog { id: colorPicker; title: "选择颜色"; options: ColorDialog.DontUseNativeDialog; onAccepted: settingsBridge.editAppearance(page.colorKey, selectedColor.toString()) }
+    } // editor layout
     FileDialog { id: imagePicker; title: "选择背景图片"; nameFilters: ["图片 (*.png *.jpg *.jpeg *.bmp *.webp)"]; onAccepted: settingsBridge.editAppearance(page.imageKey, selectedFile) }
     ConfirmDialog {
         id: unsaved
+        objectName: "appearanceUnsavedDialog"
         parent: page.Overlay.overlay
         anchors.centerIn: parent
         width: Math.min(460, page.width - 20)
@@ -280,11 +277,12 @@ ColumnLayout {
         title: "外观尚未保存"
         onRejected: page.leaveRejected()
         contentItem: Label { text: "修改尚未保存，是否退出？"; wrapMode: Text.Wrap }
-        footer: RowLayout {
-            spacing: 8
-            ShellButton { text: "取消"; onClicked: unsaved.reject() }
-            ShellButton { text: "放弃修改"; onClicked: { settingsBridge.discardAppearance(); unsaved.close(); page.backRequested() } }
-            ShellButton { text: "保存"; primary: true; onClicked: { if (settingsBridge.saveAppearance(false)) { unsaved.close(); page.backRequested() } } }
+        footer: DialogButtonBox {
+            objectName: "appearanceUnsavedActions"
+            alignment: Qt.AlignRight; spacing: 8; leftPadding: 18; rightPadding: 18; topPadding: 10; bottomPadding: 16
+            ShellButton { objectName: "appearanceLeaveCancel"; text: "取消"; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: unsaved.reject() }
+            ShellButton { objectName: "appearanceLeaveDiscard"; text: "放弃修改"; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: { settingsBridge.discardAppearance(); unsaved.close(); page.backRequested() } }
+            ShellButton { objectName: "appearanceLeaveSave"; text: "保存"; primary: true; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: { if (settingsBridge.saveAppearance(false)) { unsaved.close(); page.backRequested() } } }
         }
     }
     ConfirmDialog {

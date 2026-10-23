@@ -153,6 +153,10 @@ ApplicationWindow {
     }
     function requestQuit() { exitRequested=true; root.close() }
     function navigateOriginal(index) {
+        const same = index === 0 ? appBridge.page === 0 && libraryBridge.playlistId === "0"
+                   : index === 4 ? appBridge.page === 0 && libraryBridge.playlistId === "-1"
+                   : appBridge.page === index && (index !== 3 || settingsSection === "settings")
+        if (same) { if (lyricsOpen) animatePlayer(false); return }
         changePage(function() {
             settingsSection="settings"
             if (index===0) { libraryBridge.openPlaylist("0"); appBridge.navigate(0) }
@@ -162,7 +166,13 @@ ApplicationWindow {
             else { libraryBridge.openPlaylist("-1"); appBridge.navigate(0) }
         })
     }
-    function openPlaylist(key) { changePage(function(){if(libraryBridge.openPlaylist(key))appBridge.navigate(0)}) }
+    function openPlaylist(key) {
+        if (appBridge.page === 0 && libraryBridge.playlistId === key) {
+            if (lyricsOpen) animatePlayer(false)
+            return
+        }
+        changePage(function(){if(libraryBridge.openPlaylist(key))appBridge.navigate(0)})
+    }
     function openLyricsTools(keys,missingOnly) {
         if (!keys || !keys.length) return
         if (!lyricsSearchBridge.setTargetTracks(keys,!!missingOnly,true)) { toast.show("没有需要处理的歌曲"); return }
@@ -222,7 +232,7 @@ ApplicationWindow {
         anchors.bottom: importPanel.visible ? importPanel.top : playerBar.top
         Rectangle {
             id: sidebar; objectName: "sidebar"; width: 205; height: parent.height; color: Theme.panel;clip:true
-            Image { x:0;y:0;width:settingsBridge.palette.shareLR?root.width:parent.width;height:parent.height;source:root.backgroundUrl(settingsBridge.palette.leftImage,settingsBridge.palette.blurLeft); fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: source.toString().length>0 }
+            Image { objectName:"sidebarBackground"; x:0;y:0;width:settingsBridge.palette.shareLR?root.width:parent.width;height:settingsBridge.palette.shareLR&&settingsBridge.palette.shareFooter?root.height:parent.height;source:root.backgroundUrl(settingsBridge.palette.leftImage,settingsBridge.palette.blurLeft); fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: source.toString().length>0 }
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 18; anchors.topMargin: 27; anchors.bottomMargin: 20; spacing: 14
                 Item {
@@ -269,7 +279,7 @@ ApplicationWindow {
         Item {
             id: paper; objectName:"paperSurface"; x:205;width:parent.width-205;height:parent.height;clip:true
             Rectangle{anchors.fill:parent;color:Theme.background}
-            Image{x:settingsBridge.palette.shareLR?-205:0;y:0;width:settingsBridge.palette.shareLR?root.width:parent.width;height:parent.height;source:root.backgroundUrl(settingsBridge.palette.rightImage,settingsBridge.palette.blurRight);fillMode:Image.PreserveAspectCrop;asynchronous:true;visible:source.toString().length>0}
+            Image{objectName:"pageBackground";x:settingsBridge.palette.shareLR||settingsBridge.palette.shareFooter?-205:0;y:0;width:settingsBridge.palette.shareLR||settingsBridge.palette.shareFooter?root.width:parent.width;height:settingsBridge.palette.shareFooter?root.height:parent.height;source:root.backgroundUrl(settingsBridge.palette.rightImage,settingsBridge.palette.blurRight);fillMode:Image.PreserveAspectCrop;asynchronous:true;visible:source.toString().length>0}
             Item {
                 id: pageSurface;objectName:"pageSurface";width:parent.width;height:parent.height
                 StackLayout {
@@ -308,6 +318,7 @@ ApplicationWindow {
     PlayerBar {
         id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98
         visible:!root.bulkActive&&!lyricsWorkspace.visible;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
+        backgroundCanvasHeight: root.height; backgroundOffsetY: playerBar.y
         onExpandRequested:root.animatePlayer(!root.lyricsOpen)
     }
 

@@ -40,6 +40,7 @@ public:
     Q_INVOKABLE bool markInstrumental(bool confirmed=false);
     Q_INVOKABLE void stop();
     Q_INVOKABLE bool select(int row);
+    Q_INVOKABLE bool selectRecommended(bool requireTimed = false);
     Q_INVOKABLE bool saveSelected(const QString &exactCandidateKey,bool confirmed=false);
 signals:void changed();
 private:
@@ -54,6 +55,8 @@ private:
     QSet<qint64> m_cachedChoices;
     QSet<qint64> m_pendingReviews;
     bool m_missingOnly=false;
+    bool m_recommendTimedOnly=false;
+    bool m_explicitSelection=false;
     mutable QHash<qint64,QPair<QByteArray,bool>> m_translationCache;
     bool translationMissing(const Track &track)const;
     bool startTargets(const QVector<qint64> &ids,bool confirmed,bool missingOnly);

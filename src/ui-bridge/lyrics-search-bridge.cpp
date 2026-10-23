@@ -16,7 +16,19 @@ LyricsSearchBridge::LyricsSearchBridge(Library *library,PlaybackFacade *facade,L
         emit changed();
         const auto current=m_library->track(targetId());
         if(snapshot.trackId!=current.id||snapshot.trackHash!=current.hash)return;
-        beginResetModel();m_snapshot=snapshot;m_selected={};m_selectedKey.clear();endResetModel();emit changed();
+        const auto previous = !m_explicitSelection || m_selected.isEmpty() ? QString() : LyricsSearchCoordinator::candidateIdentity(m_selected);
+        m_explicitSelection = false;
+        beginResetModel();m_snapshot=snapshot;m_selected={};m_selectedKey.clear();m_guard={};endResetModel();
+        // Keep an explicit choice through a ranking refresh when that record is
+        // still present. New targets and removed choices default to the best rank.
+        for (int row = 0; !previous.isEmpty() && row < m_snapshot.records.size(); ++row) {
+            const auto record = m_snapshot.records[row].toObject();
+            if (LyricsSearchCoordinator::candidateIdentity(record) == previous &&
+                (!m_recommendTimedOnly || !record["syncedLyrics"].toString().isEmpty())) {
+                select(row); return;
+            }
+        }
+        selectRecommended(m_recommendTimedOnly);
     });
     connect(service,&LyricsSearchCoordinator::summaryChanged,this,[this](const LyricsSearchSummary &s){m_status=s.status;emit changed();});
     connect(service,&LyricsSearchCoordinator::eventOccurred,this,[this](const LyricsSearchEvent &event){
@@ -39,7 +51,8 @@ void LyricsSearchBridge::resetForTrack(){
     // loadCached is a synchronous read API; it intentionally emits no signal.
     if(id)m_service->loadCached({id});
     beginResetModel();m_snapshot=id?m_service->candidates(id):LyricsCandidateSnapshot{};m_selected={};m_selectedKey.clear();m_guard={};endResetModel();
-    m_status="本地缓存；手动搜索才连接歌词来源";emit changed();
+    m_status="本地缓存；手动搜索才连接歌词来源";
+    selectRecommended(m_recommendTimedOnly);
 }
 bool LyricsSearchBridge::search(bool confirmed){
     const auto track=m_library->track(targetId());
@@ -176,10 +189,21 @@ bool LyricsSearchBridge::startTargets(const QVector<qint64> &ids,bool confirmed,
     const bool ok=m_service->start(requests)!=0;emit changed();return ok;
 }
 void LyricsSearchBridge::stop(){m_service->stop();emit changed();}
+bool LyricsSearchBridge::selectRecommended(bool requireTimed) {
+    m_recommendTimedOnly = requireTimed;
+    for (int row = 0; row < m_snapshot.records.size(); ++row) {
+        if (requireTimed && m_snapshot.records[row].toObject()["syncedLyrics"].toString().isEmpty()) continue;
+        if (select(row)) { m_explicitSelection = false; return true; }
+    }
+    m_selected = {}; m_selectedKey.clear(); m_guard = {}; m_explicitSelection = false;
+    emit changed();
+    return false;
+}
 bool LyricsSearchBridge::select(int row){
     if(row<0||row>=m_snapshot.records.size()||m_snapshot.trackId!=targetId())return false;
     const auto track=m_library->track(m_snapshot.trackId);if(track.hash!=m_snapshot.trackHash)return false;
     m_selected=m_snapshot.records[row].toObject();m_guard=m_library->lyricsSaveSnapshot(track.id);
+    m_explicitSelection = true;
     m_selectedKey=QString::number(track.id)+':'+QString::number(m_snapshot.revision)+':'+LyricsSearchCoordinator::candidateIdentity(m_selected);
     emit changed();return true;
 }

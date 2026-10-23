@@ -7,6 +7,8 @@ Rectangle {
     objectName: "playerBar"
     property bool expanded: false
     property bool artworkTravelling: false
+    property real backgroundCanvasHeight: height
+    property real backgroundOffsetY: 0
     readonly property alias smallArtwork: art
     readonly property alias metadataTitle: title
     readonly property alias metadataArtist: artist
@@ -18,7 +20,15 @@ Rectangle {
         const seconds = Math.floor(Math.max(0, ms) / 1000)
         return Math.floor(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + seconds % 60
     }
-    Image {anchors.fill:parent;source:String(settingsBridge.palette.footerImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.footerImage))+"&blur="+Number(settingsBridge.palette.blurRight||0):"";fillMode:Image.PreserveAspectCrop;asynchronous:true}
+    Item {
+      anchors.fill: parent; clip: true
+      Image {
+        objectName: "footerBackground"
+        x: 0; y: settingsBridge.palette.shareFooter ? -bar.backgroundOffsetY : 0
+        width: parent.width; height: settingsBridge.palette.shareFooter ? bar.backgroundCanvasHeight : parent.height
+        source:String(settingsBridge.palette.footerImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.footerImage))+"&blur="+Number(settingsBridge.palette.blurRight||0):"";fillMode:Image.PreserveAspectCrop;asynchronous:true
+      }
+    }
     Rectangle { width: parent.width; height: 1; color: Theme.border }
     Item {
         id: metadata
