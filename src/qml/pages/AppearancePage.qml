@@ -186,6 +186,7 @@ Item {
                             RowLayout {
                                 Layout.fillWidth: true; spacing: 6
                                 Slider {
+                                    objectName: "appearanceBlurSlider-" + modelData.key
                                     Layout.fillWidth: true; Layout.minimumWidth: 20
                                     from: 0; to: 50; stepSize: 0.1
                                     value: settingsBridge.appearanceDraft[modelData.key] || 0

@@ -165,6 +165,19 @@ private slots:
         QCOMPARE(blur->property("displayText").toString(),QLocale().toString(12.3,'f',1));
         auto *input=blur->property("contentItem").value<QObject *>(); QVERIFY(input);
         QVERIFY(input->property("width").toReal()>=input->property("implicitWidth").toReal());
+        for (const char *name : {"appearanceBlur-blurRight","appearanceBlur-blurExpanded"}) {
+            auto *other=visual(root,name); QVERIFY(other);
+            QCOMPARE(bounds(other).center().y(),bounds(blur).center().y());
+        }
+        QVERIFY(click(w,qobject_cast<QQuickItem *>(input)));
+        QTest::keyClick(w,Qt::Key_A,Qt::ControlModifier);
+        for (char character : QByteArray("23.4")) QTest::keyClick(w,Qt::Key(character));
+        QTest::keyClick(w,Qt::Key_Return);
+        QTRY_COMPARE(s->appearanceDraft()["blurLeft"].toDouble(),23.4);
+        QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,blur->mapToScene(QPointF(blur->width()-8,9)).toPoint());
+        QTRY_COMPARE(s->appearanceDraft()["blurLeft"].toDouble(),23.5);
+        auto *slider=visual(root,"appearanceBlurSlider-blurRight"); QVERIFY(slider);
+        QVERIFY(click(w,slider)); QTRY_VERIFY(s->appearanceDraft()["blurRight"].toDouble()>0);
         shot(w,"appearance-lower-options");
         QVERIFY(click(w,visual(root,"appearanceBack")));
         auto *dialog=w->findChild<QObject *>("appearanceUnsavedDialog"); QVERIFY(dialog); QTRY_VERIFY(dialog->property("opened").toBool());
