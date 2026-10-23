@@ -20,6 +20,10 @@ child handles. Child admission requires birth order and a canonical path boundar
 inside the fresh run. Cleanup never expands that set. Module assertions use the
 retained handle, require two identical nonempty live snapshots, and retain every
 API error/retry. EXITED/UNKNOWN/ERROR cannot pass required dependency isolation.
+Observation is bounded to 20 samples and a 2-second wall-clock budget, with 50ms
+between samples. A preserved first matrix failure showed four complete but
+changing startup GPU/OS module sets over the original 75ms sampling window; this
+justifies the longer observation budget without weakening isolation assertions.
 The original GetModuleFileNameExW failure's exact cause remains unconfirmed.
 
 CMD testing uses native backslash paths, explicit /d /v:off /s /c boundaries,

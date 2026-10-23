@@ -17,11 +17,13 @@ class ModuleError(Exception):
         super().__init__(f'{stage}: Win32 error {code}, module={module}')
 
 
-def observe_modules(api, attempts=4, delay=.025):
+def observe_modules(api, attempts=20, delay=.05, budget_seconds=2):
     observations, previous = [], None
     identity = api.identity()
+    started = time.monotonic()
     for attempt in range(1, attempts + 1):
-        row = {'attempt': attempt, 'identity': identity}
+        if attempt>1 and time.monotonic()-started>=budget_seconds:break
+        row = {'attempt': attempt, 'identity': identity, 'elapsedMilliseconds':round((time.monotonic()-started)*1000,3)}
         if not api.alive():
             row['status'] = 'EXITED'; observations.append(row)
             return {'status': 'EXITED', 'observations': observations, 'identity': identity}
@@ -48,7 +50,7 @@ def observe_modules(api, attempts=4, delay=.025):
             if error.code not in (6, 126, 299, 487):
                 return {'status': 'ERROR', 'observations': observations, 'identity': identity}
         if attempt < attempts:
-            time.sleep(delay)
+            time.sleep(min(delay,max(0,budget_seconds-(time.monotonic()-started))))
     return {'status': 'UNKNOWN', 'observations': observations, 'identity': identity}
 
 

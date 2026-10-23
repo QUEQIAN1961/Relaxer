@@ -277,21 +277,27 @@ def main():
             # Never expand ancestry or open a PID for termination during cleanup.
             # Only original retained handles are eligible, and child paths must
             # still be under this run's directory. No image-name/global cleanup.
-            for pid,(handle,birth,path) in item['identities'].items():
+            # Close verified children before their waiting launcher so a normal
+            # child exit can also release the original launcher without force.
+            for pid,(handle,birth,path) in reversed(list(item['identities'].items())):
                 code=w.DWORD()
                 if k.GetExitCodeProcess(handle,c.byref(code)) and code.value==259:
                     if pid==item['p'].pid or (path is not None and path.is_relative_to(out) and created(handle)==birth):
                         assert created(handle)==birth
-                        cleanup.append({'pid':pid,'image':str(path),'originalRoot':pid==item['p'].pid,
-                            'insideRun':path is not None and path.is_relative_to(out),'created':birth})
+                        entry={'pid':pid,'image':str(path),'originalRoot':pid==item['p'].pid,
+                            'insideRun':path is not None and path.is_relative_to(out),'created':birth,'reason':'exception cleanup'}
+                        cleanup.append(entry)
                         # Normal close precedes bounded forced cleanup. The
                         # retained handle pins this identity throughout.
                         for hwnd in support['windows'](pid):u.PostMessageW(hwnd,0x10,0,0)
                         if k.WaitForSingleObject(handle,1000)!=0:
+                            entry['action']='terminate-retained-handle'
                             if not k.TerminateProcess(handle,124):
                                 error=c.get_last_error()
                                 assert k.WaitForSingleObject(handle,0)==0,('TerminateProcess',error,pid)
+                        else:entry['action']='normal-close'
                         assert k.WaitForSingleObject(handle,5000)==0
+                        exit_code=w.DWORD();assert k.GetExitCodeProcess(handle,c.byref(exit_code));entry['exitCode']=exit_code.value
                 k.CloseHandle(handle)
             item['file'].close()
         (out/'cleanup-audit.json').write_text(json.dumps({'targets':cleanup,

@@ -43,6 +43,13 @@ class Observations(unittest.TestCase):
         self.assertEqual(self.observe(Fake([[]]*4))['status'],'UNKNOWN')
     def test_nontransient_error_with_live_process_is_error(self):
         self.assertEqual(self.observe(Fake([ModuleError(0,'filename')]))['status'],'ERROR')
+    def test_default_budget_handles_observed_loader_churn(self):
+        r=observe_modules(Fake([[str(i)+'.dll'] for i in range(7)]+[['runtime.exe'],['runtime.exe']]),delay=0)
+        self.assertEqual(r['status'],'STABLE');self.assertEqual(len(r['observations']),9)
+        self.assertIn('elapsedMilliseconds',r['observations'][0])
+    def test_default_persistent_failure_is_still_bounded_unknown(self):
+        r=observe_modules(Fake([ModuleError(299,'filename')]*20),delay=0)
+        self.assertEqual(r['status'],'UNKNOWN');self.assertEqual(len(r['observations']),20)
     def test_cmd_rejects_expansion_and_injection(self):
         for value in ['%PATH%','a"&calc','a\nb']:
             with self.assertRaises(ValueError): cmd_invocation('safe.cmd',[value])

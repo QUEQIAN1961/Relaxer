@@ -20,6 +20,7 @@ function Run-Checked([string]$File,[string[]]$Arguments,[string]$Tag,[int]$Timeo
         $record.image=$p.Image; $record.commandLine=$p.Command; $record.ownership='CreateProcessW original retained handle; root only'
         if (-not $p.Wait($Timeout)) {
             $record.cleanup=[RelaxerVerification.Cleanup]::Run($p,1000,5000)
+            $record.timedOut=$true; $record.exitCode=$p.ExitCode
             throw ('Timeout: ' + $Tag + "`n" + (Read-VerificationLog $out) + "`n" + (Read-VerificationLog $err))
         }
         $record.exitCode=$p.ExitCode
@@ -28,12 +29,19 @@ function Run-Checked([string]$File,[string[]]$Arguments,[string]$Tag,[int]$Timeo
         if ($Tag -eq 'verify-audio-decode') { Write-Output (Read-VerificationLog $out) }
     } catch { $record.error=$_.Exception.Message; throw
     } finally {
-        if ($null -ne $p) {
-            try { if (-not $p.Exited()) { $record.cleanup=[RelaxerVerification.Cleanup]::Run($p,1000,5000) } }
-            finally { $p.Dispose() }
+        try {
+            if ($null -ne $p) {
+                try {
+                    if (-not $p.Exited()) { $record.cleanup=[RelaxerVerification.Cleanup]::Run($p,1000,5000) }
+                    $record.exitCode=$p.ExitCode
+                } finally { $p.Dispose() }
+            }
+        } catch {
+            $record.status='ERROR';$record.cleanupError=$_.Exception.Message;throw
+        } finally {
+            $record.finished=[DateTime]::UtcNow.ToString('o')
+            [IO.File]::WriteAllText((Join-Path $stage ($Tag+'.result.json')),($record|ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding($false)))
         }
-        $record.finished=[DateTime]::UtcNow.ToString('o')
-        [IO.File]::WriteAllText((Join-Path $stage ($Tag+'.result.json')),($record|ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding($false)))
     }
 }
 try {
