@@ -5,6 +5,7 @@ from ctypes import wintypes as w
 import hashlib, json, os
 from pathlib import Path
 import runpy, shutil, sqlite3, subprocess, time
+from launcher_observation import WindowsModules, observe_modules, cmd_invocation, cmd_environment
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -13,7 +14,7 @@ def main():
     args=parser.parse_args(); package=args.package.resolve(); out=args.output.resolve()
     out.mkdir(parents=True,exist_ok=False)
     support=runpy.run_path(str(Path(__file__).with_name('measure-phase-c.py')))
-    env=support['clean_environment'](out); env.pop('QT_QPA_PLATFORM',None)
+    env=cmd_environment(support['clean_environment'](out)); env.pop('QT_QPA_PLATFORM',None)
     k,u=support['k'],support['u']; k.SetErrorMode(0x8003)
     k.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD]; k.OpenProcess.restype=w.HANDLE
     k.GetExitCodeProcess.argtypes=[w.HANDLE,c.POINTER(w.DWORD)]
@@ -29,19 +30,15 @@ def main():
     u.GetClassNameW.argtypes=[w.HWND,w.LPWSTR,c.c_int]
     u.EnumChildWindows.argtypes=[w.HWND,support['callback_type'],w.LPARAM]
     startup=subprocess.STARTUPINFO(); startup.dwFlags|=subprocess.STARTF_USESHOWWINDOW; startup.wShowWindow=5
-    rows=[]; active=[]; cleanup=[]
-    def modules(pid):
-        h=k.OpenProcess(0x410,False,pid); assert h,('OpenProcess',pid,c.get_last_error())
-        try:
-            array=(w.HMODULE*2048)(); size=w.DWORD()
-            assert ps.EnumProcessModules(h,array,c.sizeof(array),c.byref(size))
-            names=[]
-            for module in array[:size.value//c.sizeof(w.HMODULE)]:
-                buf=c.create_unicode_buffer(32768)
-                assert ps.GetModuleFileNameExW(h,module,buf,len(buf))
-                names.append(Path(buf.value).name)
-            return sorted(names)
-        finally:k.CloseHandle(h)
+    rows=[]; active=[]; cleanup=[]; module_observations=[]
+    def modules(item,pid):
+        handle,birth,path=item['identities'][pid]
+        identity={'pid':pid,'created':birth,'image':str(path)}
+        observation=observe_modules(WindowsModules(k,handle,identity))
+        module_observations.append({'case':item['tag'],**observation})
+        (out/'module-observations.json').write_text(json.dumps(module_observations,ensure_ascii=False,indent=2),encoding='utf-8')
+        assert observation['status']=='STABLE',('TEST ERROR: required live module evidence',observation)
+        return observation['modules']
     def text(hwnd):
         buf=c.create_unicode_buffer(4096);u.GetWindowTextW(hwnd,buf,len(buf));return buf.value
     def dialogs(pids):
@@ -95,7 +92,7 @@ def main():
     def track(item):
         for pid,(parent,name) in support['processes']().items():
             if pid in item['identities'] or parent not in item['identities']:continue
-            handle=k.OpenProcess(0x100000|0x1000|1,False,pid)
+            handle=k.OpenProcess(0x100000|0x1000|0x410|1,False,pid)
             if not handle:continue
             try:
                 birth=created(handle);path=image(handle)
@@ -143,7 +140,7 @@ def main():
             if len(players)==1:
                 pid=players[0];hwnds=support['windows'](pid)
                 if hwnds and (report is None or report.exists()):
-                    loaded=modules(pid)
+                    loaded=modules(item,pid)
                     qml='RelaxerQmlUi.dll' in loaded
                     assert qml==(mode=='qml'),(item['tag'],loaded)
                     assert ('Qt6Quick.dll' in loaded)==qml
@@ -169,9 +166,8 @@ def main():
             value=json.loads(report.read_text(encoding='utf-8'));assert value['saveSucceeded'] and value['exitCode']==0
             assert not (Path(value['dataRoot'])/'relaxer.lock').exists();row['diagnostics']=value
         return row
-    def cmdline(copy,extra=''):
-        cmd=Path(os.environ['SystemRoot'])/'System32/cmd.exe'
-        return f'{cmd} /d /s /c ""{copy / "RelaxerQml.cmd"}" {extra}"'
+    def cmdline(copy):
+        return cmd_invocation(copy/'RelaxerQml.cmd')
     def clone(name):
         dest=out/name
         shutil.copytree(package,dest,ignore=shutil.ignore_patterns('data','startup.log','startup.lock'))
@@ -288,7 +284,13 @@ def main():
                         assert created(handle)==birth
                         cleanup.append({'pid':pid,'image':str(path),'originalRoot':pid==item['p'].pid,
                             'insideRun':path is not None and path.is_relative_to(out),'created':birth})
-                        assert k.TerminateProcess(handle,124)
+                        # Normal close precedes bounded forced cleanup. The
+                        # retained handle pins this identity throughout.
+                        for hwnd in support['windows'](pid):u.PostMessageW(hwnd,0x10,0,0)
+                        if k.WaitForSingleObject(handle,1000)!=0:
+                            if not k.TerminateProcess(handle,124):
+                                error=c.get_last_error()
+                                assert k.WaitForSingleObject(handle,0)==0,('TerminateProcess',error,pid)
                         assert k.WaitForSingleObject(handle,5000)==0
                 k.CloseHandle(handle)
             item['file'].close()

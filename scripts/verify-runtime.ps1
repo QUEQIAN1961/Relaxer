@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+. (Join-Path $PSScriptRoot 'owned-process.ps1')
 $source = $env:RELAXER_SOURCE_ROOT
 $stage = Join-Path $source 'runtime.pending'
 $final = Join-Path $source 'runtime'
@@ -11,21 +12,29 @@ function Run-Checked([string]$File,[string[]]$Arguments,[string]$Tag,[int]$Timeo
     $out = Join-Path $stage ($Tag + '.log')
     $err = Join-Path $stage ($Tag + '-error.log')
     $p = $null
+    $started=[DateTime]::UtcNow
+    $record=[ordered]@{task=$Tag;root=$stage;executable=$File;arguments=$Arguments;started=$started.ToString('o');status='ERROR';stdout=$out;stderr=$err;cleanup='not-needed'}
     try {
-        $p = Start-Process -FilePath $File -ArgumentList $Arguments -WorkingDirectory $stage -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-        $null=$p.Handle
-        if (-not $p.WaitForExit($Timeout)) {
-            # Stop only the verification process we started and its worker.
-            $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
-            if (Test-Path -LiteralPath $taskkill) { & $taskkill /PID $p.Id /T /F 2>&1 | Out-Null }
-            if (-not $p.HasExited) { $p.Kill() }
-            $null=$p.WaitForExit(1000)
+        $p = New-Object RelaxerVerification.NativeLease($File,$Arguments,$stage,$out,$err,$Tag)
+        $record.pid=$p.Pid; $record.parentPid=$p.ParentPid; $record.createdFileTime=$p.Created
+        $record.image=$p.Image; $record.commandLine=$p.Command; $record.ownership='CreateProcessW original retained handle; root only'
+        if (-not $p.Wait($Timeout)) {
+            $record.cleanup=[RelaxerVerification.Cleanup]::Run($p,1000,5000)
             throw ('Timeout: ' + $Tag + "`n" + (Read-VerificationLog $out) + "`n" + (Read-VerificationLog $err))
         }
-        $p.WaitForExit()
-        if ($p.ExitCode -ne 0) { throw ($Tag + ' failed: ' + $p.ExitCode + "`n" + (Read-VerificationLog $out) + "`n" + (Read-VerificationLog $err)) }
+        $record.exitCode=$p.ExitCode
+        if ($record.exitCode -ne 0) { throw ($Tag + ' failed: ' + $record.exitCode + "`n" + (Read-VerificationLog $out) + "`n" + (Read-VerificationLog $err)) }
+        $record.status='PASS'
         if ($Tag -eq 'verify-audio-decode') { Write-Output (Read-VerificationLog $out) }
-    } finally { if ($null -ne $p) { $p.Dispose() } }
+    } catch { $record.error=$_.Exception.Message; throw
+    } finally {
+        if ($null -ne $p) {
+            try { if (-not $p.Exited()) { $record.cleanup=[RelaxerVerification.Cleanup]::Run($p,1000,5000) } }
+            finally { $p.Dispose() }
+        }
+        $record.finished=[DateTime]::UtcNow.ToString('o')
+        [IO.File]::WriteAllText((Join-Path $stage ($Tag+'.result.json')),($record|ConvertTo-Json -Depth 6),(New-Object Text.UTF8Encoding($false)))
+    }
 }
 try {
     if (-not $source) { throw 'Project path missing' }
@@ -45,22 +54,26 @@ try {
     Run-Checked (Join-Path $stage 'bin\ffprobe.exe') @('-version') 'verify-ffprobe'
     Run-Checked (Join-Path $stage 'Relaxer.exe') @('--self-test') 'verify-core'
     $image=Join-Path $stage 'verify-window.png'
-    Run-Checked (Join-Path $stage 'Relaxer.exe') @('--screenshot',('"'+$image+'"')) 'verify-window'
+    Run-Checked (Join-Path $stage 'Relaxer.exe') @('--screenshot',$image) 'verify-window'
     if (-not (Test-Path -LiteralPath $image) -or (Get-Item -LiteralPath $image).Length -lt 1024) { throw 'Qt window verification failed.' }
     if (Test-Path -LiteralPath (Join-Path $stage 'Qt6Quick.dll')) {
         $qmlImage=Join-Path $stage 'verify-qml-window.png'
-        Run-Checked (Join-Path $stage 'Relaxer.exe') @('--ui=qml','--screenshot',('"'+$qmlImage+'"')) 'verify-qml-window'
+        Run-Checked (Join-Path $stage 'Relaxer.exe') @('--ui=qml','--screenshot',$qmlImage) 'verify-qml-window'
         if (-not (Test-Path -LiteralPath $qmlImage) -or (Get-Item -LiteralPath $qmlImage).Length -lt 1024) { throw 'QML window verification failed.' }
     }
     # Decode real PCM through the bundled Qt multimedia plugin. A sound card is
     # deliberately not required: device enumeration/rendering is machine-specific.
     # --audio-device-smoke remains available as a separate hardware diagnostic.
     $fixture=Join-Path $stage 'verify-audio.wav'
-    Run-Checked (Join-Path $stage 'bin\ffmpeg.exe') @('-v','error','-f','lavfi','-i','sine=frequency=440:duration=3','-y',('"'+$fixture+'"')) 'make-audio'
-    Run-Checked (Join-Path $stage 'Relaxer.exe') @('--media-smoke',('"'+$fixture+'"')) 'verify-audio-decode' 30000
+    Run-Checked (Join-Path $stage 'bin\ffmpeg.exe') @('-v','error','-f','lavfi','-i','sine=frequency=440:duration=3','-y',$fixture) 'make-audio'
+    Run-Checked (Join-Path $stage 'Relaxer.exe') @('--media-smoke',$fixture) 'verify-audio-decode' 30000
     Remove-Item -LiteralPath $fixture -Force
-    Remove-Item -LiteralPath (Join-Path $stage 'verification-data') -Recurse -Force
-    $proof=[ordered]@{version='1.5.0';verified_at=[DateTime]::UtcNow.ToString('o');windows_only_path=$true;audio_decode=$true;audio_device_required=$false;media_clock=$false}
+    $verificationData=[IO.Path]::GetFullPath((Join-Path $stage 'verification-data'))
+    if (-not [RelaxerVerification.NativeLease]::Inside($stage,$verificationData)) { throw 'Verification data escaped staging root' }
+    Remove-Item -LiteralPath $verificationData -Recurse -Force
+    $productVersion=([Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $stage 'Relaxer.exe'))).ProductVersion
+    if (-not $productVersion) { throw 'Verified runtime lacks its product version resource' }
+    $proof=[ordered]@{version='1.5.0';readySchemaVersion='1.5.0';productVersion=$productVersion;verified_at=[DateTime]::UtcNow.ToString('o');windows_only_path=$true;audio_decode=$true;audio_device_required=$false;media_clock=$false}
     [IO.File]::WriteAllText((Join-Path $stage 'relaxer-ready.json'),($proof|ConvertTo-Json),(New-Object Text.UTF8Encoding($false)))
     [IO.Directory]::Move($stage,$final)
     Remove-Item -LiteralPath (Join-Path $final '.relaxer-staging-owner') -Force
