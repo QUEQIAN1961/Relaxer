@@ -11,6 +11,7 @@
 #include <cmath>
 #include <algorithm>
 #include <utility>
+#include <limits>
 
 namespace relaxer::ai::lyrics {
 namespace {
@@ -336,6 +337,16 @@ ValidationResult validateResponse(const QString &content, const PreparedLyrics &
         result.error = QStringLiteral("模型返回的译文数量与原歌词行数不一致");
         return result;
     }
+    // SourceLine IDs identify source rows. A single-line browser segment can
+    // contain any one of those IDs; its local vector offset is unrelated.
+    QSet<int> expectedIds;
+    for (const auto &line : lyrics.lines) {
+        if (line.id < 0 || expectedIds.contains(line.id)) {
+            result.error = QStringLiteral("歌词输入包含无效或重复的 ID");
+            return result;
+        }
+        expectedIds.insert(line.id);
+    }
     QHash<int, QString> byId;
     for (const auto &value : rows) {
         if (!value.isObject()) {
@@ -348,7 +359,8 @@ ValidationResult validateResponse(const QString &content, const PreparedLyrics &
             return result;
         }
         const double rawId = object.value("id").toDouble();
-        if (!std::isfinite(rawId) || std::floor(rawId) != rawId || rawId < 0 || rawId >= lyrics.lines.size()) {
+        if (!std::isfinite(rawId) || std::floor(rawId) != rawId || rawId < 0 ||
+            rawId > std::numeric_limits<int>::max() || !expectedIds.contains(int(rawId))) {
             result.error = QStringLiteral("模型返回了未知或无效的歌词 ID");
             return result;
         }

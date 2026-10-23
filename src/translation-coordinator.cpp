@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QJsonDocument>
 #include <QThread>
+#include <QDebug>
 #include <QTimer>
 #include <atomic>
 
@@ -122,18 +123,23 @@ quint64 TranslationCoordinator::prepare(qint64 id,TranslationMethod method,const
     value.taskId=identity();value.generation=++m_generation;
     m_tasks.insert(value.taskId,task);publish(task);return value.taskId;
 }
-bool TranslationCoordinator::current(const TaskPtr &task,QString *error) const {
+bool TranslationCoordinator::contextCurrent(const TaskPtr &task,QString *error,Track *currentTrack) const {
     if(!ownerThread()||!m_library)return fail(error,QStringLiteral("歌曲身份已失效，未保存译文"));
     const auto track=m_library->track(task->value.trackId);
     if(!track.id||track.id!=task->track.id||track.hash!=task->track.hash||track.title!=task->track.title||
        track.artist!=task->track.artist||track.lyrics!=task->track.lyrics)
         return fail(error,QStringLiteral("歌曲身份或歌词文件已变化，旧译文已丢弃"));
+    if(task->value.method==TranslationMethod::DeepSeek&&(!m_runtime||configurationDigest()!=task->value.configurationDigest))
+        return fail(error,QStringLiteral("AI 翻译配置已变化，请重新翻译"));
+    if(currentTrack)*currentTrack=track;
+    return true;
+}
+bool TranslationCoordinator::current(const TaskPtr &task,QString *error) const {
+    Track track;if(!contextCurrent(task,error,&track))return false;
     const auto file=LyricsDocumentReader::readFile(m_library->absolute(track.lyrics));
     if(!file.opened||file.tooLarge||!file.complete)return fail(error,QStringLiteral("当前歌词无法完整读取，旧译文已丢弃"));
     if(QCryptographicHash::hash(file.bytes,QCryptographicHash::Sha256)!=task->value.sourceDigest)
         return fail(error,QStringLiteral("歌词内容已变化，旧译文已丢弃"));
-    if(task->value.method==TranslationMethod::DeepSeek&&(!m_runtime||configurationDigest()!=task->value.configurationDigest))
-        return fail(error,QStringLiteral("AI 翻译配置已变化，请重新翻译"));
     if(!m_library->lyricsSnapshotMatches(task->saveSnapshot,error))return false;
     if(error)error->clear();
     return true;
@@ -218,7 +224,7 @@ void TranslationCoordinator::completeBrowser(quint64 token,const QString &text,c
     task->segmentToken=0;
     if(!error.isEmpty()){finish(task,TranslationState::Failed,QStringLiteral("翻译失败"),error,"browser");return;}
     // Reuse the strict complete-response validator even for each browser line.
-    auto single=task->value.prepared;single.lines={single.lines.at(task->value.completedLines)};single.lines[0].id=0;
+    auto single=task->value.prepared;single.lines={single.lines.at(task->value.completedLines)};
     const auto content=QString::fromUtf8(QJsonDocument(QJsonObject{{"translations",QJsonArray{QJsonObject{
         {"id",single.lines.first().id},{"text",text}}}}}).toJson(QJsonDocument::Compact));
     const auto validation=ai::lyrics::validateResponse(content,single);
@@ -267,9 +273,13 @@ bool TranslationCoordinator::save(quint64 id,QString *error){
     if(!ownerThread())return fail(error,QStringLiteral("翻译服务线程错误"));
     const auto task=m_tasks.value(id);
     if(!task||!task->value.hasPreview())return false;
-    QString message;if(!current(task,&message)){finish(task,TranslationState::Invalidated,QStringLiteral("未保存"),message,"snapshot");return fail(error,message);}
+    QString message;if(!contextCurrent(task,&message)){finish(task,TranslationState::Invalidated,QStringLiteral("未保存"),message,"snapshot");return fail(error,message);}
     if(!m_library->saveLyricsChecked(task->value.trackId,task->merged,task->saveSnapshot,true)){
         message=m_library->lastError().isEmpty()?QStringLiteral("歌词保存失败，原歌词仍保留"):m_library->lastError();
+        QString conflict;
+        if(!m_library->lyricsSnapshotMatches(task->saveSnapshot,&conflict)){
+            finish(task,TranslationState::Invalidated,QStringLiteral("未保存"),conflict,"snapshot");return fail(error,conflict);
+        }
         task->value.status=QStringLiteral("未保存");task->value.details=QStringLiteral("未保存：")+message;task->value.errorCode="save";publish(task);return fail(error,message);
     }
     finish(task,TranslationState::Saved,QStringLiteral("已保存"),QStringLiteral("双语歌词已保存，原文与时间戳保持不变。"));if(error)error->clear();
@@ -282,7 +292,10 @@ bool TranslationCoordinator::forget(quint64 id){
     return m_tasks.remove(id)>0;
 }
 void TranslationCoordinator::shutdown(){
-    if(!ownerThread())return;
+    if(!ownerThread()){
+        qWarning("TranslationCoordinator::shutdown rejected: call on owner thread required");
+        return;
+    }
     if(m_stopping)return;
     m_stopping=true;m_queue.clear();
     for(const auto &task:m_tasks.values())if(!task->value.terminal())

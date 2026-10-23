@@ -72,6 +72,7 @@ private:
     QByteArray configurationDigest() const;
     quint64 prepare(qint64 id,TranslationMethod method,const QString &provider,const QString &language,QString *error);
     bool current(const TaskPtr &task,QString *error) const;
+    bool contextCurrent(const TaskPtr &task,QString *error,Track *currentTrack=nullptr) const;
     void publish(const TaskPtr &task);
     void finish(const TaskPtr &task,TranslationState state,const QString &status,const QString &details,const QString &code={});
     void schedule();void pump();void dispatchSegment(const TaskPtr &task);

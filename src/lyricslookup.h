@@ -71,7 +71,7 @@ private:
     QPushButton *m_refreshTranslationFilter=nullptr;
     friend class LyricsLookupDiagnostics;
     struct FilterMetrics {
-        quint64 fullPasses=0,rowVisits=0,assessments=0,fileReads=0,bytesRead=0,jsonKeys=0;
+        quint64 fullPasses=0,rowVisits=0,assessments=0,fileReads=0,bytesRead=0;
         quint64 digestComputations=0,digestBytes=0,auditPasses=0,auditFiles=0;
     };
     FilterMetrics m_filterMetrics;
@@ -101,10 +101,10 @@ private:
     quint64 m_translationAssessmentRevision=0;
     int m_filterVisibleCount=0;
     bool m_filterReady=false,m_filterUpdating=false;
-    bool filterRow(int row);
-    void updateFilterRow(int row);
+    bool filterRow(int row,const LyricsFilterState *state=nullptr);
+    void updateFilterRow(int row,const LyricsFilterState *state=nullptr);
     void finishFilterUpdate();
-    ai::lyrics::TranslationAssessment translationAssessment(const Track &track);
+    ai::lyrics::TranslationAssessment translationAssessment(const Track &track,const bool *instrumentalState=nullptr);
     void requestTranslationCacheAudit();
     void startTranslationCacheAudit();
     void applyTranslationCacheAudit(const QVector<TranslationAuditResult> &results,const FilterMetrics &work);
@@ -117,7 +117,6 @@ private:
     struct ReplacementContent { QByteArray bytes;bool preservesTranslation=false; };
     ReplacementContent replacementContent(const Track &track,const QJsonObject &record) const;
     void ensureLyricsSnapshot(qint64 id);
-    bool checkLyricsSnapshot(qint64 id);
     void updateApplyButton();
     QSpinBox *m_offset;QComboBox *m_sourceFilter;QVector<int> m_visibleRecords;
     bool m_multi=false,m_moreWasOpen=false,m_pinExplicit=false;

@@ -7,6 +7,9 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
+#include <QSqlDriver>
+#include <sqlite3.h>
+#include <QScopeGuard>
 
 namespace relaxer {
 class LyricsLookupDiagnostics {
@@ -19,7 +22,7 @@ public:
     static QJsonObject work(const LyricsLookup &dialog){
         const auto &m=dialog.m_filterMetrics;
         return {{"full_passes",double(m.fullPasses)},{"row_visits",double(m.rowVisits)},{"assessments",double(m.assessments)},
-            {"file_reads",double(m.fileReads)},{"bytes_read",double(m.bytesRead)},{"json_keys",double(m.jsonKeys)},
+            {"file_reads",double(m.fileReads)},{"bytes_read",double(m.bytesRead)},
             {"digest_computations",double(m.digestComputations)},{"digest_bytes",double(m.digestBytes)},
             {"audit_passes",double(m.auditPasses)},{"audit_files",double(m.auditFiles)}};
     }
@@ -47,10 +50,22 @@ private slots:
         auto dialog=std::make_unique<LyricsLookup>(&library,ids,nullptr,QUrl("http://127.0.0.1:9/api"));
         auto *filter=dialog->findChild<QCheckBox *>("lyricsMissingTranslationOnly");auto *refresh=dialog->findChild<QPushButton *>("lyricsRefreshTranslationFilter");QVERIFY(filter);QVERIFY(refresh);
         QJsonObject result{{"songs",songs},{"status_updates",200},{"measurement","actual local synthetic SQLite and LRC files"}};
-        auto measure=[&](const QString &name,auto action){LyricsLookupDiagnostics::reset(*dialog);QElapsedTimer timer;timer.start();action();auto data=LyricsLookupDiagnostics::work(*dialog);data["elapsed_ms"]=double(timer.nsecsElapsed())/1e6;result[name]=data;return data;};
-        measure("enable",[&]{filter->setChecked(true);});
-        measure("refresh",[&]{refresh->click();});
-        measure("repeat_refresh",[&]{refresh->click();});
+        auto handle=import_fixture::database(library).driver()->handle();QVERIFY(handle.isValid());
+        auto *db=*static_cast<sqlite3 **>(handle.data());QVERIFY(db);
+        struct SqlCounts { int selects=0,trackSingles=0; } counts;
+        sqlite3_trace_v2(db,SQLITE_TRACE_STMT,+[](unsigned,void *context,void *statement,void *){
+            auto &c=*static_cast<SqlCounts *>(context);const QByteArray sql=sqlite3_sql(static_cast<sqlite3_stmt *>(statement));
+            if(sql.startsWith("SELECT")){++c.selects;if(sql.contains("WHERE id="))++c.trackSingles;}return 0;
+        },&counts);
+        const auto detach=qScopeGuard([&]{sqlite3_trace_v2(db,0,nullptr,nullptr);});
+        auto measure=[&](const QString &name,auto action){counts={};LyricsLookupDiagnostics::reset(*dialog);QElapsedTimer timer;timer.start();action();auto data=LyricsLookupDiagnostics::work(*dialog);data["elapsed_ms"]=double(timer.nsecsElapsed())/1e6;data["sql_selects"]=counts.selects;data["sql_single_track_selects"]=counts.trackSingles;result[name]=data;return data;};
+        const auto enabled=measure("enable",[&]{filter->setChecked(true);});
+        const auto refreshed=measure("refresh",[&]{refresh->click();});
+        const auto repeated=measure("repeat_refresh",[&]{refresh->click();});
+        for(const auto &pass:{enabled,refreshed,repeated}){
+            QCOMPARE(pass["row_visits"].toInt(),songs);
+            QVERIFY2(pass["sql_selects"].toInt()<=((songs+255)/256)+8,"Full passes must batch SQL without dropping rows");
+        }
         const auto updates=measure("status_updates_work",[&]{for(int i=0;i<200;++i)LyricsLookupDiagnostics::status(*dialog,i%songs);});
         LyricsLookupDiagnostics::reset(*dialog);QElapsedTimer auditClock;auditClock.start();int guiHeartbeats=0;QTimer heartbeat;
         heartbeat.setInterval(1);connect(&heartbeat,&QTimer::timeout,&heartbeat,[&]{++guiHeartbeats;});heartbeat.start();

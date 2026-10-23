@@ -4,6 +4,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <sqlite3.h>
+#include <QScopeGuard>
 
 using namespace relaxer;
 namespace {
@@ -38,6 +39,32 @@ bool installFailure(Library &library,Failure &state,const QString &trigger) {
 class LyricsPersistenceTests : public QObject {
     Q_OBJECT
 private slots:
+    void checkedSaveGuardsBothFilesAndFinalReplace_data(){
+        QTest::addColumn<bool>("target");QTest::addColumn<bool>("sameStamp");QTest::addColumn<bool>("finalWindow");
+        for(bool target:{false,true})for(bool sameStamp:{false,true})for(bool finalWindow:{false,true})
+            QTest::newRow(qPrintable(QString("%1-%2-%3").arg(target?"target":"source").arg(sameStamp?"same-size-mtime":"normal").arg(finalWindow?"before-replace":"before-save")))<<target<<sameStamp<<finalWindow;
+    }
+    void checkedSaveGuardsBothFilesAndFinalReplace(){
+        QFETCH(bool,target);QFETCH(bool,sameStamp);QFETCH(bool,finalWindow);
+        QTemporaryDir dir;Library l(dir.filePath("data"));QVERIFY(l.open());const auto t=seed(l);
+        const QString original="Lyrics/imported.lrc";const auto destination=l.absolute(QString("Lyrics/track-%1.lrc").arg(t.id));
+        auto write=[](const QString &path,const QByteArray &bytes){QFile f(path);return f.open(QIODevice::WriteOnly|QIODevice::Truncate)&&f.write(bytes)==bytes.size();};
+        QVERIFY(write(l.absolute(original),"Old source"));QVERIFY(write(destination,"Old target"));
+        QSqlQuery q(import_fixture::database(l));q.prepare("UPDATE tracks SET lyrics=? WHERE id=?");q.addBindValue(original);q.addBindValue(t.id);QVERIFY(q.exec());
+        const auto snapshot=l.lyricsSaveSnapshot(t.id);QVERIFY(snapshot.valid);
+        struct Change {QString path;QByteArray bytes;QDateTime stamp;bool preserve=false,ran=false,ok=false;} change;
+        change.path=target?destination:l.absolute(original);change.bytes=target?"New target":"New source";change.stamp=QFileInfo(change.path).lastModified();change.preserve=sameStamp;
+        auto mutate=+[](Change &c){QFile f(c.path);c.ran=true;c.ok=f.open(QIODevice::WriteOnly|QIODevice::Truncate)&&f.write(c.bytes)==c.bytes.size();if(c.ok&&c.preserve)c.ok=f.setFileTime(c.stamp,QFileDevice::FileModificationTime);};
+        auto *db=handle(l);QVERIFY(db);
+        if(finalWindow)sqlite3_trace_v2(db,SQLITE_TRACE_STMT,+[](unsigned,void *data,void *statement,void *){
+            auto &c=*static_cast<Change *>(data);const QByteArray sql=sqlite3_sql(static_cast<sqlite3_stmt *>(statement));
+            if(!c.ran&&sql.startsWith("BEGIN")){QFile f(c.path);c.ran=true;c.ok=f.open(QIODevice::WriteOnly|QIODevice::Truncate)&&f.write(c.bytes)==c.bytes.size();if(c.ok&&c.preserve)c.ok=f.setFileTime(c.stamp,QFileDevice::FileModificationTime);}return 0;
+        },&change);else mutate(change);
+        const auto detach=qScopeGuard([&]{sqlite3_trace_v2(db,0,nullptr,nullptr);});
+        QVERIFY(!l.saveLyricsChecked(t.id,"Replacement lyrics",snapshot));QVERIFY(change.ran);QVERIFY(change.ok);
+        QCOMPARE(l.track(t.id).lyrics,original);QCOMPARE(read(change.path),change.bytes);
+        QCOMPARE(read(target?l.absolute(original):destination),target?QByteArray("Old source"):QByteArray("Old target"));
+    }
     void normalAndPreservingPathsKeepExistingEncodingSemantics() {
         QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());const auto track=seed(library);QVERIFY(track.id);
         const auto text=QStringLiteral("[00:01.00]她在遠方").toUtf8();QVERIFY(library.saveLyrics(track.id,text));

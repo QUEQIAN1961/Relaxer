@@ -51,6 +51,29 @@ struct Fixture {
 class TranslationCoordinatorTests final : public QObject {
     Q_OBJECT
 private slots:
+    void responseIdsAreIdentitiesRatherThanOffsets(){
+        auto prepared=ai::lyrics::prepare("First line\n\nSecond line\n");
+        QVERIFY(prepared.ok());QCOMPARE(prepared.lines.size(),2);
+        prepared.lines[0].id=7;prepared.lines[1].id=42;
+        const auto good=ai::lyrics::validateResponse(QString::fromUtf8(translationJson({{42,QStringLiteral("第二行")},{7,QStringLiteral("第一行")}})),prepared);
+        QVERIFY2(good.ok(),qPrintable(good.error));
+        QCOMPARE(good.translations,QStringList({QStringLiteral("第一行"),QStringLiteral("第二行")}));
+        for(const auto &rows:{QList<QPair<int,QString>>{{7,"one"},{7,"two"}},QList<QPair<int,QString>>{{7,"one"},{0,"two"}}})
+            QVERIFY(!ai::lyrics::validateResponse(QString::fromUtf8(translationJson(rows)),prepared).ok());
+        prepared.lines={prepared.lines[1]};
+        QVERIFY(ai::lyrics::validateResponse(QString::fromUtf8(translationJson({{42,"one"}})),prepared).ok());
+        QVERIFY(!ai::lyrics::validateResponse(QString::fromUtf8(translationJson({{0,"one"}})),prepared).ok());
+    }
+    void wrongThreadShutdownWarnsAndDoesNotTouchBackend(){
+        Fixture f;QVERIFY(f.ok);const auto id=f.web();QVERIFY(f.coordinator->start(id));
+        QTRY_COMPARE(f.browser->calls.size(),1);
+        QTest::ignoreMessage(QtWarningMsg,"TranslationCoordinator::shutdown rejected: call on owner thread required");
+        auto *worker=QThread::create([&]{f.coordinator->shutdown();});worker->start();
+        QVERIFY(worker->wait(3000));delete worker;
+        QCOMPARE(f.browser->closes,0);QCOMPARE(f.browser->cancels,0);QCOMPARE(f.state(id),State::Running);
+        f.coordinator->shutdown();QCOMPARE(f.browser->closes,1);QCOMPARE(f.state(id),State::Cancelled);
+        f.coordinator->shutdown();QCOMPARE(f.browser->closes,1);
+    }
     void preparationIsPureAndIdentityUnique(){
         Fixture f;QVERIFY(f.ok);const auto a=f.ai(),b=f.web();QVERIFY(a);QVERIFY(b>a);
         QCOMPARE(f.http.requestCount(),0);QVERIFY(f.browser->calls.isEmpty());

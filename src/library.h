@@ -8,6 +8,11 @@
 #include <QHash>
 namespace relaxer {
 enum class TranslationJudgment { Unknown, NeedsTranslation, NoTranslationNeeded };
+struct LyricsFilterState {
+    Track track;
+    bool instrumental=false;
+    TranslationJudgment judgment=TranslationJudgment::Unknown;
+};
 struct LookupCache { bool fresh=false, noResult=false; QJsonArray records; };
 // Snapshot only the lyric files about to be replaced, never the music library.
 struct LyricFileSnapshot {
@@ -24,6 +29,7 @@ struct LyricsSaveSnapshot {
     LyricFileSnapshot source,target;
     bool valid=false;
 };
+struct LyricsSaveMetrics { quint64 fileReads=0,digestComputations=0; };
 class Library : public QObject {
     Q_OBJECT
   public:
@@ -38,6 +44,8 @@ class Library : public QObject {
     Track track(qint64 id) const;
     // Unique existing rows only; callers retain their own order/duplicates.
     QHash<qint64, Track> tracksByIds(const QVector<qint64> &ids) const;
+    // One synchronous operation snapshot, bounded to 256 IDs per SELECT.
+    QHash<qint64,LyricsFilterState> lyricsFilterStates(const QVector<qint64> &ids) const;
     qint64 insert(const Track &t);
     qint64 insertImportedTrack(const Track &t,bool *added);
     QVector<Playlist> playlists() const;
@@ -86,6 +94,8 @@ class Library : public QObject {
     void statsChanged();
 
   private:
+    friend class LibraryDiagnostics;
+    mutable LyricsSaveMetrics m_lyricsSaveMetrics;
     QString m_root, m_connection;
     bool writeLyrics(qint64 id,const QByteArray &data,const LyricsSaveSnapshot *snapshot=nullptr);
     mutable QString m_error;

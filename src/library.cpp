@@ -208,6 +208,38 @@ Track Library::track(qint64 id) const {
         return fromQuery(q);
     return {};
 }
+QHash<qint64,LyricsFilterState> Library::lyricsFilterStates(const QVector<qint64> &ids) const {
+    QHash<qint64,LyricsFilterState> result;
+    if(QThread::currentThread()!=thread()){
+        m_error=QStringLiteral("歌词筛选必须在资料库所属线程执行");return result;
+    }
+    QSet<qint64> seen;QVector<qint64> unique;
+    for(const auto id:ids)if(id>0&&!seen.contains(id)){seen.insert(id);unique.append(id);}
+    constexpr int batchSize=256;
+    for(qsizetype start=0;start<unique.size();start+=batchSize){
+        const int count=int(qMin<qsizetype>(batchSize,unique.size()-start));QStringList binds;
+        for(int i=0;i<count;++i)binds<<"?";
+        QSqlQuery q(m_db);
+        q.prepare("SELECT t.id,t.hash,t.file,t.title,t.artist,t.album,t.cover,t.lyrics,t.duration,t.plays,t.heard,"
+                  "t.favorite,t.cover_origin,t.added,lp.instrumental,s.value FROM tracks t "
+                  "LEFT JOIN lyrics_playback lp ON lp.track=t.id "
+                  "LEFT JOIN settings s ON s.key='lyrics.translationJudgment.v1.'||t.id "
+                  "WHERE t.id IN ("+binds.join(',')+")");
+        for(int i=0;i<count;++i)q.addBindValue(unique[start+i]);
+        if(!q.exec()){m_error=q.lastError().text();return {};}
+        while(q.next()){
+            LyricsFilterState state;state.track=fromQuery(q);state.instrumental=q.value(14).toBool();
+            const auto doc=QJsonDocument::fromJson(q.value(15).toByteArray());
+            const auto record=doc.isArray()&&!doc.array().isEmpty()?doc.array().first().toObject():QJsonObject{};
+            if(record["trackHash"].toString()==state.track.hash){
+                if(record["state"].toString()=="needs")state.judgment=TranslationJudgment::NeedsTranslation;
+                else if(record["state"].toString()=="not-needed")state.judgment=TranslationJudgment::NoTranslationNeeded;
+            }
+            result.insert(state.track.id,state);
+        }
+    }
+    return result;
+}
 QHash<qint64, Track> Library::tracksByIds(const QVector<qint64> &ids) const {
     QHash<qint64, Track> result;
     if (QThread::currentThread() != thread()) {
@@ -497,7 +529,7 @@ bool Library::removeManaged(const QVector<qint64> &ids){
     notifyChanged();return true;
 }
 namespace {
-bool snapshotFile(const QString &path,LyricFileSnapshot &snapshot,QString &error) {
+bool snapshotFile(const QString &path,LyricFileSnapshot &snapshot,QString &error,LyricsSaveMetrics &work) {
     snapshot.path=path;
     if(path.isEmpty())return true;
     const QFileInfo info(path);snapshot.exists=info.exists();
@@ -506,21 +538,22 @@ bool snapshotFile(const QString &path,LyricFileSnapshot &snapshot,QString &error
     if(!info.isFile()||!file.open(QIODevice::ReadOnly)){
         error=QStringLiteral("歌词无法读取，请刷新判断后重新选择。");return false;
     }
+    ++work.fileReads;
     const auto bytes=file.read(LyricsDocumentReader::MaximumBytes+1);
     if(file.error()!=QFileDevice::NoError||!file.atEnd()||bytes.size()>LyricsDocumentReader::MaximumBytes){
         error=QStringLiteral("歌词无法完整读取，请刷新判断后重新选择。");return false;
     }
-    snapshot.digest=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);return true;
+    snapshot.digest=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);++work.digestComputations;return true;
 }
 }
 LyricsSaveSnapshot Library::lyricsSaveSnapshot(qint64 id) const {
     LyricsSaveSnapshot result;const auto current=track(id);result.id=id;result.hash=current.hash;result.lyrics=current.lyrics;
     if(!current.id){result.error=QStringLiteral("歌曲已不存在，请刷新判断。");return result;}
     const auto destination=absolute(QString("Lyrics/track-%1.lrc").arg(id));
-    result.valid=snapshotFile(absolute(current.lyrics),result.source,result.error);
+    result.valid=snapshotFile(absolute(current.lyrics),result.source,result.error,m_lyricsSaveMetrics);
     if(result.valid){
         if(result.source.path==destination)result.target=result.source;
-        else result.valid=snapshotFile(destination,result.target,result.error);
+        else result.valid=snapshotFile(destination,result.target,result.error,m_lyricsSaveMetrics);
     }
     return result;
 }
@@ -548,6 +581,7 @@ bool Library::writeLyrics(qint64 id,const QByteArray &data,const LyricsSaveSnaps
     if(hadPrevious){
         QFile file(path);
         if(!QFileInfo(path).isFile()||!file.open(QIODevice::ReadOnly)){m_error=QStringLiteral("无法读取待替换的歌词文件");return false;}
+        ++m_lyricsSaveMetrics.fileReads;
         previous=file.read(LyricsDocumentReader::MaximumBytes+1);
         if(file.error()!=QFileDevice::NoError||!file.atEnd()||previous.size()>LyricsDocumentReader::MaximumBytes){m_error=QStringLiteral("无法备份待替换的歌词文件");return false;}
     }
