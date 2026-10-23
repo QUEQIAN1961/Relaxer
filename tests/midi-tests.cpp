@@ -77,6 +77,49 @@ class PlaybackDiagnostics {
 class MidiTests : public QObject {
     Q_OBJECT
   private slots:
+    void closeFailureKeepsDeviceAndCopyOwnership_data(){
+        QTest::addColumn<bool>("locked");QTest::newRow("removable")<<false;QTest::newRow("windows-held")<<true;
+    }
+    void closeFailureKeepsDeviceAndCopyOwnership(){
+        QFETCH(bool,locked);QTemporaryDir dir;const auto path=dir.filePath(QString(100,'x')+".mid");QVERIFY(write(path,midi()));
+        FakeMidi fake,otherFake;
+        MidiTransport t(dir.path(),[&](auto c,auto r){return fake.send(c,r);},[](auto p){return p;});
+        MidiTransport other(dir.path(),[&](auto c,auto r){return otherFake.send(c,r);},[](auto p){return p;});
+        QVERIFY(t.open(path));QVERIFY(other.open(path));const auto copy=t.openedPath(),otherCopy=other.openedPath();QVERIFY(copy!=otherCopy);
+        HANDLE held=INVALID_HANDLE_VALUE;
+        if(locked){held=CreateFileW(reinterpret_cast<LPCWSTR>(copy.utf16()),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);QVERIFY(held!=INVALID_HANDLE_VALUE);}
+        fake.failOn="close ";QVERIFY(!t.close());QVERIFY(t.isOpen());QCOMPARE(t.errorCode(),quint32(275));
+        QCOMPARE(t.errorDomain(),MidiTransport::ErrorDomain::NativeMci);QCOMPARE(t.errorStage(),QString("close"));
+        QCOMPARE(QFileInfo::exists(copy),locked);QCOMPARE(t.ownedTemporaryPath(),locked?copy:QString());
+        QVERIFY(QFileInfo::exists(otherCopy));QVERIFY(QFileInfo::exists(path));QVERIFY(!t.open(path));
+        if(locked)CloseHandle(held);
+        fake.failOn.clear();QVERIFY(t.close());QVERIFY(!t.isOpen());QVERIFY(!QFileInfo::exists(copy));QVERIFY(t.ownedTemporaryPath().isEmpty());
+        QCOMPARE(t.errorDomain(),MidiTransport::ErrorDomain::None);QCOMPARE(t.errorCode(),quint32(0));
+        QVERIFY(t.close());QVERIFY(t.open(path));QVERIFY(t.openedPath()!=otherCopy);QVERIFY(t.close());
+        QVERIFY(other.close());QFile source(path);QVERIFY(source.open(QIODevice::ReadOnly));QCOMPARE(source.readAll(),midi());
+    }
+    void destructorRetriesOwnedCopyAfterFailedClose(){
+        QTemporaryDir dir;const auto path=dir.filePath(QString(100,'x')+".mid");QVERIFY(write(path,midi()));FakeMidi fake;QString copy;
+        {
+            MidiTransport t(dir.path(),[&](auto c,auto r){return fake.send(c,r);},[](auto p){return p;});QVERIFY(t.open(path));copy=t.openedPath();
+            const auto held=CreateFileW(reinterpret_cast<LPCWSTR>(copy.utf16()),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);QVERIFY(held!=INVALID_HANDLE_VALUE);
+            fake.failOn="close ";const bool closed=t.close();CloseHandle(held);QVERIFY(!closed);QCOMPARE(t.ownedTemporaryPath(),copy);fake.failOn.clear();
+        }
+        QVERIFY(!QFileInfo::exists(copy));QVERIFY(QFileInfo::exists(path));
+    }
+    void localErrorDomainAndSuccessfulReset(){
+        QTemporaryDir dir;FakeMidi fake;MidiTransport t(dir.path(),[&](auto c,auto r){return fake.send(c,r);});
+        QVERIFY(!t.open(dir.filePath("missing.mid")));QCOMPARE(t.errorDomain(),MidiTransport::ErrorDomain::Local);
+        QCOMPARE(t.errorStage(),QString("read"));QCOMPARE(t.errorCode(),MidiTransport::LocalErrorBase|quint32(MidiTransport::LocalError::Read));QVERIFY(fake.commands.isEmpty());
+        const auto path=dir.filePath("file.mid");
+        for(const auto &bytes:{QByteArray{},QByteArray("not a MIDI header")}){
+            QVERIFY(write(path,bytes));QVERIFY(!t.open(path));QCOMPARE(t.errorStage(),QString("header"));
+            QCOMPARE(t.errorCode(),MidiTransport::LocalErrorBase|quint32(MidiTransport::LocalError::Header));QVERIFY(!t.error().isEmpty());
+        }
+        QVERIFY(write(path,midi()));QVERIFY(t.open(path));QCOMPARE(t.errorDomain(),MidiTransport::ErrorDomain::None);QCOMPARE(t.errorCode(),quint32(0));
+        fake.failOn="play ";QVERIFY(!t.play());QCOMPARE(t.errorDomain(),MidiTransport::ErrorDomain::NativeMci);
+        fake.failOn.clear();QVERIFY(t.play());QCOMPARE(t.errorCode(),quint32(0));QVERIFY(t.error().isEmpty());QVERIFY(t.close());
+    }
     void nativeOpen_data() {
         QTest::addColumn<int>("format");
         QTest::addColumn<QString>("name");

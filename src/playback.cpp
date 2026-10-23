@@ -11,6 +11,7 @@
 #include <QMediaDevices>
 #include <QSaveFile>
 #include <QUrl>
+#include <QDebug>
 #include <algorithm>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -445,7 +446,7 @@ void Playback::haltTransport() {
     m_player.stop();
 }
 void Playback::stopMidi() {
-    m_midiBackend->close();
+    if(!m_midiBackend->close())qWarning().noquote()<<"Playback::stopMidi:"<<m_midiBackend->error();
     m_midi = false;
     m_midiPlaying = false;
 }

@@ -7,6 +7,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QUuid>
+#include <QDebug>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -51,7 +52,7 @@ MidiTransport::MidiTransport(QString root, Sender sender, PathResolver resolver)
       m_sender(sender ? std::move(sender) : nativeSend),
       m_resolver(resolver ? std::move(resolver) : shortPath) {}
 MidiTransport::~MidiTransport() {
-    close();
+    if(!close())qWarning().noquote()<<"MIDI cleanup incomplete:"<<m_error<<"ownedCopy="<<m_temporaryPath;
 }
 void MidiTransport::diagnostic(const QString &root, const QJsonObject &event) {
     static QMutex mutex;
@@ -72,12 +73,20 @@ void MidiTransport::diagnostic(const QString &root, const QJsonObject &event) {
     value["backend"] = "Windows MCI sequencer";
     file.write(QJsonDocument(value).toJson(QJsonDocument::Compact) + '\n');
 }
-bool MidiTransport::fail(const QString &operation, const QString &message, quint32 code) const {
+void MidiTransport::clearError() const {
+    m_error.clear();m_code=0;m_domain=ErrorDomain::None;m_stage.clear();
+}
+bool MidiTransport::localFailure(const QString &operation,const QString &message,LocalError code) const {
+    return fail(operation,message,LocalErrorBase|quint32(code),ErrorDomain::Local);
+}
+bool MidiTransport::fail(const QString &operation, const QString &message, quint32 code,ErrorDomain domain) const {
     m_code = code;
+    m_domain=domain;m_stage=operation;
     m_error =
         QString("MIDI %1 失败（%2）：%3。诊断：data/logs/midi.jsonl").arg(operation).arg(code).arg(message);
     diagnostic(m_root, {{"operation", operation},
                         {"code", double(code)},
+                        {"errorDomain",domain==ErrorDomain::Local?"local":"native-mci"},
                         {"description", message},
                         {"originalPath", m_original},
                         {"openedPath", m_path},
@@ -94,7 +103,7 @@ bool MidiTransport::send(const QString &operation, const QString &command, QStri
         if (mciGetErrorStringW(code, text, 512))
             description = QString::fromWCharArray(text);
 #endif
-        return fail(operation, description, code);
+        return fail(operation, description, code,ErrorDomain::NativeMci);
     }
     if (operation != "position")
         diagnostic(
@@ -107,15 +116,14 @@ bool MidiTransport::open(const QString &path) {
         return false;
     m_original = QFileInfo(path).absoluteFilePath();
     m_path.clear();
-    m_error.clear();
-    m_code = 0;
+    clearError();
     QFile source(m_original);
     if (!source.open(QIODevice::ReadOnly))
-        return fail("read", source.errorString());
+        return localFailure("read", source.errorString(),LocalError::Read);
     // Let the native decoder validate events; reject empty/non-SMF input first.
     const auto header = source.peek(14);
     if (header.size() != 14 || header.left(4) != "MThd")
-        return fail("header", "文件为空或不是 Standard MIDI File");
+        return localFailure("header", "文件为空或不是 Standard MIDI File",LocalError::Header);
     m_path = m_resolver(m_original);
     // The legacy Windows sequencer rejects long element names (275), including
     // valid 64-character imported hashes. A Unicode API alone does not fix this.
@@ -123,14 +131,14 @@ bool MidiTransport::open(const QString &path) {
     if (m_path.size() >= 128) {
         m_copy = std::make_unique<QTemporaryFile>(QDir::tempPath() + "/rmXXXXXX.mid");
         if (!m_copy->open())
-            return fail("cache", m_copy->errorString());
+            return localFailure("cache", m_copy->errorString(),LocalError::Cache);
         while (!source.atEnd()) {
             const auto bytes = source.read(1024 * 1024);
             if ((bytes.isEmpty() && source.error() != QFile::NoError) || m_copy->write(bytes) != bytes.size())
-                return fail("cache", "无法创建 MIDI 临时副本");
+                return localFailure("cache", "无法创建 MIDI 临时副本",LocalError::Cache);
         }
         if (!m_copy->flush())
-            return fail("cache", m_copy->errorString());
+            return localFailure("cache", m_copy->errorString(),LocalError::Cache);
         // QTemporaryFile may retain its native handle after close(). Release
         // the creator before MCI opens it with the legacy driver's share mode.
         m_temporaryPath = m_copy->fileName();
@@ -138,7 +146,7 @@ bool MidiTransport::open(const QString &path) {
         m_copy.reset();
         m_path = m_resolver(m_temporaryPath);
         if (m_path.size() >= 128)
-            return fail("cache", "系统临时目录路径过长，无法提供系统合成器兼容路径");
+            return localFailure("cache", "系统临时目录路径过长，无法提供系统合成器兼容路径",LocalError::Cache);
     }
     source.close();
     int devices = -1;
@@ -154,36 +162,42 @@ bool MidiTransport::open(const QString &path) {
                         {"temporaryCopy", !m_temporaryPath.isEmpty()},
                         {"cacheCreated", QFileInfo::exists(m_path)}});
     if (!send("open", QString("open \"%1\" type sequencer alias %2").arg(m_path, m_alias))) {
-        close();
+        cleanupCopy();
         return false;
     }
     m_open = true;
     QString length;
     if (!send("time-format", "set " + m_alias + " time format milliseconds") ||
         !send("length", "status " + m_alias + " length", &length)) {
-        close();
+        // Cleanup must not hide the operation that made open() fail.
+        const auto message=m_error,stage=m_stage;const auto code=m_code;const auto domain=m_domain;
+        close();m_error=message;m_stage=stage;m_code=code;m_domain=domain;
         return false;
     }
     bool ok = false;
     m_duration = length.toLongLong(&ok);
     if (!ok || m_duration <= 0) {
-        fail("length", "MIDI 没有有效播放时长");
-        close();
+        localFailure("length", "MIDI 没有有效播放时长",LocalError::Duration);
+        const auto message=m_error,stage=m_stage;const auto code=m_code;const auto domain=m_domain;
+        close();m_error=message;m_stage=stage;m_code=code;m_domain=domain;
         return false;
     }
     m_position = 0;
     return true;
 }
 bool MidiTransport::play() {
-    return m_open && send("play", "play " + m_alias);
+    if(!m_open||!send("play", "play " + m_alias))return false;
+    clearError();return true;
 }
 bool MidiTransport::pause() {
-    return m_open && send("pause", "pause " + m_alias);
+    if(!m_open||!send("pause", "pause " + m_alias))return false;
+    clearError();return true;
 }
 bool MidiTransport::seek(qint64 position) {
     if (!m_open || !send("seek", QString("seek %1 to %2").arg(m_alias).arg(position)))
         return false;
     m_position = position;
+    clearError();
     return true;
 }
 qint64 MidiTransport::position() const {
@@ -196,20 +210,30 @@ qint64 MidiTransport::position() const {
     }
     return m_position;
 }
+bool MidiTransport::cleanupCopy() {
+    m_copy.reset();
+    if(m_temporaryPath.isEmpty())return true;
+    // Only the unique file created by this instance is owned. Keep its name
+    // on failed removal so a later close/reopen/destructor can retry.
+    if(QFile::remove(m_temporaryPath)||!QFileInfo::exists(m_temporaryPath)){
+        m_temporaryPath.clear();return true;
+    }
+    diagnostic(m_root,{{"operation","cleanup"},{"ownedCopy",m_temporaryPath},{"deviceStillOpen",m_open},{"removed",false}});
+    return false;
+}
 bool MidiTransport::close() {
     if (m_open) {
         send("stop", "stop " + m_alias);
-        if (!send("close", "close " + m_alias))
+        if (!send("close", "close " + m_alias)) {
+            cleanupCopy();
             return false;
+        }
     }
     m_open = false;
     m_duration = 0;
     m_position = 0;
-    m_copy.reset();
-    if (!m_temporaryPath.isEmpty()) {
-        QFile::remove(m_temporaryPath);
-        m_temporaryPath.clear();
-    }
+    if(!cleanupCopy())return localFailure("cleanup","MIDI 临时副本仍被占用，将在后续关闭时重试",LocalError::Cleanup);
+    clearError();
     return true;
 }
 } // namespace relaxer
