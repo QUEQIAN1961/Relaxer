@@ -1,0 +1,11 @@
+Relaxer — License notice / 许可证说明
+
+Copyright (C) 2026 QUEQIAN1961 and Relaxer contributors.
+
+Relaxer-authored code is licensed under GNU General Public License version 3.0 (GPL-3.0-only). This license grant includes the Relaxer-authored code distributed in v0.2.0 (43203314012f509a2f83e4558b9206001b2e5f75) and v0.2.1 (eb3027eed47109ab300047e8fc2d0fbe0246081a). See LICENSE / LICENSE.txt for the full terms.
+
+The original release archives are preserved byte-for-byte. This notice and the separate license accompany those historical archives; absence of this newly added file inside an older archive does not change the license grant above.
+
+Third-party components and adapted code retain their own copyrights, licenses and applicable exceptions. This grant does not relicense them. Keep their notices and license directories. See THIRD_PARTY_NOTICES.md and the actual distributed components for their source and redistribution conditions.
+
+本项目由 Relaxer 作者拥有权利的代码采用 GPL-3.0-only，适用于上列 0.2.0 和 0.2.1 构建。原始发行归档不改动，新增许可证与本说明作为独立文件随发行提供。第三方组件及改编代码保留原作者权利、各自许可和适用例外，不被本声明重新授权；请保留其许可目录与声明。音乐、封面、歌词和外部服务内容不属于本许可证授权范围。
