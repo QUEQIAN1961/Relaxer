@@ -469,6 +469,8 @@ if(RELAXER_ENABLE_QML)
   target_compile_definitions(Relaxer PRIVATE RELAXER_ENABLE_QML=1
     RELAXER_QML_MODULE_FILENAME="$<TARGET_FILE_NAME:relaxer_qml_runtime>")
   if(BUILD_TESTING)
+  add_executable(relaxer_exit_guard_tests EXCLUDE_FROM_ALL tests/exit-guard-tests.cpp)
+  target_link_libraries(relaxer_exit_guard_tests PRIVATE relaxer_qml Qt6::Test)
   add_executable(relaxer_manual_ux13_tests tests/manual-ux13-tests.cpp)
   target_link_libraries(relaxer_manual_ux13_tests PRIVATE relaxer_qml Qt6::Test)
   relaxer_add_qt_test(relaxer_manual_ux13 relaxer_manual_ux13_tests)

@@ -278,14 +278,19 @@ Item {
         width: Math.min(460, page.width - 20)
         modal: true
         title: "外观尚未保存"
+        property string saveError: ""
+        onOpened: saveError = ""
         onRejected: page.leaveRejected()
-        contentItem: Label { text: "修改尚未保存，是否退出？"; wrapMode: Text.Wrap }
+        contentItem: ColumnLayout {
+            Label { text: "修改尚未保存，是否退出？"; wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; visible: unsaved.saveError.length > 0; text: unsaved.saveError; wrapMode: Text.Wrap; color: Theme.accent }
+        }
         footer: DialogButtonBox {
             objectName: "appearanceUnsavedActions"
             alignment: Qt.AlignRight; spacing: 8; leftPadding: 18; rightPadding: 18; topPadding: 10; bottomPadding: 16
             ShellButton { objectName: "appearanceLeaveCancel"; text: "取消"; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: unsaved.reject() }
             ShellButton { objectName: "appearanceLeaveDiscard"; text: "放弃修改"; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: { settingsBridge.discardAppearance(); unsaved.close(); page.backRequested() } }
-            ShellButton { objectName: "appearanceLeaveSave"; text: "保存"; primary: true; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: { if (settingsBridge.saveAppearance(false)) { unsaved.close(); page.backRequested() } } }
+            ShellButton { objectName: "appearanceLeaveSave"; text: "保存"; primary: true; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: { if (settingsBridge.saveAppearance(false)) { unsaved.close(); page.backRequested() } else unsaved.saveError = settingsBridge.status } }
         }
     }
     ConfirmDialog {

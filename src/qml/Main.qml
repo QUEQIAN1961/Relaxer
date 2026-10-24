@@ -53,6 +53,7 @@ ApplicationWindow {
     property var pageGrab: null
     property string settingsSection: "settings"
     property var pendingPageAction: null
+    property bool pendingAppearanceClose: false
     property bool bulkActive: false
     property var bulkKeys: []
     property var bulkOwner: null
@@ -206,6 +207,13 @@ ApplicationWindow {
     Timer{id:searchFocus;interval:260;onTriggered:localPage.focusSearch()}
     onClosing: close => {
         if(playbackBridge.nonInteractiveExit()){playbackBridge.requestExit(1);return}
+        if (settingsBridge.appearanceDirty) {
+            close.accepted=false
+            pendingAppearanceClose=true
+            pendingPageAction=null
+            appearancePage.confirmLeave()
+            return
+        }
         if (!allowClose && (importBridge.busy || translationBridge.unfinished || lyricsSearchBridge.busy)) { close.accepted=false; closeConfirm.open() }
         else if(!allowClose && !exitRequested && settingsBridge.values.closeToTray && uiIntegration.trayAvailable){close.accepted=false;root.hide();uiIntegration.showTray()}
         else if(!playbackBridge.requestExit()){close.accepted=false;exitSaveFailure.open()}
@@ -293,7 +301,22 @@ ApplicationWindow {
                             currentIndex:root.settingsSection==="ai"?1:root.settingsSection==="appearance"?2:root.settingsSection==="log"?3:0
                             Item { SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:16;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
                             ScrollView { id:aiScroll;contentWidth:availableWidth;clip:true;leftPadding:34;rightPadding:34;topPadding:28;bottomPadding:16;AiPage{width:aiScroll.availableWidth;onBackRequested:root.changePage(function(){root.settingsSection="settings"})} }
-                            AppearancePage { id:appearancePage;onBackRequested:{const action=root.pendingPageAction;root.pendingPageAction=null;root.settingsSection="settings";root.changePage(action||function(){root.settingsSection="settings"})} onLeaveRejected:root.pendingPageAction=null }
+                            AppearancePage {
+                                id:appearancePage
+                                onBackRequested:{
+                                    if(root.pendingAppearanceClose){
+                                        root.pendingAppearanceClose=false
+                                        // Resume through the existing task, playback-save and import guards.
+                                        Qt.callLater(root.requestQuit)
+                                        return
+                                    }
+                                    const action=root.pendingPageAction;root.pendingPageAction=null;root.settingsSection="settings";root.changePage(action||function(){root.settingsSection="settings"})
+                                }
+                                onLeaveRejected:{
+                                    root.pendingPageAction=null
+                                    if(root.pendingAppearanceClose){root.pendingAppearanceClose=false;root.exitRequested=false}
+                                }
+                            }
                             VersionLogPage{onBackRequested:root.changePage(function(){root.settingsSection="settings"})}
                         }
                     }
