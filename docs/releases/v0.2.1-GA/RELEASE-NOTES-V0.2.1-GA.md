@@ -34,7 +34,7 @@
 
 本次增量没有新的独立 Harness 验收结论，也未重新执行全部历史测试、完整 47 项启动矩阵、WASAPI 或长期播放测试。具体运行结果以 `VERIFICATION.json` 为准。原 0.2.1 的独立验收结论属于原版本。
 
-本次仅同步版本命名与版本日志，0.2.1-GA 的程序文件和运行库保持原已验证字节；压缩包重新生成并更新文件哈希。
+本次同步程序内版本日志和发布资料，重新构建 0.2.1-GA；业务逻辑保持原样，程序及压缩包哈希同步更新。
 
 项目代码采用 GPL-3.0-only；第三方组件保留各自许可证。发行包附许可文件与第三方声明。
 
@@ -72,6 +72,6 @@ Developer checks cover 14 playlist scenarios (16 QtTest passes including setup/c
 
 This patch has no new independent Harness verdict. The full historical suite, complete 47-case startup matrix, WASAPI, and long-duration playback were not rerun. See `VERIFICATION.json` for actual results. The original 0.2.1 Harness verdict applies to that historical build.
 
-This distribution refresh updates naming and release history only. The verified 0.2.1-GA program and runtime bytes are preserved; archives and their checksums are regenerated.
+This refresh updates the embedded version log and release documents, then rebuilds 0.2.1-GA. Business logic remains unchanged; binary and archive checksums are updated.
 
 Relaxer-authored code is GPL-3.0-only; dependencies retain their own licenses. License files and third-party notices are included.
