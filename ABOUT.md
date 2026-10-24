@@ -4,7 +4,7 @@
 
 Relaxer 是面向 Windows 的本地音乐播放器，使用 C++17、Qt 6 和 QML 构建。它将音乐库、歌单、播放队列、滚动歌词与自定义外观放在同一个界面中，为日常听音乐提供一个安静的位置。
 
-当前正式版 0.2.1-GA 默认采用 QML 界面，并保留 Widgets 兼容模式；0.2.1 与 0.2.0 历史稳定版仍提供原始下载。本地播放可离线使用，在线歌词与可选翻译功能由用户自行选择。
+当前正式版 0.2.1-GA 默认采用 QML 界面，并保留 Widgets 兼容模式；0.2.1 与 0.2.0 历史稳定版仍提供原始下载，另保留 0.2.0-rc2 历史预发行版。本地播放可离线使用，在线歌词与可选翻译功能由用户自行选择。
 
 - 维护者：[QUEQIAN1961](https://github.com/QUEQIAN1961)
 - 下载：[GitHub Releases](https://github.com/QUEQIAN1961/Relaxer/releases)
@@ -16,7 +16,7 @@ Relaxer 是面向 Windows 的本地音乐播放器，使用 C++17、Qt 6 和 QML
 
 Relaxer is a local music player for Windows, built with C++17, Qt 6, and QML. It brings a music library, playlists, a playback queue, synced lyrics, and customizable themes into one interface—a quiet place for everyday listening.
 
-The current stable release, 0.2.1-GA, uses QML by default and retains a Widgets compatibility mode. Original downloads for 0.2.1 and 0.2.0 remain available. Local playback works offline; online lyrics and optional translation are user-selected features.
+The current stable release, 0.2.1-GA, uses QML by default and retains a Widgets compatibility mode. Original downloads for 0.2.1 and 0.2.0 remain available, along with the historical 0.2.0-rc2 prerelease. Local playback works offline; online lyrics and optional translation are user-selected features.
 
 - Maintainer: [QUEQIAN1961](https://github.com/QUEQIAN1961)
 - Downloads: [GitHub Releases](https://github.com/QUEQIAN1961/Relaxer/releases)

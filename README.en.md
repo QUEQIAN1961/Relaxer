@@ -12,11 +12,14 @@ A quiet place for your local music. Relaxer is a Windows music player built with
 
 Ready-to-run packages are available for **Windows x64**. Dependencies are bundled; you do not need a Qt installation or development environment.
 
-| Version | Interface | Windows download | Source |
-| --- | --- | --- | --- |
-| **0.2.1-GA · Recommended** | QML by default; Widgets compatibility mode | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Source.zip) |
-| 0.2.1 · Previous stable version | QML by default; Widgets compatibility mode | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Source.zip) |
-| 0.2.0 · Previous stable version | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Win64-Portable.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Source.zip) |
+| Version | Interface | Windows download | Source | Release notes |
+| --- | --- | --- | --- | --- |
+| **0.2.1-GA · Recommended** | QML by default; Widgets compatibility mode | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Source.zip) | [Release notes](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md) |
+| 0.2.1 · Previous stable version | QML by default; Widgets compatibility mode | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Source.zip) | [Release notes](docs/releases/v0.2.1/RELEASE-NOTES-V0.2.1.md) |
+| 0.2.0 · Previous stable version | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Win64-Portable.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Source.zip) | [Release notes](docs/releases/v0.2.0/V0.2.0-ReleaseNotes.md) |
+| 0.2.0-rc2 · Historical prerelease | Widgets | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-rc2/Relaxer-V0.2.0-rc2-win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-rc2/Relaxer-V0.2.0-rc2-foundation-src.zip) | [Release notes](docs/releases/v0.2.0-rc2/V0.2.0-RC2-ReleaseNotes.md) |
+
+The four release entries above include three stable versions and the historical RC2 prerelease. Their documentation is grouped under [`docs/releases/`](docs/releases/). Current application source is in `src/`.
 
 Each release includes `SHA256SUMS.txt`. GitHub's automatic Source code archives contain source, not a ready-to-run Windows application.
 
@@ -34,7 +37,7 @@ Version 0.2.1-GA starts the QML interface by default. `RelaxerQml.cmd` remains a
 
 Local playback works offline. Online lyrics and translation require a network connection. AI translation uses your provider configuration and requires explicit confirmation for paid requests.
 
-0.2.1-GA fixes duplicate playlist creation, adds a larger playlist cover with a smooth collapsing header, and removes the extra fullscreen button from the expanded player. See the [release notes](RELEASE-NOTES-V0.2.1-GA.md).
+0.2.1-GA fixes duplicate playlist creation, adds a larger playlist cover with a smooth collapsing header, and removes the extra fullscreen button from the expanded player. See the [release notes](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md).
 
 ## Features
 
@@ -46,7 +49,7 @@ Local playback works offline. Online lyrics and translation require a network co
 
 ## Upgrading from 0.2.0 or 0.2.1
 
-Exit the old application completely and back up the entire `data` folder. Place a **copy** of that folder beside the new launcher as `data`. Keep the original backup and do not let both versions write to the same data directory. Existing library, playlist, lyric, and settings storage is retained. See the [0.2.1-GA release notes](RELEASE-NOTES-V0.2.1-GA.md). Existing duplicate playlists are left for you to manage.
+Exit the old application completely and back up the entire `data` folder. Place a **copy** of that folder beside the new launcher as `data`. Keep the original backup and do not let both versions write to the same data directory. Existing library, playlist, lyric, and settings storage is retained. See the [0.2.1-GA release notes](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md). Existing duplicate playlists are left for you to manage.
 
 ## Verify a download
 
@@ -67,7 +70,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/m
 cmake --build build --target Relaxer RelaxerStart --parallel
 ```
 
-If Declarative uses a separate prefix, add `-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=<matching-prefix>`. See `scripts/` for dependency and deployment tools. Historical binaries at the source root support source preparation; use the full Win64 release package for normal use.
+If Declarative uses a separate prefix, add `-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=<matching-prefix>`. See `scripts/` for dependency and deployment tools. The source-root bootstrap launchers support building from source; use the full Win64 release package for normal use. To reproduce a published version, check out its release tag before building.
 
 ## Releases and verification
 

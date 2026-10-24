@@ -1,56 +1,31 @@
 {
-  "numericVersion": "0.2.1",
-  "prerelease": "",
-  "displayVersion": "V0.2.1",
-  "status": "FINAL RELEASE CANDIDATE — PENDING HARNESS APPROVAL",
   "applicationName": "Relaxer",
-  "organizationName": "Relaxer",
-  "baselineCommit": "1f1624bb123f1bbd1ab1d034beda57bd8a3e28cc",
-  "baselineTree": "f5aa504b6b51470acc4db8c3a9393e45e972baaf",
-  "stableCommit": "43203314012f509a2f83e4558b9206001b2e5f75",
-  "stableTag": "v0.2.0",
-  "defaultUi": "qml (RelaxerStart.exe)",
-  "optionalUi": "RelaxerStart.exe --widgets; --qml; --ui=widgets|qml",
-  "dataIdentityChanged": false,
-  "schemaChanged": false,
-  "officialReleaseApproved": false,
-  "publicPublicationAuthorized": false,
-  "classificationStorage": "existing Library settings rows keyed by stable trackId and content hash",
-  "releaseScope": "Version consolidation, release metadata and packaging only; R18 product code frozen",
-  "optionalQmlModule": "RelaxerQmlUi.dll",
-  "qmlLoadFailureExit": 11,
-  "moduleCodeLifetime": "Pinned until process exit; per-session QML and business objects are destroyed",
-  "independentAcceptance": "AWAITING HARNESS R19 FINAL ARTIFACT REVIEW",
-  "defectLedgerBeforeFix": {
-    "P0": 0,
-    "P1": 0,
-    "P2": 0,
-    "P3": 24,
-    "total": 24,
-    "note": "Historical R17-Final balance; includes D-R16-02, not the current balance"
-  },
-  "developerFixedPendingVerification": [],
-  "C1-P301": "Independently CLOSED/FIXED by Harness R14; preserved efficient scalar count",
-  "inheritedClosedByHarnessR13": [
-    "D-R12-01",
-    "D-R12-02",
-    "D-R12-03"
-  ],
-  "D-R14-01": "FIXED — independently confirmed by Harness R15",
-  "inheritedClosedByHarnessR14": [
-    "C1-P301"
-  ],
-  "paidRequestsDuringDevelopment": 0,
-  "runtimeDefaultUi": "widgets (unchanged)",
-  "D-R16-02": "FIXED — independently confirmed by Harness R18; delayed dialog exit 3 retained",
-  "defectLedgerCurrent": {
-    "P0": 0,
-    "P1": 0,
-    "P2": 0,
-    "P3": 25,
-    "reconciliation": "24 R17-Final - D-R16-02 + two R18 infrastructure P3; see delivery structured ledger"
-  },
-  "userManualAudioCheck": "PASS — user-reported audible playback only; prior accepted build, no claim of new-build listening",
-  "extendedHumanListening": "NOT FULLY VERIFIED",
-  "historicalAudioEndpoint": "R17-Final AUDIO ENDPOINT: VERIFIED; inherited because playback code unchanged"
+  "latestStableTag": "v0.2.1-GA",
+  "repository": "https://github.com/QUEQIAN1961/Relaxer",
+  "releases": [
+    {
+      "tag": "v0.2.1-GA",
+      "status": "stable",
+      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.1-GA",
+      "notes": "docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md"
+    },
+    {
+      "tag": "v0.2.1",
+      "status": "stable",
+      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.1",
+      "notes": "docs/releases/v0.2.1/RELEASE-NOTES-V0.2.1.md"
+    },
+    {
+      "tag": "v0.2.0",
+      "status": "stable",
+      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.0",
+      "notes": "docs/releases/v0.2.0/V0.2.0-ReleaseNotes.md"
+    },
+    {
+      "tag": "v0.2.0-rc2",
+      "status": "prerelease",
+      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.0-rc2",
+      "notes": "docs/releases/v0.2.0-rc2/V0.2.0-RC2-ReleaseNotes.md"
+    }
+  ]
 }

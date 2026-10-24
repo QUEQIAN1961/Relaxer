@@ -12,11 +12,14 @@
 
 当前提供 **Windows x64 便携版**，运行包自带依赖，无需安装 Qt 或开发环境。
 
-| 版本 | 界面 | Windows 下载 | 源码 |
-| --- | --- | --- | --- |
-| **0.2.1-GA · 推荐** | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Source.zip) |
-| 0.2.1 · 历史稳定版 | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Source.zip) |
-| 0.2.0 · 历史稳定版 | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Win64-Portable.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Source.zip) |
+| 版本 | 界面 | Windows 下载 | 源码 | 发布说明 |
+| --- | --- | --- | --- | --- |
+| **0.2.1-GA · 推荐** | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Source.zip) | [发布说明](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md) |
+| 0.2.1 · 历史稳定版 | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Source.zip) | [发布说明](docs/releases/v0.2.1/RELEASE-NOTES-V0.2.1.md) |
+| 0.2.0 · 历史稳定版 | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Win64-Portable.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Source.zip) | [发布说明](docs/releases/v0.2.0/V0.2.0-ReleaseNotes.md) |
+| 0.2.0-rc2 · 历史预发行版 | Widgets | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-rc2/Relaxer-V0.2.0-rc2-win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-rc2/Relaxer-V0.2.0-rc2-foundation-src.zip) | [发布说明](docs/releases/v0.2.0-rc2/V0.2.0-RC2-ReleaseNotes.md) |
+
+以上四个发行条目包含三个稳定版本和历史 RC2 预发行版，版本文档集中于 [`docs/releases/`](docs/releases/)，当前程序源码位于 `src/`。
 
 各 Release 均附 `SHA256SUMS.txt`。GitHub 自动生成的 Source code 归档是源码，不是可直接运行的 Windows 播放器。
 
@@ -34,7 +37,7 @@
 
 日常本地播放可以离线使用。在线歌词和翻译需要网络，AI 翻译需要自行配置提供方；付费请求仍需用户明确确认。
 
-0.2.1-GA 修复歌单重复创建，加入大封面与平滑收起的歌单页头，并移除展开播放页多余的全屏按钮。详见 [发布说明](RELEASE-NOTES-V0.2.1-GA.md)。
+0.2.1-GA 修复歌单重复创建，加入大封面与平滑收起的歌单页头，并移除展开播放页多余的全屏按钮。详见 [发布说明](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md)。
 
 ## 功能
 
@@ -46,7 +49,7 @@
 
 ## 从 0.2.0 或 0.2.1 升级
 
-完全退出旧程序，备份整个 `data` 目录，再将**资料副本**放到新版本启动器旁的 `data`。保留原备份，不要让两个版本同时写入同一份资料。曲库、歌单、歌词与设置沿用既有存储；升级说明见 [0.2.1-GA 发布说明](RELEASE-NOTES-V0.2.1-GA.md)。既有重复歌单保留，由用户自行管理。
+完全退出旧程序，备份整个 `data` 目录，再将**资料副本**放到新版本启动器旁的 `data`。保留原备份，不要让两个版本同时写入同一份资料。曲库、歌单、歌词与设置沿用既有存储；升级说明见 [0.2.1-GA 发布说明](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md)。既有重复歌单保留，由用户自行管理。
 
 ## 校验下载
 
@@ -67,7 +70,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/m
 cmake --build build --target Relaxer RelaxerStart --parallel
 ```
 
-若 Declarative 安装在单独前缀，配置时加入 `-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=<对应前缀>`。依赖和部署脚本见 `scripts/`。源码根的历史预编译启动器用于源码准备；直接使用请选择 Release 的完整 Win64 包。
+若 Declarative 安装在单独前缀，配置时加入 `-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH=<对应前缀>`。依赖和部署脚本见 `scripts/`。源码根的引导启动器用于从源码准备环境；直接使用请选择 Release 的完整 Win64 包。复现已发布版本时，请先切换到对应发行标签再构建。
 
 ## 发布与验证
 
