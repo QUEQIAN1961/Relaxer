@@ -1,9 +1,32 @@
-# 第三方组件
+# 第三方组件 / Third-party components
 
-Relaxer 主程序使用 C++17、Qt 6 Core / Gui / Widgets / Sql / Multimedia / Svg，以共享库形式运行。Qt 组件与插件的许可应以实际下载的 MSYS2 软件包及收集的 `third-party-licenses` 为准。
+本文说明主项目许可证的边界。第三方组件保留自己的版权、许可证与源代码提供条件，不因仓库公开或主项目选择许可证而改变。
 
-FFmpeg / ffprobe 用于本地音频标签、时长、封面读取，以及首次准备后对稀有格式的转码。`third_party/ffmpeg-7.1.tar.xz` 是随包附带的官方源码（约 10.5MB，LGPL-2.1-or-later），首次准备在本地编译精简解码器，不再联网下载；编译出的程序不另放进播放器安装目录以外的发行包。MIDI 在 Windows 上使用系统合成器。歌词可查询 LRCLIB、Lyrics.ovh，以及网易云、QQ 音乐、酷狗的非官方接口；外语译文在来源没有翻译时尝试免密钥在线翻译。繁简转换使用 OpenCC STCharacters 单字表，Apache-2.0。所分发运行库里的 FFmpeg 插件许可位于实际安装的软件包中。
+## Qt
 
-Windows 原生启动器与数据库锁检查组件由 MinGW-w64 GCC 交叉编译，静态链接 GCC 运行库。运行库相关许可保留在 `licenses/startup`。首次准备窗口、缓存所有权检查、Windows 进程捕获等代码根据用户提供的 Harbor C++ V1.4 项目改编，使用独立的 Relaxer 路径、标记和环境变量。
+Relaxer 使用 Qt 6 Core、Gui、Widgets、Sql、Multimedia、Svg、Network、Qml、Quick、QuickControls2 等共享库与插件。开发测试还使用 Qt Test。实际发行的版本与许可证以 Win64 包中的 `third-party-licenses/`（0.2.0 位于 `runtime/third-party-licenses/`）及对应组件为准。
 
-播放器源代码随包提供，便于修改与重新链接。运行库收集时保留 MSYS2 第三方许可文本。发行或商业使用前，请核对实际运行库的许可及源代码提供义务。
+Qt 源码与许可证：[Qt 下载](https://download.qt.io/)、[Qt 许可说明](https://www.qt.io/licensing/)、[Qt 源码仓库](https://code.qt.io/)。
+
+## FFmpeg / FFprobe
+
+FFmpeg、FFprobe 和 Qt 多媒体插件用于媒体探测、封面提取及音频解码。发行包采用实际收集的 MSYS2 构建；某些构建启用了 GPL 组件，不能将整个运行包统称为 LGPL 或 MIT。版本与构建配置可由包内 `ffmpeg -version` / `ffprobe -version` 查看，对应的 GPL/LGPL 文本保留在第三方许可目录中。
+
+仓库内 `third_party/ffmpeg-7.1.tar.xz` 是历史源码准备流程使用的 FFmpeg 7.1 上游源码，不能据此推断当前所有运行库也是 7.1。
+
+源码与构建资料：[FFmpeg 源码](https://ffmpeg.org/download.html)、[FFmpeg 许可说明](https://ffmpeg.org/legal.html)、[MSYS2 构建配方](https://github.com/msys2/MINGW-packages)。获取对应源码时须匹配所分发二进制的版本、补丁与构建选项。
+
+## 其他依赖与启动器
+
+- OpenCC 的 STCharacters 字表：Apache-2.0，原始归属与许可保留。
+- MinGW-w64/GCC、libstdc++ 及其他运行库：保留 `licenses/startup/` 和发行包中对应许可文本；适用的运行库例外不改变其他组件的许可证。
+- SQLite、图片编解码器、TLS、压缩库及其他实际依赖：以发行包的组件和许可目录为准。
+- 原生首次准备窗口、缓存所有权及进程捕获部分根据用户提供的 Harbor C++ V1.4 项目改编，使用独立的 Relaxer 路径、标记及环境变量；原作者的权利与声明不因本次发布被移除。
+
+发行包保留共享库、插件和许可目录。修改并重新分发时，请保留各组件声明并履行对应许可证。歌词、音乐、封面以及外部服务内容的权利不由本仓库许可证授予。
+
+## English
+
+The project license covers Relaxer-authored code; dependencies retain their own copyrights, licenses, exceptions, and corresponding-source requirements. Qt modules are dynamically linked. The distributed MSYS2 FFmpeg build may include GPL components; the bundled binaries must not all be described as LGPL or MIT. The historical FFmpeg 7.1 source archive does not identify the version of every current runtime library.
+
+Keep all shipped license directories. Match dependency source, patches, and build options to the binaries you redistribute. Upstream Qt, FFmpeg, and MSYS2 source/build links are listed above. OpenCC data, compiler runtimes, SQLite, codecs, TLS libraries, and the adapted Harbor startup code retain their applicable notices. Music, artwork, lyrics, and third-party service content are not licensed by this repository.
