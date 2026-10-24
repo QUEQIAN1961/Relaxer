@@ -4,7 +4,7 @@
 
 为本地音乐留一个安静的位置。Relaxer 是使用 C++17、Qt 6 和 QML 开发的 Windows 本地音乐播放器，提供音乐库、歌单、队列、滚动歌词和可自定义的外观。
 
-[下载最新版](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.1) · [全部版本](https://github.com/QUEQIAN1961/Relaxer/releases) · [反馈问题](https://github.com/QUEQIAN1961/Relaxer/issues)
+[下载最新版](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.1-GA) · [全部版本](https://github.com/QUEQIAN1961/Relaxer/releases) · [反馈问题](https://github.com/QUEQIAN1961/Relaxer/issues)
 
 ![Relaxer 0.2.1 主界面](docs/images/relaxer-v0.2.1.png)
 
@@ -14,7 +14,8 @@
 
 | 版本 | 界面 | Windows 下载 | 源码 |
 | --- | --- | --- | --- |
-| **0.2.1 · 推荐** | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Source.zip) |
+| **0.2.1-GA · 推荐** | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Source.zip) |
+| 0.2.1 · 历史稳定版 | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Source.zip) |
 | 0.2.0 · 历史稳定版 | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Win64-Portable.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Source.zip) |
 
 各 Release 均附 `SHA256SUMS.txt`。GitHub 自动生成的 Source code 归档是源码，不是可直接运行的 Windows 播放器。
@@ -25,13 +26,15 @@
 2. 双击解压目录中的 **`RelaxerStart.exe`**，然后导入本地音乐。
 3. 保留整个目录结构；不要直接在压缩包内运行或单独取出 EXE。
 
-0.2.1 默认打开 QML 界面；`RelaxerQml.cmd` 也可使用。兼容界面可运行：
+0.2.1-GA 默认打开 QML 界面；`RelaxerQml.cmd` 也可使用。兼容界面可运行：
 
 ```powershell
 .\RelaxerStart.exe --widgets
 ```
 
 日常本地播放可以离线使用。在线歌词和翻译需要网络，AI 翻译需要自行配置提供方；付费请求仍需用户明确确认。
+
+0.2.1-GA 修复歌单重复创建，加入大封面与平滑收起的歌单页头，并移除展开播放页多余的全屏按钮。详见 [发布说明](RELEASE-NOTES-V0.2.1-GA.md)。
 
 ## 功能
 
@@ -41,14 +44,14 @@
 - 调色盘和图片外观、字体设置、文字与进度条配色，以及左侧、右侧、底栏、展开播放的模糊调整。
 - 可选的歌词翻译流程；使用自己的提供方配置与凭据。
 
-## 从 0.2.0 升级
+## 从 0.2.0 或 0.2.1 升级
 
-完全退出旧程序，备份整个 `data` 目录，再将**资料副本**放到新版本启动器旁的 `data`。保留原备份，不要让两个版本同时写入同一份资料。曲库、歌单、歌词与设置沿用既有存储；升级说明见 [0.2.1 发布说明](RELEASE-NOTES-V0.2.1.md)。
+完全退出旧程序，备份整个 `data` 目录，再将**资料副本**放到新版本启动器旁的 `data`。保留原备份，不要让两个版本同时写入同一份资料。曲库、歌单、歌词与设置沿用既有存储；升级说明见 [0.2.1-GA 发布说明](RELEASE-NOTES-V0.2.1-GA.md)。既有重复歌单保留，由用户自行管理。
 
 ## 校验下载
 
 ```powershell
-Get-FileHash .\Relaxer-V0.2.1-Win64.zip -Algorithm SHA256
+Get-FileHash .\Relaxer-V0.2.1-GA-Win64.zip -Algorithm SHA256
 ```
 
 将结果与同一 Release 的 `SHA256SUMS.txt` 对照。
@@ -68,7 +71,9 @@ cmake --build build --target Relaxer RelaxerStart --parallel
 
 ## 发布与验证
 
-0.2.1 的 Windows 下载来自已通过用户测试和 Harness 专项独立验收的构建，构建提交为 `eb3027eed47109ab300047e8fc2d0fbe0246081a`。0.2.0 保留其历史稳定构建；两版的来源、哈希和验证范围见各自 Release。
+0.2.1-GA 整合用户已手动验收的歌单修复，再以 GA 标识重新构建，并完成开发方专项回归与原生包验证。本次 GA 补丁没有新增的 Harness 独立验收结论。
+
+历史 0.2.1 的 Windows 下载来自已通过用户测试和 Harness 专项独立验收的构建，构建提交为 `eb3027eed47109ab300047e8fc2d0fbe0246081a`。0.2.0 保留其历史稳定构建；两版的来源、哈希和验证范围见各自 Release。
 
 在线服务可用性、所有硬件/编码组合和长时间稳定性没有获得全面保证。反馈问题时请附版本、Windows 环境、复现步骤和脱敏日志；不要提交 API Key、个人数据库或音乐文件。
 
