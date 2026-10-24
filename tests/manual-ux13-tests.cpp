@@ -165,10 +165,11 @@ private slots:
         QCOMPARE(blur->property("displayText").toString(),QLocale().toString(12.3,'f',1));
         auto *input=blur->property("contentItem").value<QObject *>(); QVERIFY(input);
         QVERIFY(input->property("width").toReal()>=input->property("implicitWidth").toReal());
-        for (const char *name : {"appearanceBlur-blurRight","appearanceBlur-blurExpanded"}) {
-            auto *other=visual(root,name); QVERIFY(other);
-            QCOMPARE(bounds(other).center().y(),bounds(blur).center().y());
-        }
+        auto *rightBlur=visual(root,"appearanceBlur-blurRight"),*footerBlur=visual(root,"appearanceBlur-blurFooter"),*expandedBlur=visual(root,"appearanceBlur-blurExpanded");
+        QVERIFY(rightBlur && footerBlur && expandedBlur);
+        QCOMPARE(bounds(rightBlur).center().y(),bounds(blur).center().y());
+        QCOMPARE(bounds(footerBlur).center().y(),bounds(expandedBlur).center().y());
+        QVERIFY(bounds(footerBlur).top()>bounds(blur).bottom());
         QVERIFY(click(w,qobject_cast<QQuickItem *>(input)));
         QTest::keyClick(w,Qt::Key_A,Qt::ControlModifier);
         for (char character : QByteArray("23.4")) QTest::keyClick(w,Qt::Key(character));

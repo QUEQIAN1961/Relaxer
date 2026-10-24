@@ -14,7 +14,7 @@ namespace relaxer {
 QJsonObject AppearanceStore::defaults() {
     return {{"mode", "palette"},    {"left", "#f5f5f7"},     {"right", "#ffffff"}, {"accent", "#e5455f"},
             {"leftInk", "#25252b"}, {"rightInk", "#25252b"}, {"muted", "#86818a"}, {"customText", false},
-            {"mutedBold", false},   {"shareLR", false},      {"blurLeft", 0},      {"blurRight", 0}, {"blurExpanded", 15}, {"customProgressColors", false},
+            {"mutedBold", false},   {"shareLR", false},      {"blurLeft", 0},      {"blurRight", 0}, {"blurFooter", 0}, {"blurExpanded", 15}, {"customProgressColors", false},
             {"customFooter", false}, {"footer", "#f4f4f6"}, {"shareFooter", true}};
 }
 QJsonObject AppearanceStore::state() const {
@@ -48,6 +48,7 @@ QString AppearanceStore::imagePath(const QJsonObject &theme, const QString &regi
     return !directory.isEmpty() && path.startsWith(directory + '/') ? path : QString();
 }
 QJsonObject AppearanceStore::draft(QJsonObject theme) const {
+    if (!theme.contains("blurFooter")) theme["blurFooter"] = theme["blurRight"].toDouble();
     auto defaults = AppearanceStore::defaults();
     for (auto it = defaults.begin(); it != defaults.end(); ++it)
         if (!theme.contains(it.key()))
@@ -191,6 +192,7 @@ bool AppearanceStore::save(QJsonObject theme, const QString &replaceId, QString 
     theme.remove("sourceFooter");
     theme["blurLeft"] = qBound(0., theme["blurLeft"].toDouble(), 50.);
     theme["blurRight"] = qBound(0., theme["blurRight"].toDouble(), 50.);
+    theme["blurFooter"] = qBound(0., theme["blurFooter"].toDouble(theme["blurRight"].toDouble()), 50.);
     theme["blurExpanded"] = qBound(0., theme["blurExpanded"].toDouble(15), 50.);
     if (replace < 0)
         items.append(theme);

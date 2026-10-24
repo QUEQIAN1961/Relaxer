@@ -137,6 +137,7 @@ QVariantMap SettingsBridge::palette() const {
             {"expandedImage", rightImage.isEmpty() ? QUrl() : QUrl::fromLocalFile(rightImage)},
             {"blurLeft", imageMode ? appearance["blurLeft"].toDouble() : 0.},
             {"blurRight", imageMode ? appearance["blurRight"].toDouble() : 0.},
+            {"blurFooter", imageMode ? appearance["blurFooter"].toDouble(appearance["blurRight"].toDouble()) : 0.},
             {"blurExpanded", custom ? appearance["blurExpanded"].toDouble(15) : 25.}};
 }
 
@@ -300,7 +301,7 @@ bool SettingsBridge::editAppearance(const QString &key, const QVariant &value) {
     const QStringList colors{"left", "right", "accent", "leftInk", "rightInk", "muted", "footer", "progressFill", "progressTrack"};
     const QStringList flags{"customText", "mutedBold", "shareLR", "customFooter", "shareFooter", "customProgressColors"};
     const QStringList images{"sourceLeft", "sourceRight", "sourceFooter"};
-    const QStringList blurs{"blurLeft", "blurRight", "blurExpanded"};
+    const QStringList blurs{"blurLeft", "blurRight", "blurFooter", "blurExpanded"};
     const auto encoded = QJsonValue::fromVariant(value);
     if (colors.contains(key)) {
         if (!QColor(value.toString()).isValid()) { message("颜色无效"); return false; }

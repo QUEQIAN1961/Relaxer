@@ -23,7 +23,7 @@ Item {
     Image {
         objectName:"playerBackdrop"
         anchors.fill:parent
-        source:settingsBridge.values.playerCoverBackground ? "image://relaxer/blur?file="+encodeURIComponent(playbackBridge.coverUrl)+"&seed="+encodeURIComponent(playbackBridge.hasTrack?playbackBridge.title:"Relaxer")+"&rev="+playbackBridge.artworkRevision : String(settingsBridge.palette.expandedImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.expandedImage))+"&blur="+Number(settingsBridge.palette.blurExpanded||0):""
+        source:settingsBridge.values.playerCoverBackground ? "image://relaxer/blur?file="+encodeURIComponent(playbackBridge.coverUrl)+"&seed="+encodeURIComponent(playbackBridge.hasTrack?playbackBridge.title:"Relaxer")+"&rev="+playbackBridge.artworkRevision+"&blur="+Number(settingsBridge.palette.blurExpanded||0) : String(settingsBridge.palette.expandedImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.expandedImage))+"&blur="+Number(settingsBridge.palette.blurExpanded||0):""
         asynchronous:true;cache:false;retainWhileLoading:true
         sourceSize.width:720;sourceSize.height:720;fillMode:Image.PreserveAspectCrop
         visible:source.toString().length>0

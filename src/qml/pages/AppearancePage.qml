@@ -36,7 +36,7 @@ Item {
 
     ColumnLayout {
       anchors.fill: parent; anchors.leftMargin: 34; anchors.rightMargin: 34
-      anchors.topMargin: 6; anchors.bottomMargin: 16; spacing: 18
+      anchors.topMargin: 28; anchors.bottomMargin: 16; spacing: 18
       RowLayout {
         objectName: "appearanceToolbar"; Layout.fillWidth: true; spacing: 8
         ShellButton { objectName: "appearanceBack"; text: "返回设置"; font.pixelSize: 14; onClicked: page.requestBack() }
@@ -87,36 +87,43 @@ Item {
                         }
                     }
                 }
-                CheckBox { text: "自定义文字颜色"; checked: !!settingsBridge.appearanceDraft.customText; onClicked: settingsBridge.editAppearance("customText", checked) }
                 RowLayout {
-                    visible: !!settingsBridge.appearanceDraft.customText
                     Layout.fillWidth: true
                     spacing: 8
+                    CheckBox {
+                        objectName: "appearanceCustomText"
+                        Layout.preferredWidth: 174
+                        text: "自定义文字颜色"; checked: !!settingsBridge.appearanceDraft.customText
+                        onClicked: settingsBridge.editAppearance("customText", checked)
+                    }
                     Repeater {
-                        model: [{key:"leftInk",name:"左侧文字"},{key:"rightInk",name:"右侧主要文字"},{key:"muted",name:"右侧小字"}]
+                        model: [{key:"leftInk",name:"左侧文字",effective:"sideText"},{key:"rightInk",name:"右侧主要文字",effective:"text"},{key:"muted",name:"右侧小字",effective:"secondary"}]
                         delegate: ColorSwatch {
                             required property var modelData
                             objectName: "appearanceColor-" + modelData.key
-                            caption: modelData.name; swatchColor: settingsBridge.appearanceDraft[modelData.key] || "#ffffff"
+                            enabled: !!settingsBridge.appearanceDraft.customText
+                            caption: modelData.name
+                            swatchColor: (enabled ? settingsBridge.appearanceDraft[modelData.key] : settingsBridge.palette[modelData.effective]) || "#ffffff"
                             onClicked: page.chooseColor(modelData.key)
                         }
                     }
                 }
-                CheckBox {
-                    objectName: "appearanceCustomProgressColors"
-                    text: "自定义进度条颜色"
-                    checked: !!settingsBridge.appearanceDraft.customProgressColors
-                    onClicked: settingsBridge.editAppearance("customProgressColors", checked)
-                }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    enabled: !!settingsBridge.appearanceDraft.customProgressColors
+                    CheckBox {
+                        objectName: "appearanceCustomProgressColors"
+                        Layout.preferredWidth: 174
+                        text: "自定义进度条颜色"
+                        checked: !!settingsBridge.appearanceDraft.customProgressColors
+                        onClicked: settingsBridge.editAppearance("customProgressColors", checked)
+                    }
                     Repeater {
                         model: [{key:"progressFill",name:"已填充与滑块"},{key:"progressTrack",name:"未填充"}]
                         delegate: ColorSwatch {
                             required property var modelData
                             objectName: "appearanceColor-" + modelData.key
+                            enabled: !!settingsBridge.appearanceDraft.customProgressColors
                             caption: modelData.name
                             swatchColor: settingsBridge.appearanceDraft[settingsBridge.appearanceDraft.customProgressColors ? modelData.key : modelData.key === "progressFill" ? "recommendedProgressFill" : "recommendedProgressTrack"] || "#ffffff"
                             onClicked: page.chooseColor(modelData.key)
@@ -124,31 +131,51 @@ Item {
                     }
                 }
                 UiText { Layout.fillWidth: true; text: "同时用于歌曲进度条和音量条；未勾选时使用推荐颜色。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
-                CheckBox {
-                    visible: settingsBridge.appearanceMode >= 3
-                    objectName: "appearanceCustomFooter"
-                    text: "自定义底栏颜色"
-                    checked: !!settingsBridge.appearanceDraft.customFooter
-                    onClicked: settingsBridge.editAppearance("customFooter", checked)
-                }
-                ColorSwatch {
-                    objectName: "appearanceColor-footer"
-                    visible: settingsBridge.appearanceMode >= 3
-                    enabled: !!settingsBridge.appearanceDraft.customFooter
-                    caption: "底栏颜色"; swatchColor: settingsBridge.appearanceDraft.footer || "#ffffff"
-                    onClicked: page.chooseColor("footer")
-                }
-                CheckBox { text: "右侧小字加粗"; checked: !!settingsBridge.appearanceDraft.mutedBold; onClicked: settingsBridge.editAppearance("mutedBold", checked) }
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    visible: settingsBridge.appearanceMode === 4
-                    spacing: 12
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 8
                     CheckBox {
+                        objectName: "appearanceCustomFooter"
+                        Layout.preferredWidth: 174
+                        text: "自定义底栏颜色"
+                        checked: !!settingsBridge.appearanceDraft.customFooter
+                        onClicked: settingsBridge.editAppearance("customFooter", checked)
+                    }
+                    ColorSwatch {
+                        objectName: "appearanceColor-footer"
+                        enabled: !!settingsBridge.appearanceDraft.customFooter
+                        caption: "底栏颜色"
+                        swatchColor: (enabled ? settingsBridge.appearanceDraft.footer : settingsBridge.palette.footer) || "#ffffff"
+                        onClicked: page.chooseColor("footer")
+                    }
+                }
+                RowLayout {
+                    objectName: "appearanceImageOptions"
+                    Layout.fillWidth: true; spacing: 12
+                    CheckBox {
+                        visible: settingsBridge.appearanceMode === 4
                         objectName: "appearanceShareLR"
                         text: "左右同一张（连续铺图）"
                         checked: !!settingsBridge.appearanceDraft.shareLR
                         onClicked: settingsBridge.editAppearance("shareLR", checked)
                     }
+                    CheckBox {
+                        visible: settingsBridge.appearanceMode === 4
+                        objectName: "appearanceShareFooter"
+                        text: "底栏与页面共用图片（连续铺图）"
+                        checked: !!settingsBridge.appearanceDraft.shareFooter
+                        onClicked: settingsBridge.editAppearance("shareFooter", checked)
+                    }
+                    CheckBox {
+                        objectName: "appearanceMutedBold"
+                        text: "右侧小字加粗"; checked: !!settingsBridge.appearanceDraft.mutedBold
+                        onClicked: settingsBridge.editAppearance("mutedBold", checked)
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: settingsBridge.appearanceMode === 4
+                    spacing: 12
                     Repeater {
                         model: [{key:"sourceLeft",name:"左侧图片"},{key:"sourceRight",name:"右侧图片"}]
                         delegate: RowLayout {
@@ -160,12 +187,6 @@ Item {
                             ShellButton { text: "选择图片"; onClicked: page.chooseImage(modelData.key) }
                         }
                     }
-                    CheckBox {
-                        objectName: "appearanceShareFooter"
-                        text: "底栏与页面共用图片（连续铺图）"
-                        checked: !!settingsBridge.appearanceDraft.shareFooter
-                        onClicked: settingsBridge.editAppearance("shareFooter", checked)
-                    }
                     RowLayout {
                         visible: !settingsBridge.appearanceDraft.shareFooter
                         Layout.fillWidth: true
@@ -174,10 +195,11 @@ Item {
                         ShellButton { text: "选择图片"; onClicked: page.chooseImage("sourceFooter") }
                     }
                 }
-                RowLayout {
-                    Layout.fillWidth: true; spacing: 16
+                GridLayout {
+                    objectName: "appearanceBlurGrid"
+                    Layout.fillWidth: true; columns: 2; columnSpacing: 20; rowSpacing: 14
                     Repeater {
-                        model: [{key:"blurLeft",name:"左侧列表模糊"},{key:"blurRight",name:"右侧列表模糊"},{key:"blurExpanded",name:"展开播放背景模糊"}]
+                        model: [{key:"blurLeft",name:"左侧列表模糊"},{key:"blurRight",name:"右侧列表模糊"},{key:"blurFooter",name:"底栏模糊"},{key:"blurExpanded",name:"展开播放背景模糊"}]
                         delegate: ColumnLayout {
                             required property var modelData
                             Layout.fillWidth: true; Layout.preferredWidth: 1; Layout.minimumWidth: 0

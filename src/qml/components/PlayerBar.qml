@@ -26,7 +26,7 @@ Rectangle {
         objectName: "footerBackground"
         x: 0; y: settingsBridge.palette.shareFooter ? -bar.backgroundOffsetY : 0
         width: parent.width; height: settingsBridge.palette.shareFooter ? bar.backgroundCanvasHeight : parent.height
-        source:String(settingsBridge.palette.footerImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.footerImage))+"&blur="+Number(settingsBridge.palette.blurRight||0):"";fillMode:Image.PreserveAspectCrop;asynchronous:true
+        source:String(settingsBridge.palette.footerImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.footerImage))+"&blur="+Number(settingsBridge.palette.blurFooter||0):"";fillMode:Image.PreserveAspectCrop;asynchronous:true
       }
     }
     Rectangle { width: parent.width; height: 1; color: Theme.border }

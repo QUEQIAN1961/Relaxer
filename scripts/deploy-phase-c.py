@@ -42,10 +42,12 @@ def main():
     binaries = ["Relaxer.exe", "RelaxerStart.exe", "RelaxerQmlUi.dll"]
     binary_hashes = {name: hashlib.sha256((build / name).read_bytes()).hexdigest() for name in binaries}
     verified = False
+    native_proof = {}
     if args.verification_proof:
         native_proof = json.loads(args.verification_proof.read_text(encoding="utf-8"))
         assert native_proof.get("verified") is True and native_proof.get("binarySHA256") == binary_hashes, "Native proof does not match build inputs"
         assert native_proof.get("sourceFingerprint") == fingerprint and native_proof.get("sourceCommit") == commit, "Native proof does not match frozen source"
+        assert native_proof.get("sourceTree", tree) == tree, "Native proof does not match source tree"
         verified = True
     env = os.environ.copy()
     env["PATH"] = str(quick / "bin") + os.pathsep + str(qt / "bin") + os.pathsep + env["PATH"]
@@ -140,13 +142,19 @@ def main():
         "本包为开发方验证的候选构建，正式验收状态见随包交付报告。\n",
         encoding="utf-8")
     if verified:
-        (runtime / "relaxer-ready.json").write_text(json.dumps(marker(version, displayVersion=display, **{
-            "windows_only_path": True, "audio_decode": True, "qml_window": True,
-            "audio_device_required": False, "media_clock": False})), encoding="utf-8")
+        scope = native_proof.get("verificationScope")
+        fields = {"windows_only_path": True, "qml_window": True}
+        if scope:
+            assert native_proof.get("windowsOnlyPath") is True and native_proof.get("qmlWindow") is True, "Scoped native proof lacks window/PATH verification"
+            fields.update(verificationScope=scope, nativeQaProofSHA256=hashlib.sha256(args.verification_proof.read_bytes()).hexdigest())
+        else:
+            fields.update(audio_decode=True, audio_device_required=False, media_clock=False)
+        (runtime / "relaxer-ready.json").write_text(json.dumps(marker(version, displayVersion=display, **fields)), encoding="utf-8")
     proof = {"version": version, "displayVersion": display, "sourceFingerprint": fingerprint, "sourceCommit": commit, "sourceTree": tree,
              "qmlImports": imports, "copiedDependencies": sorted(copied), "resolvedDependencyInputs": sorted(str(p) for p in seen_dependencies),
              "binarySHA256": binary_hashes, "stagingPolicy": "fresh-build-inputs-only",
-             "verified": verified, "missingDependencies": [], "executionReceipts": str(logs),
+             "verified": verified, "verificationScope": native_proof.get("verificationScope", "legacy-native" if verified else "candidate-collection"),
+             "missingDependencies": [], "executionReceipts": str(logs),
              "note": "Native proof from separate candidate" if verified else "Candidate collection only; do not package before native QA"}
     (dest / "deployment.json").write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"destination": str(dest), "qmlImports": len(imports), "dependencies": len(copied)}))

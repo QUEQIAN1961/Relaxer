@@ -474,12 +474,34 @@ ApplicationWindow {
     Row {
         id:titleBar;objectName:"titleBar";anchors.top:parent.top;anchors.right:parent.right;z:7;height:32
         Repeater{
-            model:["—","□","×"]
+            model:["最小化","最大化","关闭"]
             delegate:AbstractButton{
+                id: windowControl
                 required property int index;required property string modelData
+                objectName: "windowControl" + index
                 width:42;height:32;hoverEnabled:true
-                background:Rectangle{color:parent.hovered?(index===2?Theme.accent:Theme.hover):"transparent"}
-                contentItem:UiText {text:modelData;color:parent.hovered&&index===2?"white":Theme.secondary;font.pixelSize:17;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
+                Accessible.name: index===1 && root.visibility===Window.Maximized ? "还原窗口" : modelData
+                ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                background:Rectangle{color:windowControl.down?(index===2?Qt.darker(Theme.accent,1.15):Theme.pressed):windowControl.hovered?(index===2?Theme.accent:Theme.hover):"transparent"}
+                contentItem: Item {
+                    Canvas {
+                        anchors.centerIn: parent; width:14; height:14
+                        property color ink: windowControl.hovered && windowControl.index===2 ? "white" : Theme.text
+                        property bool maximized: root.visibility===Window.Maximized
+                        onInkChanged: requestPaint()
+                        onMaximizedChanged: requestPaint()
+                        onPaint: {
+                            const ctx=getContext("2d");ctx.clearRect(0,0,width,height)
+                            ctx.strokeStyle=ink;ctx.lineWidth=1.2;ctx.lineCap="square";ctx.beginPath()
+                            if(windowControl.index===0){ctx.moveTo(1,10);ctx.lineTo(13,10)}
+                            else if(windowControl.index===1){
+                                if(maximized){ctx.moveTo(4,1);ctx.lineTo(13,1);ctx.lineTo(13,10);ctx.moveTo(1,4);ctx.rect(1,4,9,9)}
+                                else ctx.rect(1,1,12,12)
+                            }else{ctx.moveTo(2,2);ctx.lineTo(12,12);ctx.moveTo(12,2);ctx.lineTo(2,12)}
+                            ctx.stroke()
+                        }
+                    }
+                }
                 onClicked:{if(index===0)root.showMinimized();else if(index===1){if(root.visibility===Window.Maximized)root.showNormal();else root.showMaximized()}else root.close()}
             }
         }

@@ -221,7 +221,7 @@ QImage UiImages::requestImage(const QString &id,QSize *resultSize,const QSize &r
         p.drawText(QRectF(size * .1, size * .86, size * .8, size * .06), Qt::AlignCenter, "RELAXER");
     }
 
-    if(blur)out=gaussianBlur(out,50);
+    if(blur)out=gaussianBlur(out,query.hasQueryItem("blur") ? qBound(0.,query.queryItemValue("blur").toDouble(),50.) : 50.);
     else {QImage rounded(out.size(),QImage::Format_ARGB32_Premultiplied);rounded.fill(Qt::transparent);QPainter p(&rounded);p.setRenderHint(QPainter::Antialiasing);QPainterPath mask;const auto ratio=qBound(.0,query.queryItemValue("radiusRatio").isEmpty()?.075:query.queryItemValue("radiusRatio").toDouble(),.5);mask.addRoundedRect(rounded.rect(),size*ratio,size*ratio);p.setClipPath(mask);p.drawImage(0,0,out);p.end();out=rounded;}
     if(resultSize)*resultSize=out.size();
     {QMutexLocker lock(&m_mutex);m_cache.insert(cacheKey,new QImage(out),qMax(1,int(out.sizeInBytes()/1024)));}
