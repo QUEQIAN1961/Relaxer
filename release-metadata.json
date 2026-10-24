@@ -16,10 +16,10 @@
       "notes": "docs/releases/v0.2.1/RELEASE-NOTES-V0.2.1.md"
     },
     {
-      "tag": "v0.2.0",
+      "tag": "v0.2.0-GA",
       "status": "stable",
-      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.0",
-      "notes": "docs/releases/v0.2.0/V0.2.0-ReleaseNotes.md"
+      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.0-GA",
+      "notes": "docs/releases/v0.2.0-GA/V0.2.0-GA-ReleaseNotes.md"
     },
     {
       "tag": "v0.2.0-rc2",

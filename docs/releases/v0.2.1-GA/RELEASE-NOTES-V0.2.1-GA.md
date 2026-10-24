@@ -2,7 +2,7 @@
 
 ## 中文
 
-本次正式增量版基于 0.2.1，整合用户已实测通过的歌单修复。版本标识为 **0.2.1-GA**；此前所有版本的标签和附件保留原样。
+本次正式增量版基于 0.2.1，整合用户已实测通过的歌单修复。版本标识为 **0.2.1-GA**；发行命名统一采用 GA 格式，历史预发行版仍单独保留。
 
 ### 修复与调整
 
@@ -17,6 +17,15 @@
 
 升级前完全退出旧版并备份整个 data 目录，再将资料副本放到新启动器旁。不要让两个程序同时写同一份资料。既有重复歌单不会自动删除或合并。
 
+### 版本沿革
+
+| 版本 | 定位 |
+| --- | --- |
+| 0.2.1-GA | 当前 QML 稳定版，包含歌单创建与页头修复 |
+| 0.2.1 | 历史 QML 稳定版 |
+| 0.2.0-GA | 历史 Widgets 稳定版 |
+| 0.2.0-rc2 | 历史预发行版 |
+
 ### 来源与验证范围
 
 功能修复提交：`40b7435c11eeeb153fda7bfc0e4c3393d0504124`，用户已手动测试并接受。GA 源码与构建身份、包内文件清单、最终 ZIP 原生验证记录随发行附件提供。
@@ -25,11 +34,13 @@
 
 本次增量没有新的独立 Harness 验收结论，也未重新执行全部历史测试、完整 47 项启动矩阵、WASAPI 或长期播放测试。具体运行结果以 `VERIFICATION.json` 为准。原 0.2.1 的独立验收结论属于原版本。
 
+本次仅同步版本命名与版本日志，0.2.1-GA 的程序文件和运行库保持原已验证字节；压缩包重新生成并更新文件哈希。
+
 项目代码采用 GPL-3.0-only；第三方组件保留各自许可证。发行包附许可文件与第三方声明。
 
 ## English
 
-This stable update builds on 0.2.1 and integrates playlist fixes manually tested and accepted by the user. Its version is **0.2.1-GA**. All earlier tags and release attachments are preserved.
+This stable update builds on 0.2.1 and integrates playlist fixes manually tested and accepted by the user. Its version is **0.2.1-GA**. GA naming is used consistently, while the historical prerelease remains separate.
 
 ### Changes
 
@@ -44,6 +55,15 @@ Extract the complete `Relaxer-V0.2.1-GA-Win64.zip` into a new writable folder an
 
 Exit the previous version, back up the full data folder, and place a copy beside the new launcher. Do not let two applications write to the same data folder. Existing duplicate playlists are not automatically removed or merged.
 
+### Version history
+
+| Version | Role |
+| --- | --- |
+| 0.2.1-GA | Current stable QML release with playlist fixes |
+| 0.2.1 | Historical stable QML release |
+| 0.2.0-GA | Historical stable Widgets release |
+| 0.2.0-rc2 | Historical prerelease |
+
 ### Provenance and verification
 
 The functional fixes are commit `40b7435c11eeeb153fda7bfc0e4c3393d0504124`, manually accepted by the user. Release attachments provide the GA build identity, payload hashes, and verification results.
@@ -51,5 +71,7 @@ The functional fixes are commit `40b7435c11eeeb153fda7bfc0e4c3393d0504124`, manu
 Developer checks cover 14 playlist scenarios (16 QtTest passes including setup/cleanup), related UI regressions, GA version identity, and native package startup. Native checks use isolated data, Chinese/spaced paths, bundled dependencies, and a Windows-only system PATH. The final ZIP is extracted, all payload hashes are checked, and launcher/CMD startup plus missing-QML failure behavior are verified.
 
 This patch has no new independent Harness verdict. The full historical suite, complete 47-case startup matrix, WASAPI, and long-duration playback were not rerun. See `VERIFICATION.json` for actual results. The original 0.2.1 Harness verdict applies to that historical build.
+
+This distribution refresh updates naming and release history only. The verified 0.2.1-GA program and runtime bytes are preserved; archives and their checksums are regenerated.
 
 Relaxer-authored code is GPL-3.0-only; dependencies retain their own licenses. License files and third-party notices are included.

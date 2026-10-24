@@ -16,7 +16,7 @@
 | --- | --- | --- | --- | --- |
 | **0.2.1-GA · 推荐** | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Source.zip) | [发布说明](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md) |
 | 0.2.1 · 历史稳定版 | 默认 QML，保留 Widgets 兼容模式 | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Source.zip) | [发布说明](docs/releases/v0.2.1/RELEASE-NOTES-V0.2.1.md) |
-| 0.2.0 · 历史稳定版 | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Win64-Portable.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Source.zip) | [发布说明](docs/releases/v0.2.0/V0.2.0-ReleaseNotes.md) |
+| 0.2.0-GA · 历史稳定版 | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-GA/Relaxer-V0.2.0-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-GA/Relaxer-V0.2.0-GA-Source.zip) | [发布说明](docs/releases/v0.2.0-GA/V0.2.0-GA-ReleaseNotes.md) |
 | 0.2.0-rc2 · 历史预发行版 | Widgets | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-rc2/Relaxer-V0.2.0-rc2-win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-rc2/Relaxer-V0.2.0-rc2-foundation-src.zip) | [发布说明](docs/releases/v0.2.0-rc2/V0.2.0-RC2-ReleaseNotes.md) |
 
 以上四个发行条目包含三个稳定版本和历史 RC2 预发行版，版本文档集中于 [`docs/releases/`](docs/releases/)，当前程序源码位于 `src/`。
@@ -47,7 +47,7 @@
 - 调色盘和图片外观、字体设置、文字与进度条配色，以及左侧、右侧、底栏、展开播放的模糊调整。
 - 可选的歌词翻译流程；使用自己的提供方配置与凭据。
 
-## 从 0.2.0 或 0.2.1 升级
+## 从 0.2.0-GA 或 0.2.1 升级
 
 完全退出旧程序，备份整个 `data` 目录，再将**资料副本**放到新版本启动器旁的 `data`。保留原备份，不要让两个版本同时写入同一份资料。曲库、歌单、歌词与设置沿用既有存储；升级说明见 [0.2.1-GA 发布说明](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md)。既有重复歌单保留，由用户自行管理。
 
@@ -76,7 +76,7 @@ cmake --build build --target Relaxer RelaxerStart --parallel
 
 0.2.1-GA 整合用户已手动验收的歌单修复，再以 GA 标识重新构建，并完成开发方专项回归与原生包验证。本次 GA 补丁没有新增的 Harness 独立验收结论。
 
-历史 0.2.1 的 Windows 下载来自已通过用户测试和 Harness 专项独立验收的构建，构建提交为 `eb3027eed47109ab300047e8fc2d0fbe0246081a`。0.2.0 保留其历史稳定构建；两版的来源、哈希和验证范围见各自 Release。
+历史 0.2.1 的 Windows 下载来自已通过用户测试和 Harness 专项独立验收的构建，构建提交为 `eb3027eed47109ab300047e8fc2d0fbe0246081a`。0.2.0-GA 保留其历史稳定构建；两版的来源、哈希和验证范围见各自 Release。
 
 在线服务可用性、所有硬件/编码组合和长时间稳定性没有获得全面保证。反馈问题时请附版本、Windows 环境、复现步骤和脱敏日志；不要提交 API Key、个人数据库或音乐文件。
 

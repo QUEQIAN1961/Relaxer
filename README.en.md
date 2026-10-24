@@ -16,7 +16,7 @@ Ready-to-run packages are available for **Windows x64**. Dependencies are bundle
 | --- | --- | --- | --- | --- |
 | **0.2.1-GA · Recommended** | QML by default; Widgets compatibility mode | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1-GA/Relaxer-V0.2.1-GA-Source.zip) | [Release notes](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md) |
 | 0.2.1 · Previous stable version | QML by default; Widgets compatibility mode | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.1/Relaxer-V0.2.1-Source.zip) | [Release notes](docs/releases/v0.2.1/RELEASE-NOTES-V0.2.1.md) |
-| 0.2.0 · Previous stable version | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Win64-Portable.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0/Relaxer-V0.2.0-Source.zip) | [Release notes](docs/releases/v0.2.0/V0.2.0-ReleaseNotes.md) |
+| 0.2.0-GA · Previous stable version | Widgets | [Win64 Portable ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-GA/Relaxer-V0.2.0-GA-Win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-GA/Relaxer-V0.2.0-GA-Source.zip) | [Release notes](docs/releases/v0.2.0-GA/V0.2.0-GA-ReleaseNotes.md) |
 | 0.2.0-rc2 · Historical prerelease | Widgets | [Win64 ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-rc2/Relaxer-V0.2.0-rc2-win64.zip) | [Source ZIP](https://github.com/QUEQIAN1961/Relaxer/releases/download/v0.2.0-rc2/Relaxer-V0.2.0-rc2-foundation-src.zip) | [Release notes](docs/releases/v0.2.0-rc2/V0.2.0-RC2-ReleaseNotes.md) |
 
 The four release entries above include three stable versions and the historical RC2 prerelease. Their documentation is grouped under [`docs/releases/`](docs/releases/). Current application source is in `src/`.
@@ -47,7 +47,7 @@ Local playback works offline. Online lyrics and translation require a network co
 - Palette and image themes, font settings, text and progress colors, and separate blur controls for the left panel, right panel, footer, and expanded player.
 - Optional lyric translation using your own provider configuration and credentials.
 
-## Upgrading from 0.2.0 or 0.2.1
+## Upgrading from 0.2.0-GA or 0.2.1
 
 Exit the old application completely and back up the entire `data` folder. Place a **copy** of that folder beside the new launcher as `data`. Keep the original backup and do not let both versions write to the same data directory. Existing library, playlist, lyric, and settings storage is retained. See the [0.2.1-GA release notes](docs/releases/v0.2.1-GA/RELEASE-NOTES-V0.2.1-GA.md). Existing duplicate playlists are left for you to manage.
 
@@ -76,7 +76,7 @@ If Declarative uses a separate prefix, add `-DQT_ADDITIONAL_PACKAGES_PREFIX_PATH
 
 Version 0.2.1-GA integrates the playlist fixes manually accepted by the user, followed by a fresh build with the GA label, scoped developer regression tests, and native package verification. This GA patch has no new independent Harness verdict.
 
-The historical 0.2.1 Windows download preserves the build tested by the user and independently checked by Harness, built from `eb3027eed47109ab300047e8fc2d0fbe0246081a`. Version 0.2.0 retains its historical stable build. Each release documents its provenance, hashes, and verification scope.
+The historical 0.2.1 Windows download preserves the build tested by the user and independently checked by Harness, built from `eb3027eed47109ab300047e8fc2d0fbe0246081a`. Version 0.2.0-GA retains its historical stable build. Each release documents its provenance, hashes, and verification scope.
 
 Online services, all hardware/codec combinations, and long-running playback have not been exhaustively verified. Include the version, Windows environment, reproduction steps, and redacted logs in issue reports. Do not attach API keys, personal databases, or music files.
 
