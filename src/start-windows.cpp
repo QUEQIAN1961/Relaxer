@@ -496,11 +496,16 @@ int run(const fs::path &root, const fs::path &exe, const relaxer::launch::Argume
     // Lock conflicts already have a runtime dialog. Diagnostics are explicitly
     // noninteractive; ordinary users get a short, actionable QML error.
     if (code && code != 3 && !args.diagnostics) {
-        if (code == 11)
+        if (code == 11) {
+            std::wstring missing;
+            for (const auto name : {"RelaxerQmlUi.dll", "Qt6Qml.dll", "Qt6Quick.dll", "Qt6QuickControls2.dll"})
+                if (!fs::is_regular_file(root / name))
+                    missing += L"\n" + (root / name).wstring();
             fail(L"新版界面的组件缺失或无法加载。请重新解压完整便携包。\n"
                  L"也可用 RelaxerStart.exe --widgets 启动兼容界面。\n\n"
-                 L"退出码：11\n日志：" + (root / "startup.log").wstring());
-        else
+                 L"退出码：11" + (missing.empty() ? std::wstring() : L"\n缺少组件：" + missing) +
+                 L"\n日志：" + (root / "startup.log").wstring());
+        } else
             fail(L"Relaxer 已退出。\n\n退出码：" + std::to_wstring(code) +
                  L"\n请查看日志或重新解压完整便携包。\n日志：" +
                  (root / "startup.log").wstring());
@@ -527,8 +532,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         auto root = location();
         auto plan = relaxer::launch::select(root);
         if (plan.kind == relaxer::launch::Kind::Incomplete) {
+            const auto runtime = fs::is_directory(root / "runtime") ? root / "runtime" : root;
+            std::wstring missing;
+            for (const auto name : {"Relaxer.exe", "relaxer-ready.json"})
+                if (!fs::is_regular_file(runtime / name))
+                    missing += L"\n" + (runtime / name).wstring();
             fail(L"没有找到完整的 Relaxer 文件。\n\n请先把 ZIP 全部解压到一个新文件夹，"
-                 L"再运行其中的 RelaxerStart.exe。不要直接在压缩包内运行，也不要只取出 EXE。");
+                 L"再运行其中的 RelaxerStart.exe。不要直接在压缩包内运行，也不要只取出 EXE。"
+                 L"\n\n缺少启动所需文件：" + missing +
+                 L"\n\nrelaxer-ready.json 是部署验证标记；若完整解压后仍缺少它，"
+                 L"请使用重新验证并打包的候选 ZIP，不要自行创建该文件。\n退出码：1");
         } else {
             Handle guard(CreateFileW((root / "startup.lock").c_str(), GENERIC_READ | GENERIC_WRITE, 0,
                                      nullptr, OPEN_ALWAYS,
