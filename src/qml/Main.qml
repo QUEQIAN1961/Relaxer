@@ -267,7 +267,7 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth:true
                     UiText { text:"我的歌单"; color:Theme.text; font.pixelSize: 14;font.weight:Font.DemiBold; Layout.fillWidth:true }
-                    IconButton { width:26;height:26; symbol:"plus"; tip:"创建歌单"; onClicked:playlistEditor.create() }
+                    IconButton { objectName:"sidebarCreatePlaylist";width:26;height:26; symbol:"plus"; tip:"创建歌单"; onClicked:playlistEditor.create() }
                 }
                 ListView {
                     id: sidebarLists; objectName:"playlistNavigation"; Layout.fillWidth:true;Layout.fillHeight:true
@@ -292,7 +292,7 @@ ApplicationWindow {
                 id: pageSurface;objectName:"pageSurface";width:parent.width;height:parent.height
                 StackLayout {
                     id: pages;objectName:"pageStack";anchors.fill:parent;anchors.topMargin:Theme.pageContentOffset;currentIndex:appBridge.page
-                    LocalPage { id:localPage;onBulkChanged:(active,keys)=>root.updateBulk(localPage,active,keys);onLyricsRequested:(keys,missing)=>root.openLyricsTools(keys,missing);onImportRequested:anchor=>importDialog.openMenu(anchor) }
+                    LocalPage { id:localPage;onBulkChanged:(active,keys)=>root.updateBulk(localPage,active,keys);onLyricsRequested:(keys,missing)=>root.openLyricsTools(keys,missing);onImportRequested:anchor=>importDialog.openMenu(anchor);onEditRequested:(key,name)=>playlistEditor.edit(key,name) }
                     PlaylistsPage { onOpenRequested:key=>root.openPlaylist(key);onEditRequested:(key,name)=>playlistEditor.edit(key,name);onCreateRequested:playlistEditor.create() }
                     ProfilePage { id:profilePage;onBulkChanged:(active,keys)=>root.updateBulk(profilePage,active,keys);onLyricsRequested:keys=>root.openLyricsTools(keys,false) }
                     Item {
@@ -380,7 +380,7 @@ ApplicationWindow {
         }
     }
     ConfirmDialog{id:bulkDelete;parent:root.popupLayer;anchors.centerIn:parent;title:"从曲库移除";width:460;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:Label{text:"移除所选歌曲及歌单关联和统计，保留音乐文件。"} onAccepted:{libraryBridge.removeTracks(root.bulkActionKeys,false);root.clearBulk()}}
-    ConfirmDialog {id:bulkNew;parent:root.popupLayer;anchors.centerIn:parent;title:"新建歌单并加入";width:420;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:EntryField {id:bulkName;placeholderText:"歌单名称"} onAccepted:{const id=libraryBridge.createPlaylist(bulkName.text);if(id!=="0")libraryBridge.addTracksToPlaylist(id,root.bulkActionKeys)}}
+    ConfirmDialog {id:bulkNew;objectName:"bulkNewPlaylistDialog";parent:root.popupLayer;anchors.centerIn:parent;title:"新建歌单并加入";width:420;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:EntryField {id:bulkName;objectName:"bulkNewPlaylistName";placeholderText:"歌单名称"} onAccepted:{const id=libraryBridge.createPlaylist(bulkName.text);if(id!=="0")libraryBridge.addTracksToPlaylist(id,root.bulkActionKeys)}}
     Rectangle {
         id:importPanel;objectName:"importPanel";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:playerBar.top
         property bool observedTask:false

@@ -20,6 +20,7 @@
   <file>components/Toast.qml</file>
   <file>components/ImportDialog.qml</file>
   <file>components/PlaylistEditor.qml</file>
+  <file>components/PlaylistHeader.qml</file>
   <file>pages/ProfilePage.qml</file><file>pages/VersionLogPage.qml</file>
   <file>pages/AppearancePage.qml</file>
   <file>pages/ShortcutsPage.qml</file>

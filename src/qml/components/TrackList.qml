@@ -24,6 +24,7 @@ Item {
     signal lyricsRequested(var keys)
     signal bulkChanged(bool active,var keys)
     function selectedKeys(){return checkedKeys.length?checkedKeys:selectedKey!=="0"?[selectedKey]:[]}
+    function scrollToStart(){list.positionViewAtBeginning()}
     function clearBulk(){bulkMode=false;checkedKeys=[];bulkChanged(false,[])}
     function beginBulk(){bulkMode=true;checkedKeys=selectedKey!=="0"?[selectedKey]:[];bulkChanged(true,checkedKeys)}
     function toggleKey(key){let next=checkedKeys.slice();const i=next.indexOf(key);if(i<0)next.push(key);else next.splice(i,1);checkedKeys=next;bulkChanged(bulkMode,checkedKeys)}
@@ -163,8 +164,8 @@ Item {
         onAccepted:{libraryBridge.removeTracks(context.keys,false);table.clearBulk()}
     }
     ConfirmDialog{
-        id:newList;parent:table.Overlay.overlay;width:400;anchors.centerIn:parent;modal:true;title:"创建新歌单并加入";standardButtons:Dialog.Save|Dialog.Cancel
-        contentItem:EntryField {id:newListName;text:"新歌单";selectByMouse:true;maximumLength:120}
+        id:newList;objectName:"trackNewPlaylistDialog";parent:table.Overlay.overlay;width:400;anchors.centerIn:parent;modal:true;title:"创建新歌单并加入";standardButtons:Dialog.Save|Dialog.Cancel
+        contentItem:EntryField {id:newListName;objectName:"trackNewPlaylistName";text:"新歌单";selectByMouse:true;maximumLength:120}
         onAccepted:{const id=libraryBridge.createPlaylist(newListName.text);if(id!=="0")libraryBridge.addTracksToPlaylist(id,context.keys)}
     }
     FileDialog{id:coverPicker;title:"歌曲封面";nameFilters:["图片 (*.png *.jpg *.jpeg *.webp)"];onAccepted:libraryBridge.setTrackCover(context.targetKey,selectedFile)}

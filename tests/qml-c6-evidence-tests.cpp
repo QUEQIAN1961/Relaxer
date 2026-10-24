@@ -110,15 +110,15 @@ private slots:
         record("lyrics-empty-and-old-result",{{"count",m->count()},{"status",m->status()},{"preview",m->preview()}});shot(w,"lyrics-empty");
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
-    void fullscreenEscapeButtonAndRestore(){
+    void fullscreenEscapeAndProgrammaticRestore(){
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *p=f.shell->facade();const auto geometry=w->geometry();const auto queue=p->queue().items;
         for(int i=0;i<3;++i){
             QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen"));QTRY_COMPARE(w->visibility(),QWindow::FullScreen);QTest::qWait(100);shot(w,QString("fullscreen-%1").arg(i));
             if(i!=1){QTest::keyClick(w,Qt::Key_Escape);if(i==2)QTest::keyClick(w,Qt::Key_Escape);}
-            else{QTRY_VERIFY(w->property("playerProgress").toDouble()>.999);auto *button=visual(w->contentItem(),"fullscreenButton");QVERIFY(button);QVERIFY(button->isVisible()&&button->isEnabled());QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(button).center().toPoint());}
+            else{QTRY_VERIFY(w->property("playerProgress").toDouble()>.999);QVERIFY(!visual(w->contentItem(),"fullscreenButton"));QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen"));}
             QTRY_VERIFY(w->visibility()!=QWindow::FullScreen);QTRY_COMPARE(w->geometry(),geometry);
             QCOMPARE(f.shell->facade(),p);QCOMPARE(p->queue().items,queue);
-            record("fullscreen-restore",{{"cycle",i},{"exit",i==1?"Qt mouse event on actual button":"Qt key event Escape (not physical keyboard)"},{"x",w->x()},{"y",w->y()},{"width",w->width()},{"height",w->height()},{"playbackInstances",f.shell->findChildren<Playback *>().size()},{"sqliteConnections",QSqlDatabase::connectionNames().size()}});
+            record("fullscreen-restore",{{"cycle",i},{"exit",i==1?"Programmatic window fullscreen restore; expanded-page button removed":"Qt key event Escape (not physical keyboard)"},{"x",w->x()},{"y",w->y()},{"width",w->width()},{"height",w->height()},{"playbackInstances",f.shell->findChildren<Playback *>().size()},{"sqliteConnections",QSqlDatabase::connectionNames().size()}});
         }
         f.shell->playbackBridge()->play();QTRY_VERIFY(p->position()>500);const auto position=p->position();
         QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen"));QTest::qWait(150);QVERIFY(p->position()>=position);

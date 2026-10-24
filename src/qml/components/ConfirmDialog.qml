@@ -11,9 +11,9 @@ Dialog {
     footer: DialogButtonBox {
         standardButtons: dialog.standardButtons
         visible: count > 0
-        delegate: ShellButton {}
-        onAccepted: dialog.accept()
-        onRejected: dialog.reject()
+        delegate: ShellButton { objectName: "confirmationButton" + DialogButtonBox.buttonRole }
+        // Dialog connects its DialogButtonBox footer automatically. Connecting
+        // these signals again executes every confirmation twice.
     }
     // Measure the actual text/header/buttons. Hidden StackLayout pages must not
     // let a styled popup's background feed its height back into implicitHeight.

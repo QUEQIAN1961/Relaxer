@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme"
 ConfirmDialog{
-    id:dialog;property string listKey:"0"
+    id:dialog;objectName:"playlistEditor";property string listKey:"0"
     function create(){listKey="0";nameInput.text="新歌单";open()}
     function edit(key,name){listKey=key;nameInput.text=name;open()}
     signal created(string key)
@@ -12,7 +12,7 @@ ConfirmDialog{
     standardButtons:Dialog.Save|Dialog.Cancel
     contentItem:ColumnLayout{
         UiText {text:"歌单名称";color:Theme.secondary}
-        EntryField {id:nameInput;Layout.fillWidth:true;maximumLength:120;selectByMouse:true}
+        EntryField {id:nameInput;objectName:"playlistNameInput";Layout.fillWidth:true;maximumLength:120;selectByMouse:true;onAccepted:dialog.accept()}
         ShellButton{text:"删除此歌单…";visible:dialog.listKey!=="0";onClicked:deletion.open()}
     }
     onAccepted:{if(listKey==="0"){const key=libraryBridge.createPlaylist(nameInput.text);if(key!=="0")created(key)}else libraryBridge.renamePlaylist(listKey,nameInput.text)}
