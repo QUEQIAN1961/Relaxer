@@ -17,7 +17,6 @@ import shutil
 import subprocess
 
 from ready_marker import marker
-from source_identity import identity
 
 
 def digest(path):
@@ -40,6 +39,15 @@ def payload_digest(entries):
     return hashlib.sha256(json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def build_identity(source, launcher):
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=source).decode().strip()
+    # MSYS2 Git can corrupt the ^{tree} argument from native Python. Use the
+    # equivalent show query, and retain the fingerprint emitted by CMake.
+    return {"commit": git("rev-parse", "HEAD"), "tree": git("show", "-s", "--format=%T", "HEAD"),
+            "sourceFingerprint": launcher.with_name("relaxer-source-fingerprint.txt").read_text().strip()}
+
+
 def promote(source, candidate, launcher, proof_path, stage, output):
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=source).decode().strip()
@@ -48,14 +56,14 @@ def promote(source, candidate, launcher, proof_path, stage, output):
         raise ValueError("Use new staging and output paths; existing artifacts are preserved")
     if git("status", "--porcelain"):
         raise ValueError("Package only clean committed source")
-    frozen = identity(source)
+    frozen = build_identity(source, launcher)
     baseline = json.loads((candidate / "deployment.json").read_text(encoding="utf-8"))
-    # Only a direct launcher/deployment patch may inherit these runtime binaries.
-    if git("rev-parse", "HEAD^") != baseline["sourceCommit"]:
-        raise ValueError("Candidate is not the direct parent baseline")
+    # Only launcher/deployment patches descending from this baseline may inherit
+    # its runtime binaries, including a follow-up packaging-only correction.
+    subprocess.check_call(["git", "merge-base", "--is-ancestor", baseline["sourceCommit"], "HEAD"], cwd=source)
     allowed = {"src/start-windows.cpp", "scripts/package-launcher-fix.py",
                "docs/phase-c/launcher-deployment-fix.md"}
-    if set(git("diff", "--name-only", "HEAD^", "HEAD").splitlines()) - allowed:
+    if set(git("diff", "--name-only", baseline["sourceCommit"], "HEAD").splitlines()) - allowed:
         raise ValueError("Runtime source changed; perform a new runtime build instead")
     for name in ("Relaxer.exe", "RelaxerQmlUi.dll", "RelaxerStart.exe"):
         file = candidate / (name if name == "RelaxerStart.exe" else "runtime/" + name)
