@@ -76,7 +76,8 @@ private slots:
         QVERIFY(!f.shell->facade()->isShutdown());QCOMPARE(f.library.setting("appearanceHistory"),before);
         screenshot(w,"save-failure");QVERIFY(click(w,"appearanceLeaveCancel"));
         QTRY_VERIFY(!opened(dialog(w)));QVERIFY(s->appearanceDirty());
-        QVERIFY(s->editAppearance("sourceLeft",QString()));QVERIFY(s->editAppearance("accent","#345678"));
+        QVERIFY(s->editAppearance("sourceLeft",QString()));QVERIFY(s->setAppearanceMode(3));
+        QVERIFY(s->editAppearance("accent","#345678"));
         closeButton(w);QTRY_VERIFY(opened(dialog(w)));QVERIFY(click(w,"appearanceLeaveSave"));
         QTRY_VERIFY(!w->isVisible());QVERIFY(f.shell->shutdown());
         SettingsBridge reopened(&f.library);reopened.beginAppearance();
