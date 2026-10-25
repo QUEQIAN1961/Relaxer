@@ -1393,9 +1393,13 @@ void Window::songMenu(SongTable *table, const QPoint &pos) {
             check(m_library->updateArtwork(ids[0], p));
         }
     } else if (picked == lyrics) {
+        const auto guard=m_library->lyricsSaveSnapshot(ids[0]);
         auto p = QFileDialog::getOpenFileName(this, "导入歌词", {}, "歌词 (*.lrc *.txt)");
-        if (!p.isEmpty())
-            check(m_library->updateLyrics(ids[0], p));
+        if (!p.isEmpty()) {
+            LyricsLookup dialog(m_library,{ids[0]},this,QUrl("https://lrclib.net/api"),{},true,m_aiRuntime);
+            if(!dialog.importLyricsFile(p,guard))dialog.exec();
+            refreshTrack();
+        }
     } else if (picked == folder)
         QDesktopServices::openUrl(QUrl::fromLocalFile(
             QFileInfo(m_library->absolute(m_library->track(ids[0]).file)).absolutePath()));

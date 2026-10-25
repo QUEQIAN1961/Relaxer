@@ -1,6 +1,7 @@
 #pragma once
 #include "lyrics-search-coordinator.h"
 #include "playback-facade.h"
+#include "lyrics-replacement-service.h"
 #include <QAbstractListModel>
 #include <QVariantList>
 #include <QSet>
@@ -11,6 +12,7 @@ class LyricsSearchBridge final:public QAbstractListModel {
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString selectedKey READ selectedKey NOTIFY changed)
     Q_PROPERTY(QString previewText READ previewText NOTIFY changed)
+    Q_PROPERTY(QString draftText READ draftText NOTIFY changed)
     Q_PROPERTY(QString targetTrackKey READ targetTrackKey NOTIFY changed)
     Q_PROPERTY(QString targetTitle READ targetTitle NOTIFY changed)
     Q_PROPERTY(QString targetArtist READ targetArtist NOTIFY changed)
@@ -25,6 +27,7 @@ public:
     bool busy()const{return m_service->summary().running;}
     QString status()const{return m_status;}QString selectedKey()const{return m_selectedKey;}
     QString previewText()const;
+    QString draftText()const;
     QString targetTrackKey()const{return QString::number(targetId());}
     QString targetTitle()const;QString targetArtist()const;QString sourceText()const;
     QVariantList targetTracks()const;
@@ -35,14 +38,21 @@ public:
     Q_INVOKABLE bool searchTracks(const QStringList &keys,bool confirmed=false);
     Q_INVOKABLE bool searchQuery(const QString &title,const QString &artist,const QString &fragment,bool confirmed=false,bool requireTimed=false);
     Q_INVOKABLE bool searchDetailed(const QString &title,const QString &artist,const QString &album,const QString &fragment,bool confirmed=false,bool requireTimed=false,bool replace=false);
-    Q_INVOKABLE bool saveText(const QString &text,bool confirmed=false);
-    Q_INVOKABLE bool importLocalLyrics(const QUrl &file,bool confirmed=false);
+    Q_INVOKABLE QString beginLocalEdit();
+    Q_INVOKABLE bool saveText(const QString &text,bool confirmed=false,const QString &editToken={});
+    Q_INVOKABLE bool importLocalLyrics(const QUrl &file,bool confirmed=false,const QString &editToken={});
     Q_INVOKABLE bool markInstrumental(bool confirmed=false);
     Q_INVOKABLE void stop();
     Q_INVOKABLE bool select(int row);
     Q_INVOKABLE bool selectRecommended(bool requireTimed = false);
     Q_INVOKABLE bool saveSelected(const QString &exactCandidateKey,bool confirmed=false);
-signals:void changed();
+    Q_INVOKABLE bool resolveReplacement(const QString &token,int choice);
+    Q_INVOKABLE void cancelReplacement(const QString &token);
+    void setTranslationCoordinator(TranslationCoordinator *service){m_translation=service;}
+signals:
+    void changed();
+    void replacementRequested(const QString &token,const QString &reason);
+    void saved(const QString &trackKey);
 private:
     Library *m_library;PlaybackFacade *m_facade;LyricsSearchCoordinator *m_service;
     LyricsCandidateSnapshot m_snapshot;LyricsSaveSnapshot m_guard;
@@ -61,7 +71,18 @@ private:
     bool translationMissing(const Track &track)const;
     bool startTargets(const QVector<qint64> &ids,bool confirmed,bool missingOnly);
     qint64 targetId()const{return m_target?m_target:m_facade->current().id;}
-    bool saveBytes(const QByteArray &bytes,bool confirmed);
+    bool saveBytes(const QByteArray &bytes,bool confirmed,const QString &editToken={});
+    QString m_editToken;
+    LyricsSaveSnapshot m_editGuard;
+    QHash<qint64,QByteArray> m_manualDrafts;
+    bool m_showDraft=false;
+    TranslationCoordinator *m_translation=nullptr;
+    LyricsReplacementPlan m_plan;
+    QString m_planToken,m_planSelection,m_lastSavedIdentity;
+    bool m_submitting=false;
+    bool prepareSave(const QByteArray &bytes,const QString &identity,const LyricsSaveSnapshot &snapshot,bool selected);
+    bool commitPlan(LyricsReplacementChoice choice);
+    void invalidatePlan();
     void resetForTrack();
     void rememberReview(qint64 id,bool pending);
     void restoreReviews(const QVector<qint64> &ids);

@@ -6,19 +6,23 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QJsonDocument>
+#include <QUuid>
+#include <QScopedValueRollback>
+#include <QStringDecoder>
 #include "ai/whole-song-lyrics-translation.h"
 namespace relaxer {
 LyricsSearchBridge::LyricsSearchBridge(Library *library,PlaybackFacade *facade,LyricsSearchCoordinator *service,QObject *parent)
     :QAbstractListModel(parent),m_library(library),m_facade(facade),m_service(service){
     connect(facade,&PlaybackFacade::trackChanged,this,[this]{if(!m_target){m_service->stop();resetForTrack();}});
-    connect(service,&LyricsSearchCoordinator::candidatesChanged,this,[this](const LyricsCandidateSnapshot &snapshot,quint64){
+    connect(service,&LyricsSearchCoordinator::candidatesChanged,this,[this](const LyricsCandidateSnapshot &snapshot,quint64 generation){
+        if(generation!=m_service->summary().generation||snapshot.revision!=m_service->candidates(snapshot.trackId).revision)return;
         if(snapshot.records.isEmpty())m_cachedChoices.remove(snapshot.trackId);else m_cachedChoices.insert(snapshot.trackId);
         emit changed();
         const auto current=m_library->track(targetId());
         if(snapshot.trackId!=current.id||snapshot.trackHash!=current.hash)return;
         const auto previous = !m_explicitSelection || m_selected.isEmpty() ? QString() : LyricsSearchCoordinator::candidateIdentity(m_selected);
         m_explicitSelection = false;
-        beginResetModel();m_snapshot=snapshot;m_selected={};m_selectedKey.clear();m_guard={};endResetModel();
+        invalidatePlan();beginResetModel();m_snapshot=snapshot;m_selected={};m_selectedKey.clear();m_guard={};endResetModel();
         // Keep an explicit choice through a ranking refresh when that record is
         // still present. New targets and removed choices default to the best rank.
         for (int row = 0; !previous.isEmpty() && row < m_snapshot.records.size(); ++row) {
@@ -47,12 +51,15 @@ QVariant LyricsSearchBridge::data(const QModelIndex &index,int role)const{
     switch(role){case CandidateKey:return LyricsSearchCoordinator::candidateIdentity(r);case Title:return r["trackName"].toString();case Artist:return r["artistName"].toString();case Album:return r["albumName"].toString();case Source:return r["source"].toString("LRCLIB");case Timed:return !r["syncedLyrics"].toString().isEmpty();default:return {};}
 }
 void LyricsSearchBridge::resetForTrack(){
+    invalidatePlan();m_lastSavedIdentity.clear();
+    m_editToken.clear();m_editGuard={};
     const auto id=targetId();
     // loadCached is a synchronous read API; it intentionally emits no signal.
     if(id)m_service->loadCached({id});
     beginResetModel();m_snapshot=id?m_service->candidates(id):LyricsCandidateSnapshot{};m_selected={};m_selectedKey.clear();m_guard={};endResetModel();
     m_status="本地缓存；手动搜索才连接歌词来源";
     selectRecommended(m_recommendTimedOnly);
+    m_showDraft=m_manualDrafts.contains(id);emit changed();
 }
 bool LyricsSearchBridge::search(bool confirmed){
     const auto track=m_library->track(targetId());
@@ -125,6 +132,7 @@ QVariantList LyricsSearchBridge::targetTracks()const{
     }return result;
 }
 bool LyricsSearchBridge::setTargetTrack(const QString &key){
+    if(m_submitting)return false;
     bool valid=false;const auto id=key.toLongLong(&valid);
     if(!valid||id<0||(id&&!m_library->track(id).id))return false;
     if(m_target==id)return true;
@@ -132,6 +140,7 @@ bool LyricsSearchBridge::setTargetTrack(const QString &key){
     m_target=id;resetForTrack();return true;
 }
 bool LyricsSearchBridge::setTargetTracks(const QStringList &keys,bool missingOnly,bool showCompleted){
+    if(m_submitting)return false;
     QVector<qint64> input,ids;QSet<qint64> seen;
     for(const auto &key:keys){bool valid=false;const auto id=key.toLongLong(&valid);
         if(!valid||id<=0)return false;
@@ -200,48 +209,102 @@ bool LyricsSearchBridge::selectRecommended(bool requireTimed) {
     return false;
 }
 bool LyricsSearchBridge::select(int row){
+    if(m_submitting)return false;
     if(row<0||row>=m_snapshot.records.size()||m_snapshot.trackId!=targetId())return false;
     const auto track=m_library->track(m_snapshot.trackId);if(track.hash!=m_snapshot.trackHash)return false;
-    m_selected=m_snapshot.records[row].toObject();m_guard=m_library->lyricsSaveSnapshot(track.id);
+    invalidatePlan();m_showDraft=false;m_selected=m_snapshot.records[row].toObject();m_guard=m_library->lyricsSaveSnapshot(track.id);
     m_explicitSelection = true;
     m_selectedKey=QString::number(track.id)+':'+QString::number(m_snapshot.revision)+':'+LyricsSearchCoordinator::candidateIdentity(m_selected);
     emit changed();return true;
 }
 QString LyricsSearchBridge::previewText()const{
+    if(m_showDraft)return draftText();
     const auto timed=m_selected["syncedLyrics"].toString();return timed.isEmpty()?m_selected["plainLyrics"].toString():timed;
 }
+QString LyricsSearchBridge::draftText()const{
+    const auto bytes=m_manualDrafts.value(targetId());
+    QStringDecoder decoder(bytes.startsWith("\xff\xfe")||bytes.startsWith("\xfe\xff")?QStringDecoder::Utf16:QStringDecoder::Utf8);
+    return decoder(bytes);
+}
 bool LyricsSearchBridge::saveSelected(const QString &key,bool confirmed){
-    if(!confirmed||key.isEmpty()||key!=m_selectedKey||m_guard.id!=targetId())return false;
+    if(m_submitting||!confirmed||key.isEmpty()||key!=m_selectedKey||m_guard.id!=targetId())return false;
     const auto latest=m_service->candidates(targetId());
-    if(latest.trackHash!=m_snapshot.trackHash||latest.revision!=m_snapshot.revision)return false;
-    auto bytes=previewText().toUtf8();if(m_selected["instrumental"].toBool())bytes=QString("纯音乐，请欣赏").toUtf8();
-    QString error;
-    if(!LyricMatchPolicy::rawLyricsAllowed(bytes,&error)||!m_library->lyricsSnapshotMatches(m_guard,&error)){
-        m_status=error;emit changed();return false;
-    }
-    const bool ok=m_library->saveLyricsChecked(m_guard.id,bytes,m_guard);
-    if(ok){m_service->cancelTrack(m_guard.id);m_service->noteManualSave();m_trackState[m_guard.id]=LyricsSearchState::Saved;rememberReview(m_guard.id,false);}
-    m_status=ok?"歌词已保存":m_library->lastError();m_selectedKey.clear();emit changed();return ok;
+    if(latest.trackHash!=m_snapshot.trackHash||latest.revision!=m_snapshot.revision){m_status="候选版本已变化，请重新选择";emit changed();return false;}
+    const auto timed=m_selected["syncedLyrics"].toString();
+    auto bytes=(timed.isEmpty()?m_selected["plainLyrics"].toString():timed).toUtf8();if(m_selected["instrumental"].toBool())bytes=QString("纯音乐，请欣赏").toUtf8();
+    m_showDraft=false;
+    return prepareSave(bytes,key,m_guard,true);
 }
-bool LyricsSearchBridge::saveBytes(const QByteArray &bytes,bool confirmed){
-    if(!confirmed||!targetId())return false;
-    QString error;if(!LyricMatchPolicy::rawLyricsAllowed(bytes,&error)){m_status=error;emit changed();return false;}
-    const auto snapshot=m_library->lyricsSaveSnapshot(targetId());
-    const bool ok=m_library->saveLyricsChecked(targetId(),bytes,snapshot);
-    if(ok){m_service->cancelTrack(targetId());m_service->noteManualSave();m_trackState[targetId()]=LyricsSearchState::Saved;rememberReview(targetId(),false);m_selectedKey.clear();m_selected={};}
-    m_status=ok?"歌词已保存":m_library->lastError();emit changed();return ok;
+QString LyricsSearchBridge::beginLocalEdit(){
+    if(m_submitting||!targetId())return {};
+    m_editGuard=m_library->lyricsSaveSnapshot(targetId());
+    if(!m_editGuard.valid){m_status=m_editGuard.error;emit changed();return {};}
+    m_editToken=QUuid::createUuid().toString(QUuid::WithoutBraces);return m_editToken;
 }
-bool LyricsSearchBridge::saveText(const QString &text,bool confirmed){return saveBytes(text.toUtf8(),confirmed);}
-bool LyricsSearchBridge::importLocalLyrics(const QUrl &file,bool confirmed){
+bool LyricsSearchBridge::saveBytes(const QByteArray &bytes,bool confirmed,const QString &editToken){
+    if(m_submitting||!confirmed||!targetId())return false;
+    if(!editToken.isEmpty()&&(editToken!=m_editToken||m_editGuard.id!=targetId())){m_status="导入或粘贴的目标已变化，本次未保存";emit changed();return false;}
+    const auto identity=QString::number(targetId())+":"+QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());
+    if(identity==m_lastSavedIdentity&&m_library->lyricsSnapshotMatches(m_guard))return false;
+    if(bytes.size()<=LyricsDocumentReader::MaximumBytes){m_manualDrafts.insert(targetId(),bytes);m_showDraft=true;}
+    const auto snapshot=editToken.isEmpty()?m_library->lyricsSaveSnapshot(targetId()):m_editGuard;
+    return prepareSave(bytes,identity,snapshot,false);
+}
+bool LyricsSearchBridge::saveText(const QString &text,bool confirmed,const QString &editToken){return saveBytes(text.toUtf8(),confirmed,editToken);}
+bool LyricsSearchBridge::importLocalLyrics(const QUrl &file,bool confirmed,const QString &editToken){
     if(!confirmed||!file.isLocalFile())return false;
     const auto input=LyricsDocumentReader::readFile(file.toLocalFile());
     if(!input.opened||!input.complete||input.tooLarge){m_status=input.error;emit changed();return false;}
-    return saveBytes(input.bytes,true);
+    return saveBytes(input.bytes,true,editToken);
 }
 bool LyricsSearchBridge::markInstrumental(bool confirmed){
-    if(!confirmed||!targetId())return false;
-    const bool ok=m_library->markInstrumental(targetId());
-    if(ok){m_service->cancelTrack(targetId());m_service->clearCandidates(targetId());m_cachedChoices.remove(targetId());m_trackState[targetId()]=LyricsSearchState::Saved;rememberReview(targetId(),false);resetForTrack();}
-    m_status=ok?"已标记为纯音乐":m_library->lastError();emit changed();return ok;
+    return saveBytes(QStringLiteral("纯音乐，请欣赏").toUtf8(),confirmed);
+}
+void LyricsSearchBridge::invalidatePlan(){m_planToken.clear();m_planSelection.clear();m_plan={};}
+bool LyricsSearchBridge::prepareSave(const QByteArray &bytes,const QString &identity,const LyricsSaveSnapshot &snapshot,bool selected){
+    invalidatePlan();
+    m_plan=LyricsReplacementService::prepare(*m_library,snapshot,bytes,identity,m_translation);
+    if(!m_plan.decision.valid){m_status=m_plan.decision.reason;emit changed();return false;}
+    m_planSelection=selected?m_selectedKey:QString();
+    m_planToken=QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if(m_plan.decision.confirmationRequired){
+        m_status=m_plan.decision.reason;emit changed();emit replacementRequested(m_planToken,m_status);return false;
+    }
+    return commitPlan(LyricsReplacementChoice::SafeSave);
+}
+bool LyricsSearchBridge::commitPlan(LyricsReplacementChoice choice){
+    if(m_submitting||m_planToken.isEmpty())return false;
+    if(!m_planSelection.isEmpty()){
+        const auto latest=m_service->candidates(targetId());
+        if(m_planSelection!=m_selectedKey||latest.revision!=m_snapshot.revision||latest.trackHash!=m_snapshot.trackHash){
+            m_status="候选版本已变化，请重新选择";invalidatePlan();emit changed();return false;
+        }
+    }
+    const auto id=m_plan.snapshot.id;
+    const auto identity=m_plan.candidateIdentity;
+    bool ok=false;
+    {
+        QScopedValueRollback<bool> saving(m_submitting,true);
+        ok=LyricsReplacementService::commit(*m_library,m_plan,choice,targetId(),identity,m_translation,&m_status);
+        if(ok){
+            m_lastSavedIdentity=identity;m_service->cancelTrack(id);m_service->noteManualSave();
+            m_trackState[id]=LyricsSearchState::Saved;rememberReview(id,false);
+            m_guard=m_library->lyricsSaveSnapshot(id);m_selectedKey.clear();m_selected={};
+            m_status=m_plan.decision.preservesTranslation?QStringLiteral("歌词已保存；已有译文已保留，候选元数据已采用"):QStringLiteral("歌词已保存");
+            m_editToken.clear();m_editGuard={};
+            m_manualDrafts.remove(id);m_showDraft=false;
+        }
+        invalidatePlan();
+    }
+    emit changed();if(ok)emit saved(QString::number(id));return ok;
+}
+bool LyricsSearchBridge::resolveReplacement(const QString &token,int choice){
+    if(token.isEmpty()||token!=m_planToken){m_status="替换确认已失效，请重新选择后评估；本次未保存";emit changed();return false;}
+    if(choice==0||choice==2){cancelReplacement(token);return false;}
+    return choice==1&&commitPlan(LyricsReplacementChoice::Replace);
+}
+void LyricsSearchBridge::cancelReplacement(const QString &token){
+    if(token.isEmpty()||token!=m_planToken)return;
+    invalidatePlan();m_status="已保留现有歌词；候选和翻译预览仍可继续处理";emit changed();
 }
 }

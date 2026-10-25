@@ -36,6 +36,7 @@
 *.mid
 *.midi
 *.lrc
+!tests/fixtures/d2-01/*.lrc
 
 # The two root bootstrap executables are intentional source-package inputs.
 *.exe

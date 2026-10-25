@@ -68,7 +68,10 @@ private slots:
         QCOMPARE(search.targetTitle(), f.b.title); QVERIFY(search.sourceText().contains("Selected song"));
         QCOMPARE(search.rowCount(), 1); QCOMPARE(network.calls, 0); QVERIFY(search.select(0)); const auto key = search.selectedKey();
         QVERIFY(!search.saveSelected(key, false)); QCOMPARE(f.bytes(f.b.id), f.sourceB);
-        QVERIFY(search.saveSelected(key, true)); QVERIFY(f.bytes(f.b.id).contains("Candidate first"));
+        QSignalSpy replacement(&search,&LyricsSearchBridge::replacementRequested);
+        QVERIFY(!search.saveSelected(key, true));QCOMPARE(replacement.size(),1);
+        QCOMPARE(f.bytes(f.b.id),f.sourceB);QVERIFY(search.resolveReplacement(replacement.first()[0].toString(),1));
+        QVERIFY(f.bytes(f.b.id).contains("Candidate first"));
         QCOMPARE(f.bytes(f.a.id), f.sourceA); QCOMPARE(f.player->current().id, f.a.id); QCOMPARE(f.player->queue().items, queue);
         QCOMPARE(f.lyrics->trackKey(), QString::number(f.a.id)); QVERIFY(!f.lyrics->preview());
         QVERIFY(search.setTargetTrack(QString::number(f.a.id))); QVERIFY(!search.saveSelected(key, true));
@@ -116,7 +119,9 @@ private slots:
         QVERIFY(!search.searchTargets(false)); QCOMPARE(network.calls, 0); QVERIFY(search.searchTargets(true)); QTRY_VERIFY(network.calls > 0); search.stop();
         QVERIFY(!search.saveText("[00:01.00]Local text\n", false)); QVERIFY(f.library.track(c.id).lyrics.isEmpty());
         QVERIFY(search.saveText("[00:01.00]Local text\n", true)); QVERIFY(search.sourceText().contains("Local text"));
-        QVERIFY(!search.markInstrumental(false)); QVERIFY(search.markInstrumental(true)); QVERIFY(f.library.isInstrumental(c.id));
+        QVERIFY(!search.markInstrumental(false));QSignalSpy replacement(&search,&LyricsSearchBridge::replacementRequested);
+        QVERIFY(!search.markInstrumental(true));QCOMPARE(replacement.size(),1);QVERIFY(!f.library.isInstrumental(c.id));
+        QVERIFY(search.resolveReplacement(replacement.first()[0].toString(),1));QVERIFY(f.library.isInstrumental(c.id));
         QCOMPARE(f.player->current().id, f.a.id); QCOMPARE(f.bytes(f.a.id), f.sourceA); QCOMPARE(f.http.requestCount(), 0); service.shutdown();
     }
 };

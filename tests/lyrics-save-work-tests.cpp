@@ -34,7 +34,9 @@ private slots:
         QVERIFY(LyricsLookupDiagnostics::manual(dialog));answer.stop();const auto work=LibraryDiagnostics::work(l);
         qInfo()<<"MANUAL validation_and_backup_file_reads="<<work.fileReads<<"digests="<<work.digestComputations;
         if(!qEnvironmentVariableIsSet("RELAXER_P3_MEASURE_BASELINE")){
-            QCOMPARE(work.fileReads,quint64(4));QCOMPARE(work.digestComputations,quint64(3));
+            // Replacement analysis validates the captured snapshot before the
+            // two existing commit checks and post-save snapshot refresh.
+            QCOMPARE(work.fileReads,quint64(5));QCOMPARE(work.digestComputations,quint64(4));
         }
     }
     void aiSaveValidationWork(){

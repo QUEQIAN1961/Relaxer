@@ -65,7 +65,9 @@ private slots:
         {
             LyricsSearchCoordinator service(&lib,nullptr,QUrl("https://mock.invalid/api"),{},&network);LyricsSearchBridge model(&lib,&player,&service);
             QVERIFY(model.setTargetTracks({QString::number(t.id)},true,true));QCOMPARE(network.calls,calls);
-            QCOMPARE(model.targetTracks()[0].toMap()["searchState"].toString(),QString("choice"));QVERIFY(model.select(0));QVERIFY(model.saveSelected(model.selectedKey(),true));
+            QCOMPARE(model.targetTracks()[0].toMap()["searchState"].toString(),QString("choice"));QVERIFY(model.select(0));
+            QSignalSpy replacement(&model,&LyricsSearchBridge::replacementRequested);QVERIFY(!model.saveSelected(model.selectedKey(),true));QCOMPARE(replacement.size(),1);
+            QVERIFY(model.resolveReplacement(replacement.first()[0].toString(),1));
             QCOMPARE(model.targetTracks()[0].toMap()["searchState"].toString(),QString("complete"));service.shutdown();
         }
         QVERIFY(player.shutdown());
@@ -100,7 +102,9 @@ private slots:
         QVERIFY(!model.saveSelected(key,false));QCOMPARE(LyricsDocumentReader::readFile(lib.absolute(lib.track(track.id).lyrics)).bytes,original);
         QVERIFY(!model.saveSelected("wrong",true));QVERIFY(lib.saveLyrics(track.id,"[00:01.00]Externally changed\n"));
         QVERIFY(!model.saveSelected(key,true));QVERIFY(LyricsDocumentReader::readFile(lib.absolute(lib.track(track.id).lyrics)).bytes.contains("Externally"));
-        QVERIFY(model.select(0));QVERIFY(model.saveSelected(model.selectedKey(),true));QVERIFY(LyricsDocumentReader::readFile(lib.absolute(lib.track(track.id).lyrics)).bytes.contains("Walk home"));
+        QVERIFY(model.select(0));QSignalSpy replacement(&model,&LyricsSearchBridge::replacementRequested);
+        QVERIFY(!model.saveSelected(model.selectedKey(),true));QCOMPARE(replacement.size(),1);
+        QVERIFY(model.resolveReplacement(replacement.first()[0].toString(),1));QVERIFY(LyricsDocumentReader::readFile(lib.absolute(lib.track(track.id).lyrics)).bytes.contains("Walk home"));
         QCOMPARE(network.calls,0);service.shutdown();QVERIFY(player.shutdown());
     }
     void explicitSearchUsesFakeTransportAndSwitchInvalidatesSelection(){

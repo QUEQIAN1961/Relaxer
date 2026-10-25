@@ -1,4 +1,5 @@
 #include "library.h"
+#include "lyrics-replacement-policy.h"
 #include "lyric-text.h"
 #include "lyrics.h"
 #include "lyrics.h"
@@ -547,7 +548,7 @@ bool snapshotFile(const QString &path,LyricFileSnapshot &snapshot,QString &error
 }
 }
 LyricsSaveSnapshot Library::lyricsSaveSnapshot(qint64 id) const {
-    LyricsSaveSnapshot result;const auto current=track(id);result.id=id;result.hash=current.hash;result.lyrics=current.lyrics;
+    LyricsSaveSnapshot result;const auto current=track(id);result.id=id;result.hash=current.hash;result.lyrics=current.lyrics;result.trackFile=current.file;
     if(!current.id){result.error=QStringLiteral("歌曲已不存在，请刷新判断。");return result;}
     const auto destination=absolute(QString("Lyrics/track-%1.lrc").arg(id));
     result.valid=snapshotFile(absolute(current.lyrics),result.source,result.error,m_lyricsSaveMetrics);
@@ -560,7 +561,7 @@ LyricsSaveSnapshot Library::lyricsSaveSnapshot(qint64 id) const {
 bool Library::lyricsSnapshotMatches(const LyricsSaveSnapshot &snapshot,QString *error) const {
     const auto current=lyricsSaveSnapshot(snapshot.id);
     const bool same=snapshot.valid&&current.valid&&snapshot.id==current.id&&snapshot.hash==current.hash&&
-        snapshot.lyrics==current.lyrics&&snapshot.source==current.source&&snapshot.target==current.target;
+        snapshot.lyrics==current.lyrics&&snapshot.trackFile==current.trackFile&&snapshot.source==current.source&&snapshot.target==current.target;
     if(error)*error=same?QString():QStringLiteral("歌词已由外部修改、移除或无法读取，请点击刷新判断后重新选择；本次未保存。");
     return same;
 }
@@ -642,20 +643,17 @@ bool Library::applyArtworkRepair(const ArtworkResult &result) {
     return ok;
 }
 bool Library::updateLyrics(qint64 id, const QString &source) {
+    const auto snapshot=lyricsSaveSnapshot(id);
     const auto sourceDocument = LyricsDocumentReader::readFile(source);
-    if (!sourceDocument.opened || sourceDocument.tooLarge) {
+    if (!sourceDocument.opened || !sourceDocument.complete || sourceDocument.tooLarge) {
         m_error = "歌词文件无法读取或超过 4 MB";
         return false;
     }
-    auto r = QString("Lyrics/track-%1.lrc").arg(id);
-    QSaveFile out(absolute(r));
-    const auto &b = sourceDocument.bytes;
-    if (!out.open(QIODevice::WriteOnly) || out.write(b) != b.size() || !out.commit())
-        return false;
-    bool ok = exec("UPDATE tracks SET lyrics=? WHERE id=?", {r, id})&&exec("INSERT INTO lyrics_playback(track,instrumental) VALUES(?,?) ON CONFLICT(track) DO UPDATE SET instrumental=excluded.instrumental",{id,Lyrics::parse(b).instrumental?1:0});
-    if (ok)
-        notifyChanged();
-    return ok;
+    const auto old=LyricsDocumentReader::readFile(snapshot.source.exists?snapshot.source.path:snapshot.target.path);
+    const auto decision=LyricsReplacementPolicy::analyze(old.bytes,simplifyTraditionalLyrics(sourceDocument.bytes));
+    if(snapshot.source.exists&&snapshot.target.exists&&snapshot.source.path!=snapshot.target.path&&snapshot.source.digest!=snapshot.target.digest){m_error="保存位置另有歌词，请在歌词工作区确认替换";return false;}
+    if(!decision.valid||decision.confirmationRequired){m_error=decision.reason;return false;}
+    return saveLyricsChecked(id,decision.content,snapshot,true);
 }
 LookupCache Library::lookupCache(qint64 id) const {
     LookupCache out;QSqlQuery q(m_db);
@@ -673,7 +671,14 @@ bool Library::clearLookupCache(qint64 id){return exec("DELETE FROM lyrics_lookup
 int Library::lyricOffset(qint64 id) const {QSqlQuery q(m_db);q.prepare("SELECT offset_ms FROM lyrics_playback WHERE track=?");q.addBindValue(id);return q.exec()&&q.next()?qBound(-5000,q.value(0).toInt(),5000):0;}
 bool Library::setLyricOffset(qint64 id,int ms){if(!track(id).id)return false;const bool ok=exec("INSERT INTO lyrics_playback(track,offset_ms) VALUES(?,?) ON CONFLICT(track) DO UPDATE SET offset_ms=excluded.offset_ms",{id,qBound(-5000,ms,5000)});if(ok)notifyChanged();return ok;}
 bool Library::isInstrumental(qint64 id) const {QSqlQuery q(m_db);q.prepare("SELECT instrumental FROM lyrics_playback WHERE track=?");q.addBindValue(id);return q.exec()&&q.next()&&q.value(0).toBool();}
-bool Library::markInstrumental(qint64 id){return saveLyrics(id,QString("纯音乐，请欣赏").toUtf8());}
+bool Library::markInstrumental(qint64 id){
+    const auto snapshot=lyricsSaveSnapshot(id);
+    const auto old=LyricsDocumentReader::readFile(snapshot.source.exists?snapshot.source.path:snapshot.target.path);
+    const auto decision=LyricsReplacementPolicy::analyze(old.bytes,QStringLiteral("纯音乐，请欣赏").toUtf8());
+    if(snapshot.source.exists&&snapshot.target.exists&&snapshot.source.path!=snapshot.target.path&&snapshot.source.digest!=snapshot.target.digest){m_error="保存位置另有歌词，请在歌词工作区确认替换";return false;}
+    if(!decision.valid||decision.confirmationRequired){m_error=decision.reason;return false;}
+    return saveLyricsChecked(id,decision.content,snapshot,true);
+}
 QJsonValue Library::setting(const QString &k, const QJsonValue &def) const {
     QSqlQuery q(m_db);
     q.prepare("SELECT value FROM settings WHERE key=?");

@@ -75,10 +75,20 @@ Page {
             lyricsSearchBridge.searchTracks(searchKeys(), true)
         else lyricsSearchBridge.searchTargets(true)
     }
-    Connections { target: lyricsSearchBridge; function onChanged() { workspace.syncTargets() } }
+    Connections {
+        target: lyricsSearchBridge
+        function onChanged() { workspace.syncTargets() }
+        function onReplacementRequested(token, reason) {
+            replaceConfirm.exactToken = token
+            replaceConfirm.reason = reason
+            replaceConfirm.open()
+        }
+        function onSaved(trackKey) { workspace.advancePending(trackKey) }
+    }
     property bool allowClose: false
     property string localStatus: ""
     property string fileTargetKey: "0"
+    property string fileEditToken: ""
     readonly property bool compact: height < 680
     readonly property bool hasTarget: lyricsSearchBridge.targetTrackKey !== "0"
     readonly property bool taskNeedsAction: translationBridge.pending || translationBridge.preview
@@ -114,15 +124,11 @@ Page {
     }
     function commitSelection(key, target) {
         if (target !== lyricsSearchBridge.targetTrackKey || key !== lyricsSearchBridge.selectedKey) return
-        if (!lyricsSearchBridge.saveSelected(key, true)) return
-        if (translationBridge.taskKey.length) translationBridge.discard()
-        advancePending(target)
+        lyricsSearchBridge.saveSelected(key, true)
     }
     function applySelection() {
         const key = lyricsSearchBridge.selectedKey, target = lyricsSearchBridge.targetTrackKey
-        if (taskNeedsAction) {
-            replaceConfirm.exactKey = key; replaceConfirm.exactTarget = target; replaceConfirm.open()
-        } else commitSelection(key, target)
+        commitSelection(key, target)
     }
     function requestClose() {
         if (taskNeedsAction && !allowClose) leaveConfirm.open()
@@ -379,8 +385,8 @@ Page {
     }
     RoundMenu {
         id: moreMenu
-        RoundMenuItem { text: "导入本地歌词…"; onTriggered: { workspace.fileTargetKey = lyricsSearchBridge.targetTrackKey; localLyrics.open() } }
-        RoundMenuItem { text: "粘贴歌词…"; onTriggered: { pasteDialog.exactTarget = lyricsSearchBridge.targetTrackKey; pasted.text = ""; pasteDialog.open() } }
+        RoundMenuItem { text: "导入本地歌词…"; onTriggered: { workspace.fileTargetKey = lyricsSearchBridge.targetTrackKey; workspace.fileEditToken = lyricsSearchBridge.beginLocalEdit(); if (workspace.fileEditToken.length) localLyrics.open() } }
+        RoundMenuItem { text: "粘贴歌词…"; onTriggered: { pasteDialog.exactTarget = lyricsSearchBridge.targetTrackKey; pasteDialog.editToken = lyricsSearchBridge.beginLocalEdit(); pasted.text = lyricsSearchBridge.draftText; if (pasteDialog.editToken.length) pasteDialog.open() } }
     }
     RoundMenu {
         id: browserMenu
@@ -391,7 +397,7 @@ Page {
         id: localLyrics; objectName: "lyricsImportDialog"; title: "导入本地歌词"; fileMode: FileDialog.OpenFile; nameFilters: ["歌词 (*.lrc *.txt)"]
         onAccepted: {
             if (workspace.fileTargetKey !== lyricsSearchBridge.targetTrackKey) return
-            importConfirm.file = selectedFile; importConfirm.exactTarget = workspace.fileTargetKey; importConfirm.open()
+            lyricsSearchBridge.importLocalLyrics(selectedFile, true, workspace.fileEditToken)
         }
     }
     ConfirmDialog {
@@ -421,33 +427,31 @@ Page {
         onAccepted: translationBridge.discard()
     }
     ConfirmDialog {
-        id: replaceConfirm; objectName: "lyricsTranslationConflict"; parent: workspace.parent; property string exactKey: ""; property string exactTarget: "0"
-        anchors.centerIn: parent; width: Math.min(460, parent.width - 40); modal: true; title: "使用所选歌词版本？"; standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: "所选版本会替换这首歌的本地歌词。该歌曲的翻译任务或未保存预览会被放弃；已经发送的请求可能仍产生费用。"; wrapMode: Text.Wrap }
-        onAccepted: {
-            if (exactTarget !== lyricsSearchBridge.targetTrackKey || exactKey !== lyricsSearchBridge.selectedKey) return
-            workspace.commitSelection(exactKey, exactTarget)
+        id: replaceConfirm; objectName: "lyricsTranslationConflict"; parent: workspace.parent
+        property string exactToken: ""; property string reason: ""
+        anchors.centerIn: parent; width: Math.min(460, parent.width - 40); modal: true; title: "替换歌词"
+        contentItem: Label { text: replaceConfirm.reason; wrapMode: Text.Wrap }
+        footer: DialogButtonBox {
+            ShellButton { objectName: "lyricsReplaceExplicit"; text: "明确替换"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
+            ShellButton { objectName: "lyricsKeepExisting"; text: "保留现有版本"; onClicked: { lyricsSearchBridge.resolveReplacement(replaceConfirm.exactToken, 2); replaceConfirm.close() } }
+            ShellButton { text: "取消"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
         }
+        onAccepted: lyricsSearchBridge.resolveReplacement(exactToken, 1)
+        onClosed: lyricsSearchBridge.cancelReplacement(exactToken)
     }
     ConfirmDialog {
-        id: importConfirm; parent: workspace.parent; property url file; property string exactTarget: "0"
-        anchors.centerIn: parent; width: Math.min(440, parent.width - 40); modal: true; title: "导入并替换本地歌词？"; standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: "将保存所选歌词文件到这首歌，替换已有的本地歌词。"; wrapMode: Text.Wrap }
-        onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey) lyricsSearchBridge.importLocalLyrics(file, true)
-    }
-    ConfirmDialog {
-        id: pasteDialog; parent: workspace.parent; property string exactTarget: "0"
+        id: pasteDialog; parent: workspace.parent; property string exactTarget: "0"; property string editToken: ""
         anchors.centerIn: parent; width: Math.min(580, parent.width - 40); modal: true; title: "粘贴歌词"; standardButtons: Dialog.Save | Dialog.Cancel
         contentItem: ColumnLayout {
             Label { text: "保存会替换这首歌已有的本地歌词。"; color: Theme.secondary; wrapMode: Text.Wrap }
             ScrollView { Layout.fillWidth: true; Layout.preferredHeight: 250; TextArea { id: pasted; objectName: "lyricsPasteText"; placeholderText: "粘贴 LRC 或普通歌词"; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; selectByMouse: true } }
         }
-        onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey) lyricsSearchBridge.saveText(pasted.text, true)
+        onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey) lyricsSearchBridge.saveText(pasted.text, true, editToken)
     }
     ConfirmDialog {
         id: instrumentalConfirm; parent: workspace.parent; property string exactTarget: "0"
         anchors.centerIn: parent; width: Math.min(440, parent.width - 40); modal: true; title: "确认为纯音乐？"; standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Label { text: "仅在确定没有人声歌词时使用。这会把本地歌词替换为纯音乐标记。"; wrapMode: Text.Wrap }
-        onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey && lyricsSearchBridge.markInstrumental(true)) workspace.advancePending(exactTarget)
+        onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey) lyricsSearchBridge.markInstrumental(true)
     }
 }

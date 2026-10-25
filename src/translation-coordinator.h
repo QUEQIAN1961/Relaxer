@@ -44,6 +44,7 @@ public:
     bool save(quint64 taskId,QString *error=nullptr);
     bool forget(quint64 taskId); // Only terminal tasks; bounded storage (32).
     TranslationSummary summary(quint64 taskId) const;
+    QVector<TranslationSummary> replacementTasks(qint64 trackId) const;
     void shutdown();
 signals:
     void taskChanged(const relaxer::TranslationSummary &summary);

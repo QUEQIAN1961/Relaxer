@@ -3,6 +3,7 @@
 #include "translation-coordinator.h"
 #include "library.h"
 #include "lyrics-search-coordinator.h"
+#include "lyrics-replacement-service.h"
 #include <QDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -43,6 +44,7 @@ public:
     static qint64 lyricRankRuns();
     static int lyricComputeThreadCount();
     static QVector<QJsonObject> rankCandidates(const Track &query,const QVector<QJsonObject> &usable);
+    bool importLyricsFile(const QString &path,const LyricsSaveSnapshot &expected={});
 protected:
     void reject() override;
     void closeEvent(QCloseEvent *event) override;
@@ -114,6 +116,9 @@ private:
     QHash<qint64,LyricsSaveSnapshot> m_lyricsSnapshots;
     QString m_storeError;
     bool m_snapshotConflict=false;
+    bool m_replacementSubmitting=false;
+    QString m_lastReplacementIdentity;
+    QHash<qint64,QByteArray> m_manualDrafts;
     struct ReplacementContent { QByteArray bytes;bool preservesTranslation=false; };
     ReplacementContent replacementContent(const Track &track,const QJsonObject &record) const;
     void ensureLyricsSnapshot(qint64 id);
@@ -156,7 +161,10 @@ private:
     bool confirmStopTranslations();
     void translateSelected();
     void remember(qint64 id);
-    bool saveManual(const QByteArray &data,const QString &status,bool preserveText=false);void pasteLyrics();void importLyrics();void markInstrumental();
+    bool saveManual(const QByteArray &data,const QString &status,const QString &candidateIdentity={});
+    QString selectedReplacementIdentity() const;
+    bool confirmReplacement(const LyricsReplacementPlan &plan);
+    void pasteLyrics();void importLyrics();void markInstrumental();
     void selectNextIncomplete(int after);
     QVector<int> batchRows() const;void setMultiSelect(bool on);void saveOffsets();
 };

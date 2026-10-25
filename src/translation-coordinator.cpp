@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <QTimer>
 #include <atomic>
+#include <algorithm>
 
 namespace relaxer {
 namespace {
@@ -23,6 +24,13 @@ bool TranslationSummary::terminal() const {
 }
 bool TranslationSummary::pending() const {
     return state==TranslationState::Queued||state==TranslationState::Running||state==TranslationState::NeedsAttention;
+}
+QVector<TranslationSummary> TranslationCoordinator::replacementTasks(qint64 trackId) const {
+    QVector<TranslationSummary> result;
+    for (const auto &task : m_tasks)
+        if (task->value.trackId == trackId && !task->value.terminal()) result.append(task->value);
+    std::sort(result.begin(), result.end(), [](const auto &a, const auto &b) { return a.taskId < b.taskId; });
+    return result;
 }
 TranslationCoordinator::TranslationCoordinator(Library *library,ai::AiRuntime *runtime,QObject *parent,
                                                std::unique_ptr<TranslationBrowserBackend> browser)

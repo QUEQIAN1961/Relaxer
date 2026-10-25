@@ -1,4 +1,5 @@
 #include "lyrics-search-coordinator.h"
+#include "lyrics-replacement-policy.h"
 #include "release-version.h"
 #include "domain/lyric-match.h"
 #include "importer.h"
@@ -502,7 +503,17 @@ bool LyricsSearchCoordinator::store(const Track &t, const QByteArray &data, bool
         m_storeError = "已有本地歌词，请手动确认替换。";
         return false;
     }
-    const bool ok = m_library->saveLyricsChecked(t.id, data, j->saveSnapshot, preserveText);
+    // Automatic processing has no destructive approval. This also protects an
+    // orphan destination not yet referenced by tracks.lyrics.
+    const auto &guard=j->saveSnapshot;
+    const auto source=guard.source.exists?guard.source:guard.target;
+    const auto existing=source.exists?LyricsDocumentReader::readFile(source.path).bytes:QByteArray();
+    const auto decision=LyricsReplacementPolicy::analyze(existing,preserveText?data:simplifyTraditionalLyrics(data));
+    if(!decision.valid||decision.confirmationRequired||
+        (guard.source.exists&&guard.target.exists&&guard.source.path!=guard.target.path&&guard.source.digest!=guard.target.digest)){
+        m_storeError=decision.reason.isEmpty()?QStringLiteral("保存位置已有不同歌词，请手动确认替换。"):decision.reason;return false;
+    }
+    const bool ok = m_library->saveLyricsChecked(t.id, decision.content, guard, true);
     if (ok)
         remember(t.id);
     else

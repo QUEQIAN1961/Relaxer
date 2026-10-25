@@ -25,7 +25,7 @@ struct LyricFileSnapshot {
 };
 struct LyricsSaveSnapshot {
     qint64 id=0;
-    QString hash,lyrics,error;
+    QString hash,lyrics,error,trackFile;
     LyricFileSnapshot source,target;
     bool valid=false;
 };

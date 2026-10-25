@@ -20,6 +20,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
       m_translation(library,m_ai,this,std::move(browser)),m_translationBridge(library,&m_facade,&m_translation,&m_lyrics,this),
       m_importBridge(library,&m_import,this),m_search(library,this),m_searchBridge(library,&m_facade,&m_search,this) {
     initializeQmlResources();
+    m_searchBridge.setTranslationCoordinator(&m_translation);
     setObjectName("qmlShell");
     // A fixed official style makes custom control backgrounds portable on Windows.
     static const bool styleConfigured = [] { QQuickStyle::setStyle("Basic"); return true; }();
