@@ -7,16 +7,19 @@ Item {
     objectName: "feedbackPanel"
     anchors.fill: parent
     property var service: feedbackBridge
+    property bool suspended: false
+    onSuspendedChanged: updateFeedback()
     property var selected: ({})
     property string lastEventId: ""
     function openDetails(entry) { selected = entry || service.current; details.open() }
     function updateFeedback() {
         if (service.visible) {
             if (lastEventId !== String(service.current.eventId)) {
+                if (suspended) { expiry.stop(); return }
                 lastEventId = String(service.current.eventId)
                 expiry.restart()
             }
-            service.presented(String(service.current.eventId))
+            if (!suspended) service.presented(String(service.current.eventId))
         } else expiry.stop()
     }
     Component.onCompleted: updateFeedback()
@@ -25,10 +28,10 @@ Item {
     Rectangle {
         id: notice
         objectName: "feedbackNotice"
-        visible: panel.service.visible
-        anchors.top: parent.top; anchors.topMargin: 42
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(600, parent.width - 40)
+        visible: panel.service.visible && !panel.suspended
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 84
+        anchors.right: parent.right; anchors.rightMargin: 20
+        width: Math.min(520, parent.width - 40)
         height: noticeContent.implicitHeight + 24
         radius: 10; color: Theme.card; border.color: Theme.border
         ColumnLayout {
@@ -47,7 +50,7 @@ Item {
             }
             UiText {
                 objectName: "feedbackReason"
-                Layout.fillWidth: true; text: panel.service.current.details || ""
+                Layout.fillWidth: true; text: panel.service.current.reason || ""
                 visible: text.length > 0; textFormat: Text.PlainText; color: Theme.secondary
                 wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
             }
@@ -56,8 +59,8 @@ Item {
     ShellButton {
         objectName: "feedbackHistoryButton"
         anchors.right: parent.right; anchors.rightMargin: 16
-        anchors.top: parent.top; anchors.topMargin: 38
-        visible: panel.service.history.length > 0 && !panel.service.visible
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 84
+        visible: panel.service.history.length > 0 && !panel.service.visible && !panel.suspended
         text: "操作记录"; flat: true
         onClicked: panel.openDetails(panel.service.history[0])
     }

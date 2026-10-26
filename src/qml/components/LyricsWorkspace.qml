@@ -148,6 +148,11 @@ Page {
         consent.browser = browserProvider.length > 0
         consent.open()
     }
+    function beginLocalImport() {
+        fileTargetKey = lyricsSearchBridge.targetTrackKey
+        fileEditToken = lyricsSearchBridge.beginLocalEdit()
+        if (fileEditToken.length) localLyrics.open()
+    }
     function startSearch() {
         if (sourceActionsEnabled && !lyricsSearchBridge.busy)
             lyricsSearchBridge.searchDetailed(songTitle.text, songArtist.text, songAlbum.text, fragment.text, true, syncedOnly.checked, replaceExisting.checked, Number(searchDuration.text))
@@ -182,7 +187,8 @@ Page {
     ConfirmDialog {
         id: searchSettings; objectName: "lyricsSearchSettingsDialog"; parent: Overlay.overlay
         anchors.centerIn: parent; width: Math.min(480, workspace.width - 32); modal: true
-        title: "搜索来源与参数"; standardButtons: Dialog.Close
+        title: "搜索来源与参数"
+        footer: DialogButtonBox { ShellButton { objectName: "lyricsSearchSettingsClose"; text: "关闭"; onClicked: searchSettings.close() } }
         contentItem: ColumnLayout {
             spacing: 8
             Label { Layout.fillWidth: true; text: "请求仅发送到勾选的来源。专辑和精确时长由 LRCLIB 消费；其他来源使用歌名、歌手或查询词。"; wrapMode: Text.Wrap; color: Theme.secondary }
@@ -445,7 +451,7 @@ Page {
     }
     RoundMenu {
         id: moreMenu
-        RoundMenuItem { text: "导入本地歌词…"; onTriggered: { workspace.fileTargetKey = lyricsSearchBridge.targetTrackKey; workspace.fileEditToken = lyricsSearchBridge.beginLocalEdit(); if (workspace.fileEditToken.length) localLyrics.open() } }
+        RoundMenuItem { text: "导入本地歌词…"; onTriggered: workspace.beginLocalImport() }
         RoundMenuItem { text: "粘贴歌词…"; onTriggered: { pasteDialog.exactTarget = lyricsSearchBridge.targetTrackKey; pasteDialog.editToken = lyricsSearchBridge.beginLocalEdit(); pasted.text = lyricsSearchBridge.draftText; if (pasteDialog.editToken.length) pasteDialog.open() } }
     }
     RoundMenu {
@@ -456,7 +462,6 @@ Page {
     FileDialog {
         id: localLyrics; objectName: "lyricsImportDialog"; title: "导入本地歌词"; fileMode: FileDialog.OpenFile; nameFilters: ["歌词 (*.lrc *.txt)"]
         onAccepted: {
-            if (workspace.fileTargetKey !== lyricsSearchBridge.targetTrackKey) return
             lyricsSearchBridge.importLocalLyrics(selectedFile, true, workspace.fileEditToken)
         }
     }

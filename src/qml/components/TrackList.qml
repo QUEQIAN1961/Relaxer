@@ -150,7 +150,7 @@ Item {
         }
         MenuSeparator{}
         RoundMenuItem {text:"设置歌曲封面…";visible:context.keys.length===1;onTriggered:coverPicker.open()}
-        RoundMenuItem {text:"导入本地歌词…";visible:context.keys.length===1;onTriggered:lyricsPicker.open()}
+        RoundMenuItem {text:"导入本地歌词…";visible:context.keys.length===1;onTriggered:lyricsSearchBridge.requestLocalImport(context.targetKey)}
         RoundMenuItem {text:"打开音乐所在目录";visible:context.keys.length===1;onTriggered:libraryBridge.openTrackFolder(context.targetKey)}
         MenuSeparator{}
         RoundMenuItem {text:"在歌单中上移";visible:Number(libraryBridge.playlistId)>0;onTriggered:libraryBridge.moveTracksInPlaylist(context.keys,-1)}
@@ -169,5 +169,4 @@ Item {
         onAccepted:{const id=libraryBridge.createPlaylist(newListName.text);if(id!=="0")libraryBridge.addTracksToPlaylist(id,context.keys)}
     }
     FileDialog{id:coverPicker;title:"歌曲封面";nameFilters:["图片 (*.png *.jpg *.jpeg *.webp)"];onAccepted:libraryBridge.setTrackCover(context.targetKey,selectedFile)}
-    FileDialog{id:lyricsPicker;title:"导入本地歌词";nameFilters:["歌词 (*.lrc *.txt)"];onAccepted:{lyricsSearchBridge.setTargetTrack(context.targetKey);lyricsSearchBridge.importLocalLyrics(selectedFile,true);lyricsSearchBridge.setTargetTrack("0")}}
 }

@@ -108,14 +108,6 @@ bool LyricsModel::seekRow(int row) {
     if(!m_facade||!timed()||row<0||row>=m_rows.size()||m_track.id!=m_facade->current().id||!m_facade->seekable())return false;
     m_facade->seek(qBound<qint64>(0,m_rows[row].time+m_offset,m_facade->duration()));return true;
 }
-bool LyricsModel::importLocalLyrics(const QUrl &file) {
-    if(!file.isLocalFile()||!m_library||!m_facade||!m_track.id||m_track.id!=m_facade->current().id)return false;
-    const auto input=LyricsDocumentReader::readFile(file.toLocalFile());
-    if(!input.opened||!input.complete||input.tooLarge){m_error=input.error;emit documentChanged();return false;}
-    const auto snapshot=m_library->lyricsSaveSnapshot(m_track.id);
-    if(!m_library->saveLyricsChecked(m_track.id,input.bytes,snapshot)){m_error=m_library->lastError();emit documentChanged();return false;}
-    reload();return true;
-}
 void LyricsModel::presentTranslation(const TranslationSummary &summary) {
     if(!m_facade||!m_library||summary.trackId!=m_facade->current().id)return;
     if(m_track.id!=summary.trackId)readCurrent();

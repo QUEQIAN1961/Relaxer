@@ -14,6 +14,7 @@ ConfirmDialog {
     function review(keys) {
         if (!lyricsSearchBridge.prepareInstrumentalBatch(keys)) return
         riskConsent.checked = false
+        riskDetails.checked = false
         open()
     }
     contentItem: ColumnLayout {
@@ -25,6 +26,31 @@ ConfirmDialog {
                 + "，无法处理 " + (dialog.overview.unavailable || 0) + "。"
         }
         Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "仅在确认这些歌曲没有人声歌词时使用。逐曲独立保存；未授权的风险目标会跳过，失败不会回退其他已成功歌曲。" }
+        ShellButton {
+            id: riskDetails; objectName: "batchInstrumentalRiskDetails"; visible: dialog.overview.risk > 0
+            text: (checked ? "收起" : "查看") + "这 " + (dialog.overview.risk || 0) + " 首风险歌曲"
+            checkable: true
+        }
+        ScrollView {
+            objectName: "batchInstrumentalRiskList"; visible: riskDetails.checked && dialog.overview.risk > 0
+            Layout.fillWidth: true; Layout.preferredHeight: Math.min(220, riskRows.implicitHeight); clip: true
+            ColumnLayout {
+                id: riskRows; width: parent.width; spacing: 5
+                Repeater {
+                    model: dialog.overview.riskTargets || []
+                    delegate: Label {
+                        required property var modelData
+                        objectName: "batchRisk-" + modelData.trackKey
+                        Layout.fillWidth: true; textFormat: Text.PlainText; elide: Text.ElideRight
+                        text: modelData.title.slice(0, 48) + (modelData.title.length > 48 ? "…" : "") + (modelData.artist ? " · " + modelData.artist : "")
+                        HoverHandler { id: riskHover }
+                        ToolTip.visible: riskHover.hovered
+                        ToolTip.text: modelData.title + " · " + modelData.artist + "\n" + modelData.reason
+                    }
+                }
+                Label { visible: dialog.overview.riskOmitted > 0; text: "另有 " + (dialog.overview.riskOmitted || 0) + " 首未展开显示；仍属于本次冻结授权集合。"; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            }
+        }
         CheckBox {
             id: riskConsent; objectName: "batchInstrumentalRiskConsent"
             Layout.fillWidth: true; visible: dialog.overview.risk > 0

@@ -1,5 +1,6 @@
 #include "feedback-bridge.h"
 #include <QDateTime>
+#include <QMediaPlayer>
 #include <QLoggingCategory>
 
 Q_LOGGING_CATEGORY(relaxerFeedback, "relaxer.feedback")
@@ -8,9 +9,19 @@ void FeedbackBridge::post(const QString &source, const QString &category, const 
                           const QString &details, const QString &operation, const QString &target,
                           bool retryable, bool actionRequired, int code) {
     if (m_closing || message.isEmpty()) return;
+    QString reason;
+    if(category=="Error"||category=="Warning") {
+        reason=QStringLiteral("请打开详情查看具体原因和技术诊断。");
+        if(source=="Playback")switch(code){
+            case QMediaPlayer::ResourceError:reason=QStringLiteral("音乐文件无法读取，请检查文件是否存在且可访问。");break;
+            case QMediaPlayer::FormatError:reason=QStringLiteral("音乐格式或编码无法解析，请检查文件是否完整。");break;
+            case QMediaPlayer::NetworkError:reason=QStringLiteral("媒体连接失败，请检查网络后重试。");break;
+            case QMediaPlayer::AccessDeniedError:reason=QStringLiteral("没有权限访问音乐文件，请检查访问权限。");break;
+        }
+    }
     const auto id = QString::number(++m_sequence);
     const QVariantMap event = {{"eventId", id}, {"timestamp", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
-        {"source", source}, {"category", category}, {"message", message.left(512)},
+        {"source", source}, {"category", category}, {"message", message.left(512)}, {"reason",reason},
         {"details", details.left(16384)}, {"operationId", operation.isEmpty() ? id : operation},
         {"targetId", target}, {"retryable", retryable}, {"actionRequired", actionRequired},
         {"code", code}, {"presented", false}, {"detailsTruncated", details.size() > 16384}};

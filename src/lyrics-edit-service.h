@@ -31,7 +31,7 @@ public:
     QString error() const { return m_error; }
 private:
     friend class LyricsEditService;
-    struct Entry { qint64 id = 0; QString title, state, reason; LyricsReplacementPlan plan; };
+    struct Entry { qint64 id = 0; QString title, artist, state, reason; LyricsReplacementPlan plan; };
     QVector<Entry> m_entries;
     QString m_error;
     QStringList m_details;

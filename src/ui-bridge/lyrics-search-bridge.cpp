@@ -357,6 +357,12 @@ bool LyricsSearchBridge::saveSelected(const QString &key,bool confirmed){
     m_showDraft=false;
     return prepareSave(bytes,key,m_guard,true);
 }
+bool LyricsSearchBridge::requestLocalImport(const QString &key){
+    bool valid=false;const auto id=key.toLongLong(&valid);
+    if(!valid||id<=0||!m_library->track(id).id||m_submitting||m_batchPrepared||m_batchRunning)
+        return searchInvalid("当前无法导入歌词，请先结束批量操作并确认歌曲仍然存在");
+    emit localImportRequested(QString::number(id));return true;
+}
 QString LyricsSearchBridge::beginLocalEdit(){
     if(m_submitting||!targetId())return {};
     m_editGuard=m_library->lyricsSaveSnapshot(targetId());
@@ -377,6 +383,9 @@ bool LyricsSearchBridge::importLocalLyrics(const QUrl &file,bool confirmed,const
     if(!confirmed||!file.isLocalFile())return false;
     const auto input=LyricsDocumentReader::readFile(file.toLocalFile());
     if(!input.opened||!input.complete||input.tooLarge){m_status=input.error;emit changed();emit operationFailed(QString::number(targetId()),m_status);return false;}
+    if(m_manualDrafts.contains(targetId()) && m_manualDrafts.value(targetId())!=input.bytes){
+        m_status="当前歌曲有未保存手动草稿，请先处理草稿后再导入其他歌词";emit changed();emit operationFailed(targetTrackKey(),m_status);return false;
+    }
     return saveBytes(input.bytes,true,editToken);
 }
 bool LyricsSearchBridge::markInstrumental(bool confirmed){

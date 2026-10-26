@@ -187,6 +187,13 @@ ApplicationWindow {
     function backgroundUrl(file,blur){return String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
     function applySettings() { Theme.fontFamily=root.restFontFamily; if(settingsBridge.values.reduceMotion)relocateUpcoming(lyricsOpen); Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}) }
     Component.onCompleted: { width=settingsBridge.windowBounds.width;height=settingsBridge.windowBounds.height;applySettings(); if(settingsBridge.windowBounds.maximized)showMaximized() }
+    Connections {
+        target: lyricsSearchBridge
+        function onLocalImportRequested(key) {
+            if (!lyricsWorkspace.visible || lyricsSearchBridge.targetTrackKey !== key) root.openLyricsTools([key], false)
+            if (lyricsWorkspace.visible && lyricsSearchBridge.targetTrackKey === key) lyricsWorkspace.beginLocalImport()
+        }
+    }
     Connections { target: settingsBridge; function onSettingsChanged(){root.applySettings()} }
     Connections { target: importBridge; function onReadyToClose(){if(root.awaitingImportClose){root.allowClose=true;Qt.callLater(root.close)}} }
     Connections { target: appBridge; function onPageChanged(){if(root.lyricsOpen)root.animatePlayer(false)} }
@@ -542,7 +549,7 @@ ApplicationWindow {
     PlaylistEditor{id:playlistEditor;parent:root.popupLayer;onCreated:key=>root.openPlaylist(key)}
     LyricsWorkspace{id:lyricsWorkspace;parent:root.contentItem;z:6;onBatchInstrumentalRequested:keys=>batchInstrumental.review(keys)}
     BatchInstrumentalDialog{id:batchInstrumental;parent:root.popupLayer}
-    FeedbackPanel{id:feedbackPanel;parent:root.popupLayer;z:100}
+    FeedbackPanel{id:feedbackPanel;parent:root.popupLayer;z:100;suspended:root.popupOpen}
     Toast{id:toast;anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:playerBar.top;anchors.bottomMargin:16;z:20}
     ConfirmDialog {
         id:closeConfirm;parent:root.popupLayer;objectName:"closeTasksConfirmation";anchors.centerIn:parent;width:Math.min(480,root.width-40);modal:true

@@ -78,12 +78,12 @@ private slots:
         model->reload();model.reset();QCoreApplication::processEvents();QVERIFY(player->shutdown());player.reset();
         QCOMPARE(QSqlDatabase::connectionNames().size(),1);
     }
-    void failedFileAndLocalImport() {
+    void failedFileAndReadOnlyApi() {
         QTemporaryDir dir;Library lib(dir.path());QVERIFY(lib.open());const auto id=fixture(lib,"target");QVERIFY(id);
         PlaybackFacade player(&lib,nullptr,true);LyricsModel model(&lib,&player);player.play({id},id);QTRY_COMPARE(model.trackKey(),QString::number(id));
         const auto path=dir.filePath("歌词 with spaces.lrc");QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));file.write("[00:01.00]Imported\n");file.close();
-        QVERIFY(model.importLocalLyrics(QUrl::fromLocalFile(path)));QTRY_COMPARE(model.count(),1);
-        QVERIFY(!model.importLocalLyrics(QUrl("https://example.invalid/test.lrc")));
+        QCOMPARE(model.metaObject()->indexOfMethod("importLocalLyrics(QUrl)"),-1);
+        QVERIFY(lib.saveLyricsPreservingText(id,"[00:01.00]Imported\n"));model.reload();QTRY_COMPARE(model.count(),1);
         QVERIFY(QFile::remove(lib.absolute(lib.track(id).lyrics)));model.reload();QTRY_VERIFY(!model.error().isEmpty());QCOMPARE(model.count(),0);QVERIFY(player.shutdown());
     }
 };

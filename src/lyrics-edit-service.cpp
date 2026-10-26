@@ -127,7 +127,11 @@ QVariantMap LyricsInstrumentalBatch::overview() const {
         if(entry.state=="ready")++safe; else if(entry.state=="risk")++risk;
         else if(entry.state=="already")++already; else if(entry.state=="unavailable")++unavailable;
     }
-    return {{"total",m_entries.size()},{"safe",safe},{"risk",risk},{"already",already},{"unavailable",unavailable},{"error",m_error}};
+    QVariantList riskTargets;
+    for(const auto &entry:m_entries)if(entry.state=="risk" && riskTargets.size()<20)
+        riskTargets.append(QVariantMap{{"trackKey",QString::number(entry.id)},{"title",entry.title},{"artist",entry.artist},{"reason",entry.plan.decision.reason}});
+    return {{"total",m_entries.size()},{"safe",safe},{"risk",risk},{"already",already},{"unavailable",unavailable},{"error",m_error},
+        {"riskTargets",riskTargets},{"riskOmitted",qMax(0,risk-int(riskTargets.size()))}};
 }
 QVariantMap LyricsInstrumentalBatch::result() const {
     QVariantList rows;
@@ -148,7 +152,7 @@ LyricsInstrumentalBatch LyricsEditService::prepareInstrumental(Library &library,
     for(auto id:ids) {
         if(seen.contains(id))continue;
         seen.insert(id);
-        LyricsInstrumentalBatch::Entry entry;entry.id=id;entry.title=library.track(id).title;
+        LyricsInstrumentalBatch::Entry entry;entry.id=id;entry.title=library.track(id).title;entry.artist=library.track(id).artist;
         const auto snapshot=snapshots.contains(id)?snapshots.value(id):library.lyricsSaveSnapshot(id);
         entry.plan=LyricsReplacementService::prepare(library,snapshot,QStringLiteral("纯音乐，请欣赏").toUtf8(),QString::number(id)+":instrumental",translation);
         if(!entry.plan.decision.valid){entry.state="unavailable";entry.reason=entry.plan.decision.reason;}

@@ -60,6 +60,7 @@ public:
     Q_INVOKABLE bool searchTracks(const QStringList &keys,bool confirmed=false);
     Q_INVOKABLE bool searchQuery(const QString &title,const QString &artist,const QString &fragment,bool confirmed=false,bool requireTimed=false);
     Q_INVOKABLE bool searchDetailed(const QString &title,const QString &artist,const QString &album,const QString &fragment,bool confirmed=false,bool requireTimed=false,bool replace=false,double durationMs=-1);
+    Q_INVOKABLE bool requestLocalImport(const QString &key);
     Q_INVOKABLE QString beginLocalEdit();
     Q_INVOKABLE bool saveText(const QString &text,bool confirmed=false,const QString &editToken={});
     Q_INVOKABLE bool importLocalLyrics(const QUrl &file,bool confirmed=false,const QString &editToken={});
@@ -88,6 +89,7 @@ signals:
     void operationFailed(const QString &target, const QString &message);
     void changed();
     void sourcesChanged();
+    void localImportRequested(const QString &key);
     void replacementRequested(const QString &token,const QString &reason);
     void saved(const QString &trackKey);
     void editCompleted(const QString &category,const QString &operation,const QString &message,const QString &details);
