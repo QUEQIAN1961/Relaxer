@@ -2,6 +2,7 @@
 #include "ai/ai-runtime.h"
 #include "translation-coordinator.h"
 #include "library.h"
+#include "lyrics-translation-classification.h"
 #include "lyrics-search-coordinator.h"
 #include "lyrics-replacement-service.h"
 #include <QDialog>
@@ -80,7 +81,7 @@ private:
     struct AssessmentCache {
         QString path,hash,title,artist;
         qint64 size=0,modified=0;
-        bool instrumental=false,fileExists=false,readable=false,tooLarge=false,sourceValid=false;
+        bool instrumental=false,fileExists=false,readable=false,tooLarge=false,sourceValid=false,verifiedBilingual=false;
         quint64 revision=0;
         QByteArray contentDigest;
         ai::lyrics::TranslationAssessment value;
@@ -107,6 +108,8 @@ private:
     void updateFilterRow(int row,const LyricsFilterState *state=nullptr);
     void finishFilterUpdate();
     ai::lyrics::TranslationAssessment translationAssessment(const Track &track,const bool *instrumentalState=nullptr);
+    TranslationClassification translationClassification(const Track &track,TranslationJudgment judgment,bool taskRunning,
+                                                          bool taskUnsaved,const bool *instrumentalState=nullptr);
     void requestTranslationCacheAudit();
     void startTranslationCacheAudit();
     void applyTranslationCacheAudit(const QVector<TranslationAuditResult> &results,const FilterMetrics &work);

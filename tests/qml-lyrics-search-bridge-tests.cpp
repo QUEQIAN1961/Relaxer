@@ -116,6 +116,40 @@ private slots:
         QVERIFY(model->search(true));QTRY_VERIFY(network.calls>0);model->stop();QVERIFY(!model->busy());model.reset();QCoreApplication::processEvents();service.shutdown();QVERIFY(player.shutdown());
         QVERIFY(lib.track(b.id).lyrics.isEmpty());QCOMPARE(QSqlDatabase::connectionNames().size(),1);
     }
+    // D2-06: the QML bridge and the shared policy agree on every synthetic case.
+    void translationFlagsMatchSharedClassification(){
+        QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        struct Row { QString key; bool missing; bool completed; QString status; };
+        QVector<Row> expected;
+        const QByteArray mono="[00:01.00]Hello my friend\n[00:03.00]We walk together\n";
+        const QByteArray bilingual=QString("[re:relaxer-bilingual]\n[00:01.00]Hello friend\n[00:01.00]朋友你好\n[00:02.00]Goodbye friend\n[00:02.00]朋友再见\n").toUtf8();
+        const QByteArray chinese=QString("[00:01.00]今天的风很温柔\n[00:03.00]我们一起走回家\n").toUtf8();
+        const auto a=seed(lib,"Foreign","foreign"),b=seed(lib,"Bilingual","bilingual"),c=seed(lib,"Missing","missing"),d=seed(lib,"中文","chinese");
+        QVERIFY(lib.saveLyrics(a.id,mono));
+        QVERIFY(lib.saveLyrics(b.id,bilingual));
+        QVERIFY(lib.saveLyrics(d.id,chinese));
+        FakeNetwork network;PlaybackFacade player(&lib,nullptr,true);LyricsSearchCoordinator service(&lib,nullptr,QUrl("https://mock.invalid/api"),{},&network);
+        LyricsSearchBridge model(&lib,&player,&service);
+        QVERIFY(model.setTargetTracks({QString::number(a.id),QString::number(b.id),QString::number(c.id),QString::number(d.id)},false,true));
+        auto rows=model.targetTracks();
+        QVERIFY(rows[0].toMap()["translationMissing"].toBool());   // foreign -> needs
+        QVERIFY(!rows[0].toMap()["translationCompleted"].toBool());
+        QCOMPARE(rows[0].toMap()["translationStatus"].toString(),QString("needs-translation"));
+        QVERIFY(!rows[1].toMap()["translationMissing"].toBool());  // bilingual -> translated
+        QVERIFY(rows[1].toMap()["translationCompleted"].toBool());
+        QCOMPARE(rows[1].toMap()["translationStatus"].toString(),QString("translated"));
+        QVERIFY(!rows[2].toMap()["translationMissing"].toBool());  // no lyrics
+        QCOMPARE(rows[2].toMap()["translationStatus"].toString(),QString("no-lyrics"));
+        QVERIFY(!rows[3].toMap()["translationMissing"].toBool());  // chinese body
+        QCOMPARE(rows[3].toMap()["translationStatus"].toString(),QString("native-chinese"));
+        // Manual judgement flips the no-lyrics row back into the missing list.
+        QVERIFY(lib.setTranslationJudgment(c.id,TranslationJudgment::NeedsTranslation));
+        QVERIFY(model.targetTracks()[2].toMap()["translationMissing"].toBool());
+        QVERIFY(lib.setTranslationJudgment(a.id,TranslationJudgment::NoTranslationNeeded));
+        QVERIFY(!model.targetTracks()[0].toMap()["translationMissing"].toBool());
+        QCOMPARE(model.targetTracks()[0].toMap()["translationStatus"].toString(),QString("not-needed"));
+        QCOMPARE(network.calls,0);service.shutdown();QVERIFY(player.shutdown());
+    }
 };
 QTEST_MAIN(QmlLyricsSearchBridgeTests)
 #include "qml-lyrics-search-bridge-tests.moc"

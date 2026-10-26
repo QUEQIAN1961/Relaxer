@@ -29,6 +29,10 @@ enum class TranslationNeed { NotApplicable, Chinese, Translated, Missing, Review
 struct TranslationAssessment {
     TranslationNeed need = TranslationNeed::NotApplicable;
     QString reason;
+    // True when the body itself carries the 纯音乐 marker. Exposed so shared
+    // classification can tell it apart from "no usable body" without parsing
+    // the human readable reason.
+    bool instrumental = false;
     bool missing() const { return need == TranslationNeed::Missing || need == TranslationNeed::Review; }
 };
 TranslationAssessment assessTranslation(const QByteArray &source, const QString &localTitle = {}, const QString &localArtist = {});

@@ -208,7 +208,7 @@ PreparedLyrics prepare(const QByteArray &source, const QString &localTitle, cons
 
 TranslationAssessment assessTranslation(const QByteArray &source, const QString &localTitle, const QString &localArtist) {
     const auto prepared = prepare(source, localTitle, localArtist);
-    if (prepared.instrumental) return {TranslationNeed::NotApplicable, QStringLiteral("纯音乐")};
+    if (prepared.instrumental) return {TranslationNeed::NotApplicable, QStringLiteral("纯音乐"), true};
     if (prepared.lines.isEmpty()) return {TranslationNeed::NotApplicable, QStringLiteral("没有有效歌词正文")};
     struct Counts { int han = 0; int foreign = 0; };
     QVector<Counts> counts;

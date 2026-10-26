@@ -3,6 +3,7 @@
 #include "playback-facade.h"
 #include "lyrics-replacement-service.h"
 #include "lyrics-edit-service.h"
+#include "lyrics-translation-classification.h"
 #include <QAbstractListModel>
 #include <QVariantList>
 #include <QSet>
@@ -116,7 +117,9 @@ private:
     bool candidateVisible(const QJsonObject &record) const;
     void refreshCandidateFilter();
     bool searchInvalid(const QString &message);
-    mutable QHash<qint64,QPair<QByteArray,bool>> m_translationCache;
+    struct CachedClassification { QByteArray signature; TranslationClassification value; };
+    mutable QHash<qint64,CachedClassification> m_translationCache;
+    TranslationClassification translationClassification(const Track &track)const;
     bool translationMissing(const Track &track)const;
     bool startTargets(const QVector<qint64> &ids,bool confirmed,bool missingOnly);
     qint64 targetId()const{return m_target?m_target:m_facade->current().id;}

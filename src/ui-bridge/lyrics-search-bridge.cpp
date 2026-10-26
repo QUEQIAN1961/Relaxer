@@ -195,23 +195,38 @@ void LyricsSearchBridge::restoreReviews(const QVector<qint64> &ids){
         if(digest==value["sourceDigest"].toString())m_pendingReviews.insert(id);
     }
 }
-bool LyricsSearchBridge::translationMissing(const Track &track)const{
+TranslationClassification LyricsSearchBridge::translationClassification(const Track &track)const{
     const auto judgment=m_library->translationJudgment(track.id);
-    if(judgment==TranslationJudgment::NoTranslationNeeded||m_library->isInstrumental(track.id))return false;
+    const bool instrumental=m_library->isInstrumental(track.id);
+    // The task snapshot belongs to the same decision as the saved file; a paid
+    // preview must never be reported as "missing" while it waits to be written.
+    bool running=false,unsaved=false;
+    if(m_translation)for(const auto &task:m_translation->replacementTasks(track.id)){
+        if(task.hasPreview())unsaved=true;
+        else if(task.pending())running=true;
+    }
     const auto path=track.lyrics.isEmpty()?QString():m_library->absolute(track.lyrics);const QFileInfo file(path);
     const auto signature=QJsonDocument(QJsonArray{path,double(file.size()),double(file.lastModified().toMSecsSinceEpoch()),
-        track.title,track.artist,int(judgment)}).toJson(QJsonDocument::Compact);
+        track.hash,track.title,track.artist,int(judgment),instrumental,running,unsaved}).toJson(QJsonDocument::Compact);
     const auto cached=m_translationCache.constFind(track.id);
-    if(cached!=m_translationCache.cend()&&cached->first==signature)return cached->second;
-    ai::lyrics::TranslationAssessment assessment;
-    if(!path.isEmpty()&&file.isFile()){
+    if(cached!=m_translationCache.cend()&&cached->signature==signature)return cached->value;
+    TranslationClassificationInput input;
+    input.judgment=judgment;input.instrumental=instrumental;input.lyricsConfigured=!track.lyrics.isEmpty();
+    input.fileExists=input.lyricsConfigured&&file.isFile();input.taskRunning=running;input.taskUnsaved=unsaved;
+    if(input.fileExists){
         const auto source=LyricsDocumentReader::readFile(path);
-        if(source.opened&&source.complete&&!source.tooLarge)assessment=ai::lyrics::assessTranslation(source.bytes,track.title,track.artist);
+        input.fileReadable=source.opened&&source.complete&&!source.tooLarge;
+        if(input.fileReadable){
+            input.content=ai::lyrics::assessTranslation(source.bytes,track.title,track.artist);
+            input.verifiedBilingual=input.content.need==ai::lyrics::TranslationNeed::Chinese&&
+                LyricsTranslationClassification::verifiedMarkedBilingual(source.bytes,track.title,track.artist);
+        }
     }
-    const bool missing=assessment.need!=ai::lyrics::TranslationNeed::Translated&&
-        (judgment==TranslationJudgment::NeedsTranslation||assessment.missing());
-    m_translationCache.insert(track.id,{signature,missing});return missing;
+    const auto value=LyricsTranslationClassification::decide(input);
+    m_translationCache.insert(track.id,{signature,value});
+    return value;
 }
+bool LyricsSearchBridge::translationMissing(const Track &track)const{return translationClassification(track).needsTranslation;}
 QVariantList LyricsSearchBridge::targetTracks()const{
     QVariantList result;auto ids=m_targets;if(ids.isEmpty()&&targetId())ids.append(targetId());
     const auto tracks=m_targets.isEmpty()?m_library->tracksByIds(ids):m_targetRows;
@@ -226,8 +241,12 @@ QVariantList LyricsSearchBridge::targetTracks()const{
         auto label=state=="complete"?QString("已完成"):state=="choice"?QString("待选择歌词版本"):state=="searching"?m_trackStatus.value(id,QString("正在查找")):QString("未完成");
         if(state=="incomplete"&&!m_trackStatus.value(id).isEmpty()&&active!=LyricsSearchState::Searching&&active!=LyricsSearchState::Queued)
             label+=" · "+m_trackStatus.value(id);
+        const auto translation=translationClassification(track);
         result.append(QVariantMap{{"trackKey",QString::number(id)},{"title",track.title},{"artist",track.artist},
-            {"lyricsAvailable",saved},{"translationMissing",translationMissing(track)},{"status",label},{"searchState",state}});
+            {"lyricsAvailable",saved},{"translationMissing",translation.needsTranslation},
+            {"translationCompleted",translation.completed},
+            {"translationStatus",LyricsTranslationClassification::statusKey(translation.status)},
+            {"translationReason",translation.reason},{"status",label},{"searchState",state}});
     }return result;
 }
 bool LyricsSearchBridge::setTargetTrack(const QString &key){

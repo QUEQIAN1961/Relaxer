@@ -170,6 +170,23 @@ class TranslationWorkflowTests : public QObject {
         QVERIFY(lib.setTranslationJudgment(id,J::NeedsTranslation));task=coordinator.prepareAi(id);QVERIFY(coordinator.start(task));QVERIFY(lib.setTranslationJudgment(id,J::NoTranslationNeeded));QTRY_COMPARE(coordinator.summary(task).state,TranslationState::Invalidated);QCOMPARE(paid.requestCount(),0);
         QVERIFY(lib.setTranslationJudgment(id,J::NeedsTranslation));task=coordinator.prepareAi(id);QVERIFY(coordinator.start(task));QTRY_VERIFY(coordinator.summary(task).hasPreview());QCOMPARE(paid.requestCount(),1);QCOMPARE(coordinator.prepareAi(id),quint64(0));QCOMPARE(bytes(lib.absolute(lib.track(id).lyrics)),source);QVERIFY(coordinator.discard(task));
     }
+    // D2-06: the Widgets filter consumes the shared decision; a "missing" row is
+    // visible under the translation-only filter and a "completed" row is green.
+    void filterMatchesSharedClassification(){
+        QTemporaryDir dir;Library lib(dir.path());QVERIFY(lib.open());const auto ids=seed(lib);QCOMPARE(ids.size(),3);
+        // Foreign body -> needs translation; marked bilingual -> translated; empty -> no source.
+        QVERIFY(lib.saveLyrics(ids[0],source));
+        QVERIFY(lib.saveLyrics(ids[1],QString("[re:relaxer-bilingual]\n[00:01.00]Hello friend\n[00:01.00]朋友你好\n[00:02.00]Goodbye friend\n[00:02.00]朋友再见\n").toUtf8()));
+        LyricsLookup d(&lib,ids,nullptr,QUrl("http://127.0.0.1:9/api"));all(d);
+        d.findChild<QCheckBox *>("lyricsMissingTranslationOnly")->setChecked(true);
+        // ids[0] foreign -> shown in filter, badge 待判断, not green
+        QVERIFY(!item(d,ids[0])->isHidden());QCOMPARE(badge(d,ids[0]),QString("待判断"));QVERIFY(!green(d,ids[0]));
+        // ids[1] marked bilingual -> hidden in filter, green, 翻译完成
+        QVERIFY(item(d,ids[1])->isHidden());QVERIFY(green(d,ids[1]));QCOMPARE(badge(d,ids[1]),QString("翻译完成"));
+        // ids[2] no lyrics -> not missing, not green, badge empty
+        QVERIFY(item(d,ids[2])->isHidden());QVERIFY(!green(d,ids[2]));
+        QCOMPARE(badge(d,ids[2]),QString());
+    }
 };
 QTEST_MAIN(TranslationWorkflowTests)
 #include "translation-workflow-tests.moc"

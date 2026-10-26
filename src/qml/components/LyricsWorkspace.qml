@@ -255,12 +255,20 @@ Page {
                         required property string searchState
                         required property bool lyricsAvailable
                         required property bool translationMissing
+                        required property string translationStatus
+                        required property string translationReason
                         objectName: "lyricsTarget-" + trackKey
                         readonly property bool matchesFilter: (!missingLyrics.checked || !lyricsAvailable) && (!missingTranslation.checked || translationMissing)
                         visible: matchesFilter
                         width: ListView.view.width; height: matchesFilter ? 74 : 0; padding: 9
                         highlighted: trackKey === lyricsSearchBridge.targetTrackKey
-                        Accessible.name: title + " · " + artist + " · " + status
+                        Accessible.name: title + " · " + artist + " · " + status + (translationReason.length ? " · " + translationReason : "")
+                        // Shared classification reason: explains "cannot read" or "needs a look"
+                        // instead of silently dropping the row from the filter.
+                        ToolTip.visible: hovered && translationReason.length > 0 &&
+                            translationStatus !== "translated" && translationStatus !== "not-needed"
+                        ToolTip.text: translationReason
+                        ToolTip.delay: 700
                         background: Rectangle { radius: 7; color: parent.highlighted ? Theme.selected : parent.hovered ? Theme.hover : "transparent" }
                         contentItem: Item {
                             implicitHeight: 54

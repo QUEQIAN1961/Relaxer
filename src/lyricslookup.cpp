@@ -23,6 +23,7 @@
 #include <QStringConverter>
 #include <QTextDocumentFragment>
 #include "lyricslookup.h"
+#include "lyrics-translation-classification.h"
 #include "domain/lyric-match.h"
 #include "importer.h"
 #include "lyric-remote.h"
@@ -122,30 +123,6 @@ public:
     }
 };
 bool rowComplete(QListWidgetItem *item){return item && item->data(StateRole).toInt()==Complete;}
-bool verifiedMarkedTranslation(const QByteArray &bytes,const Track &track){
-    // A merge marker alone is insufficient: every source line must have a
-    // matching saved partner. Reuse the production response validator.
-    static const QRegularExpression marker(QStringLiteral("^\\s*\\[re:relaxer-bilingual\\]\\s*$"),QRegularExpression::MultilineOption|QRegularExpression::CaseInsensitiveOption);
-    QStringDecoder decoder(QStringConverter::Utf8);QString text=decoder(bytes);if(decoder.hasError())return false;
-    if(text.startsWith(QChar(0xfeff)))text.remove(0,1);
-    if(!marker.match(text).hasMatch())return false;
-    auto parsed=ai::lyrics::prepare(bytes,track.title,track.artist);
-    if(parsed.lines.isEmpty()||parsed.lines.size()%2)return false;
-    if(parsed.timed){
-        static const QRegularExpression stamp(QStringLiteral("\\[\\d+:\\d{1,2}(?:[.:]\\d{1,3})?\\]"));
-        static const QRegularExpression meta(QStringLiteral("^\\[(?:ar|al|ti|by|re|ve|length|offset):"),QRegularExpression::CaseInsensitiveOption);
-        for(const auto &raw:text.split('\n')){const auto line=raw.trimmed();if(!line.isEmpty()&&!meta.match(line).hasMatch()&&!stamp.match(line).hasMatch()&&!ai::lyrics::prepare(line.toUtf8(),track.title,track.artist).lines.isEmpty())return false;}
-        std::stable_sort(parsed.lines.begin(),parsed.lines.end(),[](const auto &a,const auto &b){return a.timestampMs<b.timestampMs;});
-    }
-    ai::lyrics::PreparedLyrics prepared;QJsonArray translations;
-    for(int i=0;i<parsed.lines.size();i+=2){
-        const auto &original=parsed.lines[i],&translation=parsed.lines[i+1];
-        if(original.timestampMs!=translation.timestampMs||original.text.trimmed().isEmpty())return false;
-        ai::lyrics::SourceLine line;line.id=prepared.lines.size();line.text=original.text;prepared.lines.append(line);
-        translations.append(QJsonObject{{"id",line.id},{"text",translation.text}});
-    }
-    return ai::lyrics::validateResponse(QString::fromUtf8(QJsonDocument(QJsonObject{{"translations",translations}}).toJson(QJsonDocument::Compact)),prepared).ok();
-}
 QString recordLyrics(const QJsonObject &record){
     const auto synced=record["syncedLyrics"].toString();return synced.isEmpty()?record["plainLyrics"].toString():synced;
 }
@@ -557,19 +534,20 @@ void LyricsLookup::updateTranslationWorkflow(){
     const auto id=trackIdAt(m_tracks->currentRow());const auto track=m_library->track(id);
     const bool single=!m_multi&&track.id&&m_tracks->currentItem()&&m_tracks->currentItem()->isSelected()&&!m_tracks->currentItem()->isHidden()&&m_tracks->selectedItems().size()==1;
     const auto judgment=m_library->translationJudgment(id);const auto task=aiSummary();
-    const auto assessment=single?translationAssessment(track):ai::lyrics::TranslationAssessment{};
+    const auto classification=single?translationClassification(track,judgment,task.trackId==id&&task.pending(),
+                                                               task.trackId==id&&task.hasPreview()):TranslationClassification{};
     {QSignalBlocker a(m_noTranslation),b(m_needsTranslation);m_noTranslation->setChecked(single&&judgment==TranslationJudgment::NoTranslationNeeded);m_needsTranslation->setChecked(single&&judgment==TranslationJudgment::NeedsTranslation);}
     m_noTranslation->setText(m_noTranslation->isChecked()?QStringLiteral("✓ 无需翻译"):QStringLiteral("无需翻译"));
     m_needsTranslation->setText(m_needsTranslation->isChecked()?QStringLiteral("✓ 需要翻译"):QStringLiteral("需要翻译"));
     m_noTranslation->setEnabled(single&&!translationPending()&&!m_aiConsentPending);m_needsTranslation->setEnabled(m_noTranslation->isEnabled());
     const auto human=judgment==TranslationJudgment::NoTranslationNeeded?QStringLiteral("无需翻译"):judgment==TranslationJudgment::NeedsTranslation?QStringLiteral("需要翻译"):QStringLiteral("待判断");
-    const auto saved=assessment.need==ai::lyrics::TranslationNeed::Translated?QStringLiteral("✓ 翻译完成（已保存双语歌词）"):assessment.reason;
+    const auto saved=classification.status==TranslationStatus::Translated?QStringLiteral("✓ 翻译完成（已保存双语歌词）"):classification.reason;
     QString current=task.trackId==id&&task.hasPreview()?QStringLiteral("翻译未保存，请点击保存 AI 翻译"):task.trackId==id&&task.pending()?QStringLiteral("正在翻译"):judgment==TranslationJudgment::NoTranslationNeeded?QStringLiteral("✓ 无需翻译（人工确认）"):human;
     m_classificationSummary->setText(single?track.title+" · "+track.artist+"\n人工判断："+human+(current==human?QString():" · "+current)+"\n本地歌词："+saved:QStringLiteral("请选择一首歌曲进行翻译分类；多选仅用于歌词搜索。"));
     const bool mode=m_missingTranslationOnly&&m_missingTranslationOnly->isChecked();
     if(auto *close=findChild<QPushButton *>("lyricsSaveClose"))close->setText(mode?QStringLiteral("关闭"):QStringLiteral("保存并关闭"));
     const auto cached=m_translationAssessments.constFind(id);
-    if(single&&judgment==TranslationJudgment::NeedsTranslation&&assessment.need!=ai::lyrics::TranslationNeed::Translated&&
+    if(single&&judgment==TranslationJudgment::NeedsTranslation&&classification.status!=TranslationStatus::Translated&&
        (cached==m_translationAssessments.cend()||!cached->sourceValid))
         m_classificationSummary->setText(m_classificationSummary->text()+QStringLiteral("\n当前歌曲没有可用原歌词，请先查找或选择歌词。"));
     m_findLyrics->setVisible(mode);m_findLyrics->setEnabled(single);
@@ -705,12 +683,27 @@ ai::lyrics::TranslationAssessment LyricsLookup::translationAssessment(const Trac
             result.contentDigest=QCryptographicHash::hash(file.bytes,QCryptographicHash::Sha256);
             ++m_filterMetrics.digestComputations;m_filterMetrics.digestBytes+=file.bytes.size();
             result.value=ai::lyrics::assessTranslation(file.bytes,track.title,track.artist);
-            if(result.value.need==Need::Chinese&&verifiedMarkedTranslation(file.bytes,track))result.value={Need::Translated,QStringLiteral("已校验保存的完整双语对应行")};
+            if(result.value.need==Need::Chinese&&LyricsTranslationClassification::verifiedMarkedBilingual(file.bytes,track.title,track.artist)){result.value={Need::Translated,QStringLiteral("已校验保存的完整双语对应行")};result.verifiedBilingual=true;}
             const auto prepared=ai::lyrics::prepare(file.bytes,track.title,track.artist);result.sourceValid=prepared.ok()&&!prepared.bilingual&&!prepared.instrumental;
         }else result.value={Need::NotApplicable,QStringLiteral("歌词无法完整读取")};
     }
     result.revision=++m_translationAssessmentRevision;
     const auto assessment=result.value;m_translationAssessments.insert(track.id,std::move(result));return assessment;
+}
+TranslationClassification LyricsLookup::translationClassification(const Track &track,TranslationJudgment judgment,
+                                                                      bool taskRunning,bool taskUnsaved,const bool *instrumentalState){
+    const auto assessment=translationAssessment(track,instrumentalState);
+    TranslationClassificationInput input;
+    input.judgment=judgment;
+    input.instrumental=instrumentalState?*instrumentalState:m_library->isInstrumental(track.id);
+    input.lyricsConfigured=!track.lyrics.isEmpty();
+    input.content=assessment;
+    const auto cached=m_translationAssessments.constFind(track.id);
+    if(cached!=m_translationAssessments.cend()){
+        input.fileExists=cached->fileExists;input.fileReadable=cached->readable;input.verifiedBilingual=cached->verifiedBilingual;
+    }
+    input.taskRunning=taskRunning;input.taskUnsaved=taskUnsaved;
+    return LyricsTranslationClassification::decide(input);
 }
 void LyricsLookup::requestTranslationCacheAudit(){
     if(m_translationAssessments.isEmpty()||!m_translationAuditDebounce)return;
@@ -762,7 +755,7 @@ void LyricsLookup::startTranslationCacheAudit(){
                         if(cache.readable){
                             cache.contentDigest=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);result.digestComputed=true;result.digestBytes=bytes.size();
                             work.digestComputations++;work.digestBytes+=bytes.size();cache.value=ai::lyrics::assessTranslation(bytes,track.title,track.artist);
-                            if(cache.value.need==ai::lyrics::TranslationNeed::Chinese&&verifiedMarkedTranslation(bytes,track))cache.value={ai::lyrics::TranslationNeed::Translated,QStringLiteral("已校验保存的完整双语对应行")};
+                            if(cache.value.need==ai::lyrics::TranslationNeed::Chinese&&LyricsTranslationClassification::verifiedMarkedBilingual(bytes,track.title,track.artist)){cache.value={ai::lyrics::TranslationNeed::Translated,QStringLiteral("已校验保存的完整双语对应行")};cache.verifiedBilingual=true;}
                             const auto prepared=ai::lyrics::prepare(bytes,track.title,track.artist);cache.sourceValid=prepared.ok()&&!prepared.bilingual&&!prepared.instrumental;
                         }else cache.value={ai::lyrics::TranslationNeed::NotApplicable,QStringLiteral("歌词无法完整读取")};
                     }else{
@@ -810,22 +803,21 @@ bool LyricsLookup::filterRow(int row,const LyricsFilterState *state){
     const auto local=state?LyricsFilterState{}:m_library->lyricsFilterStates({id}).value(id);
     const auto &value=state?*state:local;
     const auto &track=value.track;const auto judgment=value.judgment;
-    const auto assessment=translationAssessment(track,&value.instrumental);
     const auto task=aiSummary();const bool owns=id==task.trackId;
-    const bool paidResultPending=owns&&(task.pending()||task.hasPreview());
-    const bool translated=assessment.need==ai::lyrics::TranslationNeed::Translated;
-    const bool completed=!paidResultPending&&(judgment==TranslationJudgment::NoTranslationNeeded||translated);
-    const bool hideTranslation=translationOnly&&(completed||!(judgment==TranslationJudgment::NeedsTranslation||assessment.missing()));
+    // One shared decision feeds both frontends; this widget only renders it.
+    const auto classification=translationClassification(track,judgment,owns&&task.pending(),owns&&task.hasPreview(),&value.instrumental);
+    const bool paidResultPending=classification.unsavedResult;
+    const bool completed=classification.completed;
+    const bool hideTranslation=translationOnly&&(completed||!classification.needsTranslation);
     QString badge;
     if(paidResultPending)badge=task.hasPreview()?(task.errorCode=="save"?QStringLiteral("保存失败 · 翻译未保存"):QStringLiteral("翻译未保存")):QStringLiteral("正在翻译");
-    else if(judgment==TranslationJudgment::NoTranslationNeeded)badge=QStringLiteral("无需翻译");
-    else if(translated)badge=QStringLiteral("翻译完成");
-    else if(judgment==TranslationJudgment::NeedsTranslation)badge=QStringLiteral("需要翻译");
-    else if(translationOnly&&assessment.missing())badge=QStringLiteral("待判断");
-    else if(!translationOnly&&item->data(StateRole).toInt()==Complete&&!track.lyrics.isEmpty())badge=QStringLiteral("已有原文 · 待判断");
+    else badge=classification.badge;
+    // Wording only: outside the filter the row keeps its "已有原文" hint.
+    if(badge==QStringLiteral("待判断")&&!translationOnly&&item->data(StateRole).toInt()==Complete&&!track.lyrics.isEmpty())
+        badge=QStringLiteral("已有原文 · 待判断");
     item->setData(TranslationFilterRole,badge);item->setData(TranslationCompletionRole,completed);
     const auto details=item->data(StatusRole).toString()+QStringLiteral("\n")+badge+QStringLiteral("：")+
-        (assessment.need==ai::lyrics::TranslationNeed::Review?QStringLiteral("本地自动判断待确认 · "):QString())+assessment.reason;
+        (classification.status==TranslationStatus::Review?QStringLiteral("本地自动判断待确认 · "):QString())+classification.reason;
     item->setToolTip(item->text()+QStringLiteral("\n")+details);item->setData(Qt::AccessibleTextRole,item->text()+QStringLiteral(" · ")+details);
     const bool ownsTranslation=id==aiTrackId()&&(aiTaskId()||hasAiPreview());
     item->setHidden(!track.id||(!ownsTranslation&&(hideMissing||hideDone||hideTranslation)));
