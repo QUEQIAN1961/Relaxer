@@ -3,6 +3,7 @@
 #include "lyrics-document-reader.h"
 #include <QApplication>
 #include <QDataStream>
+#include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QQuickItem>
@@ -19,6 +20,29 @@ QQuickItem *visual(QQuickItem *item,const QString &name) {
 }
 bool write(const QString &path,const QByteArray &bytes) {
     QFile f(path);return f.open(QIODevice::WriteOnly|QIODevice::Truncate)&&f.write(bytes)==bytes.size();
+}
+bool click(QQuickWindow *window,QQuickItem *item) {
+    if(!item || !item->isVisible() || !item->isEnabled())return false;
+    QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,
+                     item->mapToScene(QPointF(item->width()/2,item->height()/2)).toPoint());
+    return true;
+}
+bool escapeEvidence(QQuickWindow *window,FeedbackBridge *feedback,const QString &stage) {
+    const auto output=qEnvironmentVariable("RELAXER_D2_ESCAPE_EVIDENCE");
+    if(output.isEmpty())return true;
+    if(!QDir().mkpath(output))return false;
+    const auto name=QString::fromLatin1(QTest::currentTestFunction())+"-"+stage;
+    const QJsonObject state{{"stage",stage},{"utc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {"input","QtTest window mouse/key events (not OS input)"},{"platform",QGuiApplication::platformName()},
+        {"pid",double(QCoreApplication::applicationPid())},{"windowId",QString::number(quintptr(window->winId()))},
+        {"title",window->title()},{"active",window->isActive()},{"visible",window->isVisible()},
+        {"popupOpen",window->property("popupOpen").toBool()},{"lyricsOpen",window->property("lyricsOpen").toBool()},
+        {"playerProgress",window->property("playerProgress").toDouble()},
+        {"bulkActive",window->property("bulkActive").toBool()},{"fullScreen",window->visibility()==QWindow::FullScreen},
+        {"feedbackVisible",feedback->visible()},{"historySize",feedback->history().size()},
+        {"eventId",feedback->current()["eventId"].toString()}};
+    return write(QDir(output).filePath(name+".json"),QJsonDocument(state).toJson())
+        && window->grabWindow().save(QDir(output).filePath(name+".png"));
 }
 qint64 seed(Library &lib,const QString &name,bool playable=false) {
     Track t;t.title=name;t.hash=name;t.file="Music/"+name+".wav";t.duration=3000;
@@ -60,6 +84,104 @@ class ErrorFeedbackTests final:public QObject {
     Q_OBJECT
 private slots:
     void initTestCase(){qputenv("RELAXER_SKIP_AUDIO_DEVICE_TESTS","1");}
+    void escapeWithoutNotification(){
+        QTemporaryDir dir;QVERIFY(dir.isValid());Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *f=shell.feedbackBridge();
+        w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));
+        auto *expand=visual(w->contentItem(),"playbackExpandButton");QVERIFY(click(w,expand));
+        QTRY_VERIFY(w->property("lyricsOpen").toBool());QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
+        QVERIFY(escapeEvidence(w,f,"expanded"));
+        QTest::keyClick(w,Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(!w->property("lyricsOpen").toBool(),1500);
+        QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);
+        QVERIFY(!w->property("popupOpen").toBool());QVERIFY(!f->visible());QVERIFY(f->history().isEmpty());
+        QVERIFY(escapeEvidence(w,f,"collapsed"));QVERIFY(shell.warnings().isEmpty());
+    }
+    void escapeDuringNotificationAndAfterExpiry(){
+        QTemporaryDir dir;QVERIFY(dir.isValid());Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        const auto id=seed(lib,"escape-missing");QVERIFY(id);
+        QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *f=shell.feedbackBridge();
+        w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));
+        auto *root=w->contentItem();auto *expand=visual(root,"playbackExpandButton");QVERIFY(click(w,expand));
+        QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
+        // Trigger the real missing-file path, rather than a synthetic notification.
+        shell.libraryBridge()->play(QString::number(id));QTRY_VERIFY(f->visible());
+        auto *notice=visual(root,"feedbackNotice");QVERIFY(notice);QTRY_VERIFY(notice->isVisible());
+        QCOMPARE(f->current()["source"].toString(),QString("Playback"));
+        const auto event=f->current()["eventId"];const auto history=f->history().size();
+        QVERIFY(escapeEvidence(w,f,"notice-expanded"));QTest::keyClick(w,Qt::Key_Escape);
+        QTRY_VERIFY_WITH_TIMEOUT(!w->property("lyricsOpen").toBool(),1500);
+        QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);QVERIFY(!w->property("popupOpen").toBool());
+        QVERIFY(f->visible());QVERIFY(notice->isVisible());QCOMPARE(f->current()["eventId"],event);QCOMPARE(f->history().size(),history);
+        QVERIFY(escapeEvidence(w,f,"notice-collapsed"));
+        // Use the production expiry callback, with a shorter wait for the test.
+        auto *expiry=w->findChild<QObject *>("feedbackExpiry");QVERIFY(expiry);QVERIFY(expiry->setProperty("interval",80));
+        QVERIFY(QMetaObject::invokeMethod(expiry,"restart"));QTRY_VERIFY(!f->visible());
+        QCOMPARE(f->history().size(),history);QVERIFY(!w->property("popupOpen").toBool());
+        auto *historyButton=visual(root,"feedbackHistoryButton");QVERIFY(historyButton);QVERIFY(historyButton->isVisible());
+        QVERIFY(click(w,expand));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);QTest::keyClick(w,Qt::Key_Escape);
+        QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);QVERIFY(!w->property("lyricsOpen").toBool());
+        QVERIFY(escapeEvidence(w,f,"expired-collapsed"));
+        QVERIFY(expiry->setProperty("interval",10000));
+        shell.playbackBridge()->play();QTRY_VERIFY(f->visible());QVERIFY(f->current()["eventId"]!=event);
+        QVERIFY(!w->property("popupOpen").toBool());QVERIFY(click(w,expand));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
+        QTest::keyClick(w,Qt::Key_Escape);QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);
+        QVERIFY(f->visible());QCOMPARE(f->history().size(),history+1);QVERIFY(shell.warnings().isEmpty());
+    }
+    void escapeDetailsAndModalPriority(){
+        QTemporaryDir dir;QVERIFY(dir.isValid());Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *f=shell.feedbackBridge();
+        w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));auto *root=w->contentItem();
+        auto *expand=visual(root,"playbackExpandButton");QVERIFY(click(w,expand));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
+        f->post("Library","Error","Escape details","Preserve the detail and background state");
+        QVERIFY(click(w,visual(root,"feedbackDetailsButton")));
+        auto *details=w->findChild<QObject *>("feedbackDetailsDialog");QVERIFY(details);QTRY_VERIFY(details->property("opened").toBool());
+        QTRY_VERIFY(w->property("popupOpen").toBool());QVERIFY(!details->property("modal").toBool());
+        const auto event=f->current()["eventId"];QVERIFY(escapeEvidence(w,f,"details-open"));
+        QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!details->property("visible").toBool());
+        QVERIFY(w->property("lyricsOpen").toBool());QCOMPARE(w->property("playerProgress").toDouble(),1.0);
+        QTRY_VERIFY(!w->property("popupOpen").toBool());QVERIFY(f->visible());QCOMPARE(f->current()["eventId"],event);
+        auto *confirm=w->findChild<QObject *>("closeTasksConfirmation");QVERIFY(confirm);QVERIFY(confirm->property("modal").toBool());
+        QSignalSpy rejected(confirm,SIGNAL(rejected()));QVERIFY(QMetaObject::invokeMethod(confirm,"open"));
+        QTRY_VERIFY(confirm->property("opened").toBool());QTRY_VERIFY(w->property("popupOpen").toBool());
+        QVERIFY(escapeEvidence(w,f,"modal-open"));QTest::keyClick(w,Qt::Key_Escape);
+        QTRY_COMPARE(rejected.size(),1);QTRY_VERIFY(!confirm->property("visible").toBool());
+        QVERIFY(w->property("lyricsOpen").toBool());QCOMPARE(w->property("playerProgress").toDouble(),1.0);
+        QTRY_VERIFY(!w->property("popupOpen").toBool());QVERIFY(escapeEvidence(w,f,"modal-cancelled-background-expanded"));
+        QTest::keyClick(w,Qt::Key_Escape);QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);
+        QCOMPARE(f->current()["eventId"],event);QCOMPARE(f->history().size(),1);QVERIFY(shell.warnings().isEmpty());
+    }
+    void escapeBulkAndUpcoming_data(){
+        QTest::addColumn<bool>("notification");QTest::newRow("quiet")<<false;QTest::newRow("visible-notice")<<true;
+    }
+    void escapeBulkAndUpcoming(){
+        QFETCH(bool,notification);QTemporaryDir dir;QVERIFY(dir.isValid());Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        QVERIFY(seed(lib,"escape-bulk"));QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());
+        auto *w=shell.window();auto *f=shell.feedbackBridge();w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));
+        if(notification)f->post("Library","Error","Bulk Escape notification");
+        auto *table=visual(w->contentItem(),"libraryListContainer");QVERIFY(table);
+        QVERIFY(QMetaObject::invokeMethod(table,"beginBulk"));QTRY_VERIFY(w->property("bulkActive").toBool());
+        QVERIFY(table->property("bulkMode").toBool());QVERIFY(!w->property("popupOpen").toBool());
+        QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());QVERIFY(!table->property("bulkMode").toBool());
+        auto *upcoming=visual(w->contentItem(),"nextQueuePanel");QVERIFY(upcoming);QVERIFY(upcoming->isVisible());
+        QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,upcoming->mapToScene(QPointF(14,upcoming->property("headerHeight").toDouble()/2)).toPoint());
+        QTRY_VERIFY(upcoming->property("panelExpanded").toBool());
+        QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!upcoming->property("panelExpanded").toBool());
+        QCOMPARE(f->visible(),notification);QCOMPARE(f->history().size(),notification?1:0);QVERIFY(shell.warnings().isEmpty());
+    }
+    void escapeFeedbackPanelLifetime(){
+        QTemporaryDir dir;QVERIFY(dir.isValid());Library lib(dir.filePath("data"));QVERIFY(lib.open());
+        auto shell=std::make_unique<QmlShell>(&lib,nullptr,true);QVERIFY(shell->load());auto *w=shell->window();
+        QVERIFY(!w->property("popupOpen").toBool());auto *f=shell->feedbackBridge();f->post("Library","Error","closing with active feedback");
+        QVERIFY(f->visible());QVERIFY(!w->property("popupOpen").toBool());
+        QPointer<QQuickWindow> window=w;QPointer<QObject> panel=visual(w->contentItem(),"feedbackPanel");QVERIFY(panel);
+        shell.reset();QVERIFY(!window);QVERIFY(!panel);QCoreApplication::processEvents();
+        QmlShell restored(&lib,nullptr,true);QVERIFY(restored.load());w=restored.window();
+        w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));QVERIFY(!w->property("popupOpen").toBool());
+        QVERIFY(!restored.feedbackBridge()->visible());QVERIFY(restored.feedbackBridge()->history().isEmpty());
+        QVERIFY(click(w,visual(w->contentItem(),"playbackExpandButton")));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
+        QTest::keyClick(w,Qt::Key_Escape);QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);QVERIFY(restored.warnings().isEmpty());
+    }
     void startupDatabaseFailureIsReported(){
         QTemporaryDir dir;QVERIFY(dir.isValid());
         QVERIFY(write(dir.filePath("relaxer.sqlite"),"not a sqlite database"));

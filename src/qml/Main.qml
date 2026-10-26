@@ -66,8 +66,10 @@ ApplicationWindow {
     property var artistTo: titleFrom
     readonly property bool popupOpen: {
         const items = popupLayer ? popupLayer.children : []
+        // The persistent feedback Item is non-modal. Its detail dialogs are
+        // separate overlay children and retain their existing Escape priority.
         for (let index = 0; index < items.length; ++index)
-            if (items[index].visible && items[index].opacity > 0 && items[index].width > 0 && items[index].height > 0) return true
+            if (items[index] !== feedbackPanel && items[index].visible && items[index].opacity > 0 && items[index].width > 0 && items[index].height > 0) return true
         return false
     }
     function imageRect(item) { const p = item.mapToItem(root.contentItem,0,0); return {x:p.x,y:p.y,width:item.width,height:item.height} }
