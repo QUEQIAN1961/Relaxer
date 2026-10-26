@@ -10,6 +10,7 @@
 #include <QThreadPool>
 #include <atomic>
 #include <memory>
+#include <optional>
 
 namespace relaxer {
 struct LyricsSearchSource {
@@ -17,6 +18,7 @@ struct LyricsSearchSource {
     QUrl endpoint;
     int kind = 0;
     bool backup = false;
+    QString id;
 };
 struct LyricsQueryAttempt {
     QString title, artist, album, keywords;
@@ -33,6 +35,8 @@ struct LyricsSearchRequest {
     bool manual = false, replace = false, requireTimed = false;
     // Optional frontend snapshot preserves an already observed external-change conflict.
     LyricsSaveSnapshot saveSnapshot;
+    // nullopt keeps the historical default; an explicit empty set permits no network source.
+    std::optional<QStringList> enabledSources;
 };
 struct LyricsQueryPlan {
     LyricsSearchRequest request;
@@ -55,12 +59,15 @@ struct LyricsCandidateSnapshot {
     QString trackHash;
     quint64 revision = 0;
     QJsonArray records;
+    QString parameterIdentity;
 };
 struct LyricsSearchEvent {
     quint64 taskId = 0, generation = 0, candidateRevision = 0;
     qint64 trackId = 0;
     LyricsSearchState state = LyricsSearchState::Queued;
     QString phase, status, source;
+    QString parameterIdentity;
+    QStringList sourceFailures;
     int attempt = -1, pass = 0;
     QUrl url;
 };
@@ -88,13 +95,18 @@ class LyricsSearchCoordinator final : public QObject {
     QVector<LyricsSearchEvent> stop();
     void shutdown();
     void cancelTrack(qint64 id);
-    void loadCached(const QVector<qint64> &ids);
+    void loadCached(const QVector<qint64> &ids, const std::optional<QStringList> &sources = {}, bool requireTimed = false);
+    void invalidateCandidates(qint64 id);
     void clearCandidates(qint64 id);
     void remember(qint64 id);
     void noteManualSave(int count = 1);
     LyricsCandidateSnapshot candidates(qint64 id) const { return m_candidates.value(id); }
     LyricsSearchSummary summary() const { return m_summary; }
     QVector<LyricsSearchSource> sources() const { return m_sources; }
+    static QString sourceId(const LyricsSearchSource &source);
+    static QString sourceLabel(const QJsonObject &record);
+    static QString validationError(const LyricsSearchRequest &request, const QVector<LyricsSearchSource> &sources);
+    static QString parameterIdentity(const LyricsSearchRequest &request, const QVector<LyricsSearchSource> &sources);
     static QString candidateIdentity(const QJsonObject &record);
     static QVector<QJsonObject> rankCandidates(const Track &query, const QVector<QJsonObject> &records);
     static double score(const Track &track, const QJsonObject &record);
@@ -115,6 +127,7 @@ class LyricsSearchCoordinator final : public QObject {
     // Test diagnostics can deliver captured results in a controlled order.
     // No runtime hook, dispatch change, or additional state.
     friend class LyricsSearchDiagnostics;
+    friend class LyricsSearchParameterDiagnostics;
     struct RankItem {
         QJsonObject record;
         double score = 0;

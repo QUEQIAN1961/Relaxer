@@ -19,13 +19,18 @@ class LyricsSearchBridge final:public QAbstractListModel {
     Q_PROPERTY(QString targetArtist READ targetArtist NOTIFY changed)
     Q_PROPERTY(QString sourceText READ sourceText NOTIFY changed)
     Q_PROPERTY(QVariantList targetTracks READ targetTracks NOTIFY changed)
+    Q_PROPERTY(QVariantList availableSources READ availableSources NOTIFY sourcesChanged)
+    Q_PROPERTY(QStringList enabledSources READ enabledSources NOTIFY sourcesChanged)
+    Q_PROPERTY(QString candidateSource READ candidateSource WRITE setCandidateSource NOTIFY changed)
+    Q_PROPERTY(QString recommendedKey READ recommendedKey NOTIFY changed)
+    Q_PROPERTY(QString searchContext READ searchContext NOTIFY changed)
     Q_PROPERTY(QVariantMap fileOffset READ fileOffset NOTIFY changed)
     Q_PROPERTY(bool batchPrepared READ batchPrepared NOTIFY changed)
     Q_PROPERTY(bool batchRunning READ batchRunning NOTIFY changed)
     Q_PROPERTY(QVariantMap batchOverview READ batchOverview NOTIFY changed)
     Q_PROPERTY(QVariantMap batchResult READ batchResult NOTIFY changed)
 public:
-    enum Role { CandidateKey=Qt::UserRole+1,Title,Artist,Album,Source,Timed };
+    enum Role { CandidateKey=Qt::UserRole+1,Title,Artist,Album,Source,Timed,CandidateVisible,MatchDetails };
     LyricsSearchBridge(Library *library,PlaybackFacade *facade,LyricsSearchCoordinator *service,QObject *parent=nullptr);
     int rowCount(const QModelIndex &parent={})const override;
     QVariant data(const QModelIndex &index,int role)const override;
@@ -37,13 +42,24 @@ public:
     QString targetTrackKey()const{return QString::number(targetId());}
     QString targetTitle()const;QString targetArtist()const;QString sourceText()const;
     QVariantList targetTracks()const;
+    QVariantList availableSources() const;
+    QStringList enabledSources() const { return m_enabledSources; }
+    QString candidateSource() const { return m_candidateSource; }
+    void setCandidateSource(const QString &source);
+    QString recommendedKey() const;
+    QString searchContext() const { return m_searchContext; }
+    Q_INVOKABLE QVariantMap defaultQuery() const;
+    Q_INVOKABLE bool setSourceEnabled(const QString &id,bool enabled);
+    Q_INVOKABLE void restoreSearchDefaults();
+    Q_INVOKABLE void parametersEdited();
+    Q_INVOKABLE void setSearchOptions(bool requireTimed,bool replace);
     Q_INVOKABLE bool setTargetTrack(const QString &key);
     Q_INVOKABLE bool setTargetTracks(const QStringList &keys,bool missingOnly=false,bool showCompleted=false);
     Q_INVOKABLE bool search(bool confirmed=false);
     Q_INVOKABLE bool searchTargets(bool confirmed=false);
     Q_INVOKABLE bool searchTracks(const QStringList &keys,bool confirmed=false);
     Q_INVOKABLE bool searchQuery(const QString &title,const QString &artist,const QString &fragment,bool confirmed=false,bool requireTimed=false);
-    Q_INVOKABLE bool searchDetailed(const QString &title,const QString &artist,const QString &album,const QString &fragment,bool confirmed=false,bool requireTimed=false,bool replace=false);
+    Q_INVOKABLE bool searchDetailed(const QString &title,const QString &artist,const QString &album,const QString &fragment,bool confirmed=false,bool requireTimed=false,bool replace=false,double durationMs=-1);
     Q_INVOKABLE QString beginLocalEdit();
     Q_INVOKABLE bool saveText(const QString &text,bool confirmed=false,const QString &editToken={});
     Q_INVOKABLE bool importLocalLyrics(const QUrl &file,bool confirmed=false,const QString &editToken={});
@@ -62,6 +78,7 @@ public:
     Q_INVOKABLE void cancelInstrumentalBatch();
     Q_INVOKABLE void stop();
     Q_INVOKABLE bool select(int row);
+    Q_INVOKABLE bool selectKey(const QString &key);
     Q_INVOKABLE bool selectRecommended(bool requireTimed = false);
     Q_INVOKABLE bool saveSelected(const QString &exactCandidateKey,bool confirmed=false);
     Q_INVOKABLE bool resolveReplacement(const QString &token,int choice);
@@ -70,9 +87,11 @@ public:
 signals:
     void operationFailed(const QString &target, const QString &message);
     void changed();
+    void sourcesChanged();
     void replacementRequested(const QString &token,const QString &reason);
     void saved(const QString &trackKey);
     void editCompleted(const QString &category,const QString &operation,const QString &message,const QString &details);
+    void searchFeedback(const QString &category,const QString &operation,const QString &target,const QString &message,const QString &details);
 private:
     Library *m_library;PlaybackFacade *m_facade;LyricsSearchCoordinator *m_service;
     LyricsCandidateSnapshot m_snapshot;LyricsSaveSnapshot m_guard;
@@ -87,6 +106,14 @@ private:
     bool m_missingOnly=false;
     bool m_recommendTimedOnly=false;
     bool m_explicitSelection=false;
+    QStringList m_enabledSources;
+    QString m_candidateSource,m_searchContext;
+    QHash<qint64,QString> m_searchContexts;
+    QSet<qint64> m_searchIds,m_sourceFailures;
+    bool m_searchBatch=false,m_requireTimed=false,m_replaceSearch=false;
+    bool candidateVisible(const QJsonObject &record) const;
+    void refreshCandidateFilter();
+    bool searchInvalid(const QString &message);
     mutable QHash<qint64,QPair<QByteArray,bool>> m_translationCache;
     bool translationMissing(const Track &track)const;
     bool startTargets(const QVector<qint64> &ids,bool confirmed,bool missingOnly);

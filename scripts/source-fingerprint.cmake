@@ -5,7 +5,7 @@ function(relaxer_track_source_content source_root)
   file(GLOB_RECURSE source_files LIST_DIRECTORIES FALSE RELATIVE "${source_root}"
     "${source_root}/src/*.cpp" "${source_root}/src/*.h"
     "${source_root}/src/qml/*"
-    "${source_root}/tests/*.cpp" "${source_root}/resources/*")
+    "${source_root}/tests/*.cpp" "${source_root}/tests/*.h" "${source_root}/resources/*")
   list(APPEND source_files "CMakeLists.txt")
   list(SORT source_files)
   file(SHA256 "${CMAKE_CURRENT_FUNCTION_LIST_FILE}" policy_hash)

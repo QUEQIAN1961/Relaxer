@@ -118,13 +118,13 @@ bool LyricsSearchCoordinator::ownerThread() const {
 QVector<LyricsSearchSource> LyricsSearchCoordinator::defaultSources(QUrl endpoint, QUrl backup) {
     if (backup.isEmpty() && endpoint.host() == "lrclib.net")
         backup = QUrl("https://api.lyrics.ovh/v1");
-    QVector<Source> out{{"LRCLIB", endpoint, 0, false}};
+    QVector<Source> out{{"LRCLIB", endpoint, 0, false, "lrclib"}};
     if (!backup.isEmpty())
-        out.append({"Lyrics.ovh", backup, 1, true});
+        out.append({"Lyrics.ovh", backup, 1, true, "ovh"});
     if (endpoint.host() == "lrclib.net") {
-        out.append({"网易云", QUrl("https://music.163.com"), 2, false});
-        out.append({"QQ音乐", QUrl("https://y.qq.com"), 3, false});
-        out.append({"酷狗", QUrl("https://www.kugou.com"), 4, false});
+        out.append({"网易云", QUrl("https://music.163.com"), 2, false, "netease"});
+        out.append({"QQ音乐", QUrl("https://y.qq.com"), 3, false, "qq"});
+        out.append({"酷狗", QUrl("https://www.kugou.com"), 4, false, "kugou"});
     }
     return out;
 }
@@ -183,14 +183,85 @@ QString LyricsSearchCoordinator::candidateIdentity(const QJsonObject &record) {
                                                         QCryptographicHash::Sha256)
                                    .toHex());
 }
-void LyricsSearchCoordinator::loadCached(const QVector<qint64> &ids) {
-    if (!ownerThread() || m_stopping)
-        return;
+QString LyricsSearchCoordinator::sourceId(const LyricsSearchSource &source) {
+    return source.id.isEmpty() ? source.label : source.id;
+}
+QString LyricsSearchCoordinator::sourceLabel(const QJsonObject &record) {
+    auto source=record["source"].toString().trimmed();
+    if(source.isEmpty())source=QStringLiteral("来源未知");
+    if(record["cacheOrigin"].toBool())source=QStringLiteral("缓存 · ")+source;
+    if(record["legacyCache"].toBool())source+=QStringLiteral("（历史条件未知）");
+    return source;
+}
+QString LyricsSearchCoordinator::validationError(const LyricsSearchRequest &input, const QVector<Source> &sources) {
+    auto request = input;
+    if (!request.manual && request.match.title.isEmpty()) request.match = searchTrack(request.original);
+    for (const auto &value : {request.match.title, request.match.artist, request.match.album, request.fragment}) {
+        if (value.size() > 512) return QStringLiteral("搜索条件不能超过 512 个字符");
+        for (const auto c : value)
+            if (c.category() == QChar::Other_Control) return QStringLiteral("搜索条件不能包含控制字符");
+    }
+    if (request.match.title.trimmed().isEmpty() && request.fragment.trimmed().isEmpty())
+        return QStringLiteral("请输入歌名或手动查询词；空条件不会自动替换为其他查询");
+    if (request.match.duration < 0) return QStringLiteral("时长须为非负毫秒，0 表示未知");
+    bool enabled = false, compatible = false;
+    QSet<QString> known;
+    for (const auto &source : sources) {
+        const auto id = sourceId(source); known.insert(id);
+        if (request.enabledSources && !request.enabledSources->contains(id)) continue;
+        enabled = true;
+        compatible |= source.kind != 1 || (!request.match.title.trimmed().isEmpty() && knownArtist(request.match.artist));
+    }
+    if (request.enabledSources)
+        for (const auto &id : *request.enabledSources)
+            if (!known.contains(id)) return QStringLiteral("所选歌词来源不存在，请恢复默认来源");
+    if (!enabled) return QStringLiteral("没有启用歌词来源，请至少选择一个来源");
+    if (!compatible) return QStringLiteral("所选来源需要歌名和歌手，无法执行当前查询");
+    return {};
+}
+QString LyricsSearchCoordinator::parameterIdentity(const LyricsSearchRequest &input, const QVector<Source> &sources) {
+    auto match = input.match;
+    if (!input.manual && match.title.isEmpty()) match = searchTrack(input.original);
+    QStringList ids;
+    for (const auto &source : sources)
+        if (!input.enabledSources || input.enabledSources->contains(sourceId(source)))
+            ids.append(sourceId(source) + ":" + source.endpoint.toString());
+    ids.sort();
+    const QJsonArray fields{trackContext(input.original), match.title, match.artist, match.album,
+        double(match.duration), input.fragment.trimmed(), input.requireTimed, QJsonArray::fromStringList(ids)};
+    return QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(fields).toJson(QJsonDocument::Compact),
+        QCryptographicHash::Sha256).toHex());
+}
+void LyricsSearchCoordinator::invalidateCandidates(qint64 id) {
+    if (ownerThread()) m_candidates.remove(id); // Keep the on-disk cache for compatible local review.
+}
+void LyricsSearchCoordinator::loadCached(const QVector<qint64> &ids, const std::optional<QStringList> &sources, bool requireTimed) {
+    if (!ownerThread() || m_stopping) return;
     for (auto id : ids) {
         const auto t = m_library->track(id);
+        // Active generations own their candidate snapshots, including empty ones.
+        if (m_running && m_candidates.contains(id)) continue;
+        LyricsSearchRequest defaults; defaults.original=t; defaults.match=searchTrack(t); defaults.enabledSources=sources; defaults.requireTimed=requireTimed;
+        const auto context=parameterIdentity(defaults,m_sources);
+        const auto previous=m_candidates.value(id);
         const auto cache = m_library->lookupCache(id);
-        if (cache.fresh && !cache.noResult && !cache.records.isEmpty())
-            m_candidates[id] = {id, t.hash, ++m_candidateRevision, cache.records};
+        if (!cache.fresh || cache.noResult || cache.records.isEmpty()) { m_candidates.remove(id); continue; }
+        bool allSources=true;
+        for(const auto &source:m_sources) if(sources&&!sources->contains(sourceId(source)))allSources=false;
+        QJsonArray records;
+        for (const auto &value : cache.records) {
+            auto r=value.toObject();
+            const auto stored=r.take("lookupContext").toString();
+            if (!stored.isEmpty() && stored!=context) continue;
+            bool allowed=allSources;
+            if (sources) for (const auto &source : m_sources)
+                if (sources->contains(sourceId(source)) && r["source"].toString()==source.label) allowed=true;
+            if (!allowed) continue;
+            r["cacheOrigin"]=true; r["legacyCache"]=stored.isEmpty(); records.append(r);
+        }
+        if (records.isEmpty()) m_candidates.remove(id);
+        else if(previous.trackHash!=t.hash || previous.parameterIdentity!=context || previous.records!=records)
+            m_candidates[id]={id,t.hash,++m_candidateRevision,records,context};
     }
 }
 void LyricsSearchCoordinator::clearCandidates(qint64 id) {
@@ -227,6 +298,7 @@ void LyricsSearchCoordinator::setJobStatus(const JobPtr &j, const QString &statu
     event.pass = j->searchPass;
     event.url = std::move(url);
     event.source = std::move(source);
+    event.parameterIdentity = parameterIdentity(j->input, m_sources);
     publishEvent(std::move(event));
 }
 void LyricsSearchCoordinator::publishSummary(bool terminal) {
@@ -261,7 +333,7 @@ void LyricsSearchCoordinator::setCandidates(const JobPtr &j, const QJsonArray &r
     auto &snapshot = m_candidates[j->original.id];
     if (snapshot.trackHash == j->original.hash && snapshot.records == records)
         return;
-    snapshot = {j->original.id, j->original.hash, ++m_candidateRevision, records};
+    snapshot = {j->original.id, j->original.hash, ++m_candidateRevision, records, parameterIdentity(j->input,m_sources)};
     const auto value = snapshot;
     const quint64 generation = j->generation;
     QTimer::singleShot(0, this, [this, value, generation] { emit candidatesChanged(value, generation); });
@@ -280,10 +352,11 @@ quint64 LyricsSearchCoordinator::start(const QVector<LyricsSearchRequest> &reque
         if (!input.original.id || seen.contains(input.original.id))
             continue;
         seen.insert(input.original.id);
-        if (input.match.title.isEmpty())
+        if (!input.manual && input.match.title.isEmpty())
             input.match = searchTrack(input.original);
         if (!input.saveSnapshot.id)
             input.saveSnapshot = m_library->lyricsSaveSnapshot(input.original.id);
+        m_candidates[input.original.id] = {input.original.id,input.original.hash,++m_candidateRevision,{},parameterIdentity(input,m_sources)};
         m_queue.append(std::move(input));
     }
     m_summary = {};
@@ -320,6 +393,11 @@ void LyricsSearchCoordinator::pumpTracks() {
         m_jobs[j->original.id] = j;
         if (!current(j)) {
             finishJob(j, "歌曲文件已变化或已移除，请重新查找", LyricsSearchState::Invalidated);
+            continue;
+        }
+        const auto invalid = validationError(j->input, m_sources);
+        if (!invalid.isEmpty()) {
+            finishJob(j, invalid, LyricsSearchState::Failed);
             continue;
         }
         if (j->manual)
@@ -397,6 +475,8 @@ void LyricsSearchCoordinator::finishJob(const JobPtr &j, const QString &status, 
     event.trackId = j->original.id;
     event.generation = j->generation;
     event.state = state;
+    event.parameterIdentity = parameterIdentity(j->input, m_sources);
+    event.sourceFailures = j->failures;
     event.phase = recovering ? "recovery-queued" : "finished";
     event.status = status;
     event.pass = j->searchPass;
@@ -474,9 +554,9 @@ QVector<LyricsSearchEvent> LyricsSearchCoordinator::stop() {
     }
     m_queue.clear();
     m_next = 0;
-    if (wasRunning)
-        publishSummary(true);
     ++m_generation;
+    m_summary.generation = m_generation;
+    if (wasRunning) publishSummary(true);
     return cancelled;
 }
 void LyricsSearchCoordinator::shutdown() {
@@ -634,29 +714,21 @@ void LyricsSearchCoordinator::lookup(const JobPtr &j) {
 LyricsQueryPlan LyricsSearchCoordinator::queryPlan(const LyricsSearchRequest &request,
                                                    const QVector<Source> &sources,
                                                    const LyricsSearchOptions &options) {
-    LyricsQueryPlan out;
-    out.request = request;
-    out.options = options;
-    auto &input = out.request;
-    if (input.match.title.isEmpty())
-        input.match = searchTrack(input.original);
-    const auto t = input.original;
-    if (sources.isEmpty())
-        return out;
-    auto add = [&](QString title, QString artist, bool exact = false, QString keywords = {},
-                   QString album = {}, int source = 0, bool cover = false) {
-        if (title.isEmpty() && keywords.isEmpty())
-            return;
-        if (!knownArtist(artist))
-            artist.clear();
-        Attempt a{title, artist, album, keywords, source, exact, !keywords.isEmpty(), cover, false, {}};
-        for (const auto &old : out.attempts)
-            if (old.title == a.title && old.artist == a.artist && old.source == a.source &&
-                old.cover == a.cover &&
-                (sources[source].kind >= 2 ||
-                 (old.album == a.album && old.keywords == a.keywords && old.exact == a.exact)))
-                return;
-        out.attempts << a;
+    LyricsQueryPlan out; out.request=request; out.options=options;
+    auto &input=out.request;
+    if (!input.manual && input.match.title.isEmpty()) input.match=searchTrack(input.original);
+    if (!validationError(input,sources).isEmpty()) return out;
+    const auto t=input.original;
+    QVector<Attempt> variants;
+    auto add = [&](QString title, QString artist, bool exact=false, QString keywords={},
+                   QString album={}, int source=-1, bool cover=false) {
+        if (title.isEmpty() && keywords.isEmpty()) return;
+        if (!knownArtist(artist)) artist.clear();
+        Attempt a{title,artist,album,keywords,source,exact,!keywords.isEmpty(),cover,false,{}};
+        for (const auto &old : variants)
+            if (old.title==a.title && old.artist==a.artist && old.album==a.album && old.keywords==a.keywords &&
+                old.exact==a.exact && old.cover==a.cover) return;
+        variants.append(a);
     };
     // Both buttons use the same query plan for unchanged input. Start with the
     // normalized search rather than spending a batch slot on a strict album get.
@@ -694,18 +766,8 @@ LyricsQueryPlan LyricsSearchCoordinator::queryPlan(const LyricsSearchRequest &re
         input.match.title == originalMatch.title && input.match.artist == originalMatch.artist;
     if (unchanged && (t.title != input.match.title || t.artist != input.match.artist))
         add(t.title, t.artist, true);
-    if (input.manual && !input.fragment.trimmed().isEmpty())
+    if (!input.fragment.trimmed().isEmpty())
         add(input.match.title, {}, false, input.fragment.trimmed());
-    if (sources.size() > 1 && knownArtist(input.match.artist))
-        add(input.match.title, input.match.artist, false, {}, {}, 1);
-    if ((!sources.isEmpty() && sources.first().endpoint.host() == "lrclib.net")) {
-        const auto baseAttempts = out.attempts;
-        for (const auto &attempt : baseAttempts)
-            for (int s = 0; s < sources.size(); ++s)
-                if (sources[s].kind >= 2)
-                    add(attempt.title, attempt.artist, attempt.exact, attempt.keywords, attempt.album, s,
-                        attempt.cover);
-    }
     if (unchanged) {
         auto credit = originalCredit(input.match.title);
         if (!credit.found)
@@ -713,28 +775,38 @@ LyricsQueryPlan LyricsSearchCoordinator::queryPlan(const LyricsSearchRequest &re
         if (!credit.found)
             credit = originalCredit(input.original.title);
         if (credit.found) {
-            add(credit.title, credit.artist, true, {}, {}, 0, true);
-            if ((!sources.isEmpty() && sources.first().endpoint.host() == "lrclib.net"))
-                for (int s = 0; s < sources.size(); ++s)
-                    if (sources[s].kind >= 2)
-                        add(credit.title, credit.artist, true, {}, {}, s, true);
+            add(credit.title, credit.artist, true, {}, {}, -1, true);
         }
     }
-    // Try independent sources early, instead of exhausting all LRCLIB variants (and its timeouts) first.
+
     QVector<QVector<Attempt>> bySource(sources.size());
-    for (const auto &attempt : out.attempts)
-        bySource[attempt.source] << attempt;
-    out.attempts.clear();
-    int rounds = 0;
-    for (const auto &list : bySource)
-        rounds = qMax(rounds, int(list.size()));
-    for (int n = 0; n < rounds; ++n)
-        for (int source = 0; source < bySource.size(); ++source)
-            if (n < bySource[source].size() && !sources[source].backup)
-                out.attempts << bySource[source][n];
-    for (int source = 0; source < bySource.size(); ++source)
-        if (sources[source].backup)
-            out.attempts += bySource[source];
+    for (int source=0; source<sources.size(); ++source) {
+        const auto &provider=sources[source];
+        if (input.enabledSources && !input.enabledSources->contains(sourceId(provider))) continue;
+        if (provider.kind==1) {
+            if (!input.match.title.isEmpty() && knownArtist(input.match.artist))
+                bySource[source].append({input.match.title,input.match.artist,{},{},source,false,false,false,false,{}});
+            continue;
+        }
+        for (auto attempt : variants) {
+            attempt.source=source;
+            if (provider.kind>=2) {
+                if (attempt.keywordsSearch) { attempt.title=attempt.keywords; attempt.artist.clear(); }
+                bool duplicate=false;
+                for (const auto &old : bySource[source])
+                    if (old.title==attempt.title && old.artist==attempt.artist && old.cover==attempt.cover) duplicate=true;
+                if (duplicate) continue;
+            }
+            bySource[source].append(attempt);
+        }
+    }
+    int rounds=0;
+    for (const auto &list : bySource) rounds=qMax(rounds,int(list.size()));
+    for (int n=0; n<rounds; ++n)
+        for (int source=0; source<bySource.size(); ++source)
+            if (n<bySource[source].size() && !sources[source].backup) out.attempts.append(bySource[source][n]);
+    for (int source=0; source<bySource.size(); ++source)
+        if (sources[source].backup) out.attempts+=bySource[source];
     return out;
 }
 
@@ -863,6 +935,10 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
     }
     const auto a = j->attempts[stage];
     const auto source = m_sources[a.source];
+    // Enforce the frozen allow-list at the actual dispatch boundary, including retries/details.
+    if (j->input.enabledSources && !j->input.enabledSources->contains(sourceId(source))) {
+        j->completeResponses=false; j->failures << "来源已禁用"; pumpQueries(j); return;
+    }
     QUrl url = source.endpoint;
     if (m_hostRequests.value(source.endpoint.host()) >= 6) {
         ++j->active;
@@ -890,7 +966,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
     if (source.kind >= 2) {
         const auto step = a.detailRequest
                               ? a.detail.step
-                              : lyric_remote::begin(source.kind, a.title, a.artist, j->original.duration);
+                              : lyric_remote::begin(source.kind, a.title, a.artist, j->match.duration);
         url = step.url;
         extraHeaders = step.headers;
         remotePhase = a.detailRequest ? "lyric" : "search";
@@ -910,9 +986,9 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
         const auto album = a.exact ? j->match.album : a.album;
         if (!album.isEmpty() && album != "未知专辑")
             q.addQueryItem("album_name", album);
-        if (a.exact && j->original.duration > 0)
-            q.addQueryItem("duration", QString::number(j->original.duration / 1000., 'f', 3));
-        url.setQuery(q);
+        if (a.exact && j->match.duration > 0)
+            q.addQueryItem("duration", QString::number(j->match.duration / 1000., 'f', 3));
+        url.setQuery(q.toString(QUrl::FullyEncoded).replace("+", "%2B"));
     }
     setJobStatus(j, "正在查找 · " + source.label + " · " +
                         (a.exact              ? QString("精确匹配")
@@ -999,6 +1075,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
                 return;
             }
             if (code == 400) {
+                j->failures << source.label + "：请求参数被拒绝";
                 j->completeResponses = false;
                 pumpQueries(j);
                 return;
@@ -1007,6 +1084,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
                 j->completeResponses = false;
                 const auto failure = large         ? QString("响应过大")
                                      : timeout     ? QString("请求超时")
+                                     : code == 401 || code == 403 ? QString("来源拒绝访问或需要验证")
                                      : code == 429 ? QString("请求限流")
                                      : code >= 500 ? QString("服务暂时异常")
                                                    : QString("网络异常");
@@ -1054,7 +1132,7 @@ void LyricsSearchCoordinator::request(const JobPtr &j, int stage, int retry) {
             if (source.kind >= 2) {
                 const auto follow = lyric_remote::consume(
                     source.kind, (a.detailRequest ? QByteArray("lyric") : QByteArray("search")), body,
-                    a.title, a.artist, a.detailRequest ? a.detail.durationMs : j->original.duration);
+                    a.title, a.artist, a.detailRequest ? a.detail.durationMs : j->match.duration);
                 if (follow.failed) {
                     j->completeResponses = false;
                     j->failures << source.label + "：" + follow.failure;
@@ -1171,7 +1249,7 @@ void LyricsSearchCoordinator::finishOnline(const JobPtr &j) {
     }
     const auto status =
         j->failures.isEmpty()
-            ? (j->completeResponses ? QString("数据库无结果") : QString("未完成：来源冷却或查询未完成"))
+            ? (j->completeResponses ? QString("所选来源均无结果") : QString("未完成：来源冷却或查询未完成"))
             : QString("未完成：") + j->failures.join("；");
     finishJob(j,
               (j->completeResponses ? status : QString("等待重试 · ") + status) + " · 可修改歌名和歌手重试",
@@ -1391,15 +1469,18 @@ void LyricsSearchCoordinator::applyAccept(const JobPtr &j) {
     const bool cached = j->acceptCached;
     if (j->readyTimed && j->readyRanked.isEmpty()) {
         j->wantAccept = false;
-        finishJob(j, "未找到滚动歌词 · 原有歌词已保留");
+        finishJob(j, "未找到滚动歌词 · 原有歌词已保留", LyricsSearchState::NoResult);
         return;
     }
     QJsonArray ranked;
     for (int i = 0; i < qMin(25, j->readyRanked.size()); ++i)
         ranked.append(j->readyRanked[i].record);
     setCandidates(j, ranked);
-    if (!cached && !ranked.isEmpty())
-        m_library->saveLookupCache(j->original.id, ranked, false);
+    if (!cached && !ranked.isEmpty()) {
+        QJsonArray payload;
+        for (const auto &value : ranked) { auto r=value.toObject(); r["lookupContext"]=parameterIdentity(j->input,m_sources); payload.append(r); }
+        m_library->saveLookupCache(j->original.id, payload, false);
+    }
     const QString suffix = cached ? QString(" · 使用上次结果") : QString();
     QString rejection;
     bool instrumental = false;

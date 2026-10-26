@@ -106,7 +106,7 @@ Step neteaseSearch(const QString &title, const QString &artist) {
     query.addQueryItem("offset", "0");
     query.addQueryItem("limit", "8");
     query.addQueryItem("total", "true");
-    url.setQuery(query);
+    url.setQuery(query.toString(QUrl::FullyEncoded).replace("+", "%2B"));
     return {url, {{"Referer", "https://music.163.com/"}, {"User-Agent", "Mozilla/5.0"}}};
 }
 Step qqSearch(const QString &title, const QString &artist) {
@@ -118,7 +118,7 @@ Step qqSearch(const QString &title, const QString &artist) {
     query.addQueryItem("p", "1");
     query.addQueryItem("cr", "1");
     query.addQueryItem("new_json", "1");
-    url.setQuery(query);
+    url.setQuery(query.toString(QUrl::FullyEncoded).replace("+", "%2B"));
     return {url, {{"Referer", "https://y.qq.com/"}, {"User-Agent", "Mozilla/5.0"}}};
 }
 Step kugouSearch(const QString &title, const QString &artist, qint64 durationMs) {
@@ -130,7 +130,7 @@ Step kugouSearch(const QString &title, const QString &artist, qint64 durationMs)
     query.addQueryItem("keyword", artist.isEmpty() ? title : artist + " - " + title);
     query.addQueryItem("duration", QString::number(qMax<qint64>(0, durationMs)));
     query.addQueryItem("hash", "");
-    url.setQuery(query);
+    url.setQuery(query.toString(QUrl::FullyEncoded).replace("+", "%2B"));
     return {url, {{"User-Agent", "Mozilla/5.0"}}};
 }
 } // namespace
@@ -145,7 +145,7 @@ Follow consume(int kind, const QByteArray &phase, const QByteArray &body, const 
                const QString &artist, qint64 durationMs) {
     Follow out;
     const auto doc = documentFrom(body);
-    if (doc.isNull()) {
+    if (doc.isNull() || !doc.isObject()) {
         out.failed = true;
         out.failure = "响应格式异常";
         return out;
@@ -186,7 +186,7 @@ Follow consume(int kind, const QByteArray &phase, const QByteArray &body, const 
                 url=QUrl("https://lyrics.kugou.com/download");query.addQueryItem("ver","1");query.addQueryItem("client","pc");query.addQueryItem("id",id);query.addQueryItem("accesskey",key);query.addQueryItem("fmt","lrc");query.addQueryItem("charset","utf8");
                 detail.step.headers={{"User-Agent","Mozilla/5.0"}};
             }
-            url.setQuery(query);if(seen.contains(url))continue;seen.insert(url);detail.step.url=url;
+            url.setQuery(query.toString(QUrl::FullyEncoded).replace("+", "%2B"));if(seen.contains(url))continue;seen.insert(url);detail.step.url=url;
             if(!out.again){out.again=true;out.step=detail.step;out.matched=detail.matched;out.durationMs=detail.durationMs;}
             else out.remaining<<detail;
             if(seen.size()>=8)break;

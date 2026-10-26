@@ -9,7 +9,8 @@
 static void initializeQmlResources() { Q_INIT_RESOURCE(qml); }
 namespace relaxer {
 QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRuntime *runtime,
-                   std::unique_ptr<TranslationBrowserBackend> browser, SettingsBridge::SystemThemeReader systemTheme)
+                   std::unique_ptr<TranslationBrowserBackend> browser, SettingsBridge::SystemThemeReader systemTheme,
+                   QNetworkAccessManager *searchTransport, QVector<LyricsSearchSource> searchSources)
     : QObject(parent), m_feedback(this), m_facade(library, this, decodeOnly), m_appBridge(library, this),
       m_playbackBridge(&m_facade, this, library), m_tracks(library, this), m_trackView(&m_tracks, this),
       m_playlists(library, this), m_libraryBridge(library, &m_facade, &m_tracks, &m_trackView, &m_playlists, this),
@@ -18,7 +19,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
       m_ownedAi(runtime?nullptr:std::make_unique<ai::AiRuntime>(library)),m_ai(runtime?runtime:m_ownedAi.get()),
       m_import(library,this),m_lyrics(library,&m_facade,this),m_settings(library,this,std::move(systemTheme)),m_aiBridge(m_ai,this),
       m_translation(library,m_ai,this,std::move(browser)),m_translationBridge(library,&m_facade,&m_translation,&m_lyrics,this),
-      m_importBridge(library,&m_import,this),m_search(library,this),m_searchBridge(library,&m_facade,&m_search,this) {
+      m_importBridge(library,&m_import,this),m_search(library,this,QUrl("https://lrclib.net/api"),{},searchTransport,std::move(searchSources)),m_searchBridge(library,&m_facade,&m_search,this) {
     initializeQmlResources();
     m_searchBridge.setTranslationCoordinator(&m_translation);
     setObjectName("qmlShell");
@@ -70,6 +71,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     connect(&m_translationBridge,&TranslationBridge::feedback,this,[this](const QString &category,const QString &task,const QString &target,const QString &message,const QString &details){m_feedback.post("Translation",category,message+" · "+m_translationBridge.targetTitle(),details,task,target,category=="Error",category=="ConfirmationRequired");});
     connect(&m_translationBridge,&TranslationBridge::feedbackCleared,this,[this]{m_feedback.clearSource("Translation");});
     connect(&m_searchBridge,&LyricsSearchBridge::saved,this,[this]{m_feedback.clearSource("Lyrics");});
+    connect(&m_searchBridge,&LyricsSearchBridge::searchFeedback,this,[this](const QString &category,const QString &operation,const QString &target,const QString &message,const QString &details){m_feedback.post("LyricsSearch",category,message,details,operation,target,category=="Error");});
     connect(&m_searchBridge,&LyricsSearchBridge::editCompleted,this,[this](const QString &category,const QString &operation,const QString &message,const QString &details){m_feedback.post("LyricsEdit",category,message,details,operation,{},category=="Error");});
     m_facade.restore();
     QCoreApplication::instance()->installEventFilter(this);

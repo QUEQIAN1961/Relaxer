@@ -23,7 +23,8 @@ class QmlShell final : public QObject {
   public:
     explicit QmlShell(Library *library, QObject *parent = nullptr, bool decodeOnly = false,
                       ai::AiRuntime *runtime = nullptr, std::unique_ptr<TranslationBrowserBackend> browser = {},
-                      SettingsBridge::SystemThemeReader systemTheme = {});
+                      SettingsBridge::SystemThemeReader systemTheme = {},
+                      QNetworkAccessManager *searchTransport = nullptr, QVector<LyricsSearchSource> searchSources = {});
     ~QmlShell() override;
     bool load();
     bool shutdown();
