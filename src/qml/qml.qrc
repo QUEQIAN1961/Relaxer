@@ -17,6 +17,7 @@
   <file>components/PlaybackSlider.qml</file>
   <file>components/UpcomingPanel.qml</file>
   <file>components/LyricsWorkspace.qml</file>
+  <file>components/BatchInstrumentalDialog.qml</file>
   <file>components/Toast.qml</file>
     <file>components/FeedbackPanel.qml</file>
   <file>components/ImportDialog.qml</file>

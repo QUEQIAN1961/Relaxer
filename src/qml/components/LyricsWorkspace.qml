@@ -13,6 +13,7 @@ Page {
     readonly property bool opened: visible
     signal aboutToShow()
     signal closed()
+    signal batchInstrumentalRequested(var keys)
     function open() { aboutToShow(); visible = true; forceActiveFocus() }
     function close() { visible = false; closed() }
     padding: 18
@@ -92,7 +93,7 @@ Page {
     readonly property bool compact: height < 680
     readonly property bool hasTarget: lyricsSearchBridge.targetTrackKey !== "0"
     readonly property bool taskNeedsAction: translationBridge.pending || translationBridge.preview
-    readonly property bool sourceActionsEnabled: hasTarget && !taskNeedsAction
+    readonly property bool sourceActionsEnabled: hasTarget && !taskNeedsAction && !lyricsSearchBridge.batchRunning
     function updateQuery() {
         songTitle.text = lyricsSearchBridge.targetTitle
         songArtist.text = lyricsSearchBridge.targetArtist
@@ -150,6 +151,8 @@ Page {
     }
     onAboutToShow: { syncTargets(); allowClose = false; updateQuery(); previewTabs.currentIndex = translationBridge.preview ? 1 : 0 }
     onClosed: {
+        offsetEditor.close()
+        lyricsSearchBridge.cancelInstrumentalBatch()
         consent.close()
         lyricsSearchBridge.stop()
         translationBridge.declineConsent()
@@ -163,7 +166,7 @@ Page {
     }
     Shortcut {
         sequence: "Escape"
-        enabled: workspace.opened && !consent.opened && !leaveConfirm.opened && !replaceConfirm.opened && !discardConfirm.opened && !pasteDialog.opened && !instrumentalConfirm.opened
+        enabled: workspace.opened && !consent.opened && !leaveConfirm.opened && !replaceConfirm.opened && !discardConfirm.opened && !pasteDialog.opened && !instrumentalConfirm.opened && !offsetEditor.opened && !lyricsSearchBridge.batchPrepared
         onActivated: workspace.requestClose()
     }
     background: Rectangle { color: Theme.background }
@@ -192,6 +195,12 @@ Page {
                 FilterToggle { id: multiSelect; objectName: "lyricsMultiSelect"; text: checked ? "取消" : "多选"; onToggled: if (!checked) workspace.selectedTracks = [] }
                 ShellButton { objectName: "lyricsSelectAll"; text: "全选"; flat: true; font.pixelSize: 13; leftPadding: 4; rightPadding: 4; implicitWidth: 38; implicitHeight: 28; visible: multiSelect.checked; onClicked: workspace.selectedTracks = workspace.visibleKeys() }
                 Item { Layout.fillWidth: true }
+                }
+                ShellButton {
+                    objectName: "lyricsBatchInstrumental"; Layout.fillWidth: true; visible: multiSelect.checked
+                    text: lyricsSearchBridge.batchRunning ? "取消纯音乐处理" : "批量标记纯音乐…"
+                    enabled: lyricsSearchBridge.batchRunning || workspace.searchKeys().length > 0
+                    onClicked: if (lyricsSearchBridge.batchRunning) lyricsSearchBridge.cancelInstrumentalBatch(); else workspace.batchInstrumentalRequested(workspace.searchKeys())
                 }
                 ListView {
                     id: tracks; objectName: "lyricsTargetTracks"
@@ -320,6 +329,11 @@ Page {
         ColumnLayout {
             Layout.fillWidth: true; Layout.preferredWidth: 360; Layout.minimumWidth: 250; Layout.fillHeight: true; spacing: workspace.compact ? 5 : 8
             Label { text: "歌词与翻译"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
+            ShellButton {
+                objectName: "lyricsFileOffsetButton"; Layout.fillWidth: true; implicitHeight: 32; text: "编辑文件时间偏移…"
+                enabled: workspace.hasTarget && !lyricsSearchBridge.busy && !lyricsSearchBridge.batchRunning
+                onClicked: if (lyricsSearchBridge.beginFileOffset()) { offsetEditor.exactTarget = lyricsSearchBridge.targetTrackKey; fileOffsetAmount.value = 0; offsetDiscard.checked = false; offsetEditor.open() }
+            }
             RowLayout {
                 Layout.fillWidth: true; spacing: 2
                 Repeater {
@@ -379,7 +393,7 @@ Page {
         implicitHeight: 28
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 18
-            Label { Layout.fillWidth: true; text: workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 13; wrapMode: Text.Wrap }
+            Label { Layout.fillWidth: true; text: lyricsSearchBridge.batchRunning ? "纯音乐处理：剩余 " + lyricsSearchBridge.batchResult.pending + " 首，可点击取消停止后续写入。" : workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 13; wrapMode: Text.Wrap }
 
         }
     }
@@ -453,5 +467,34 @@ Page {
         anchors.centerIn: parent; width: Math.min(440, parent.width - 40); modal: true; title: "确认为纯音乐？"; standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Label { text: "仅在确定没有人声歌词时使用。这会把本地歌词替换为纯音乐标记。"; wrapMode: Text.Wrap }
         onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey) lyricsSearchBridge.markInstrumental(true)
+    }
+    ConfirmDialog {
+        id: offsetEditor; objectName: "lyricsFileOffsetDialog"; parent: workspace.parent
+        property string exactTarget: "0"
+        readonly property var info: lyricsSearchBridge.fileOffset
+        anchors.centerIn: parent; width: Math.min(760,parent.width-40); height: Math.min(640,parent.height-36)
+        modal: true; title: "歌词文件时间偏移 · " + (info.title || "")
+        contentItem: ColumnLayout {
+            spacing: 8
+            Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "当前文件 offset：" + (offsetEditor.info.existingMs || 0) + " ms。这里保存 LRC 的绝对 [offset:]，不修改播放器的显示延时。" }
+            RowLayout {
+                Label { text: "文件偏移（ms）" }
+                SpinBox { id: fileOffsetAmount; objectName: "lyricsFileOffsetAmount"; from: -5000; to: 5000; stepSize: 100; editable: true; onValueModified: lyricsSearchBridge.previewFileOffset(value) }
+                Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "正数延后，负数提前；0 保留原文件偏移。" }
+            }
+            Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "预览（文件生效时间；未叠加播放显示延时）\n" + (offsetEditor.info.timeline || "") }
+            ScrollView {
+                Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                TextArea { objectName: "lyricsFileOffsetPreview"; readOnly: true; selectByMouse: true; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; text: offsetEditor.info.preview || "" }
+            }
+            CheckBox { id: offsetDiscard; objectName: "lyricsFileOffsetTaskConsent"; visible: !!offsetEditor.info.confirmationRequired; text: "明确保存偏移；仅成功后放弃该曲翻译任务或未保存译文" }
+            Label { objectName: "lyricsFileOffsetError"; Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.accent; text: offsetEditor.info.error || ""; visible: text.length > 0 }
+        }
+        footer: DialogButtonBox {
+            ShellButton { objectName: "lyricsFileOffsetCancel"; text: "取消"; onClicked: offsetEditor.reject() }
+            ShellButton { objectName: "lyricsFileOffsetSave"; text: "保存到歌词文件"; enabled: !!offsetEditor.info.valid && (!offsetEditor.info.confirmationRequired || offsetDiscard.checked); onClicked: if (lyricsSearchBridge.saveFileOffset(offsetDiscard.checked)) offsetEditor.close() }
+        }
+        onClosed: lyricsSearchBridge.cancelFileOffset()
+        Connections { target: lyricsSearchBridge; function onChanged() { if (offsetEditor.opened && offsetEditor.exactTarget !== lyricsSearchBridge.targetTrackKey) offsetEditor.close() } }
     }
 }

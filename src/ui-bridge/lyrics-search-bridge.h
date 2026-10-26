@@ -2,6 +2,7 @@
 #include "lyrics-search-coordinator.h"
 #include "playback-facade.h"
 #include "lyrics-replacement-service.h"
+#include "lyrics-edit-service.h"
 #include <QAbstractListModel>
 #include <QVariantList>
 #include <QSet>
@@ -18,6 +19,11 @@ class LyricsSearchBridge final:public QAbstractListModel {
     Q_PROPERTY(QString targetArtist READ targetArtist NOTIFY changed)
     Q_PROPERTY(QString sourceText READ sourceText NOTIFY changed)
     Q_PROPERTY(QVariantList targetTracks READ targetTracks NOTIFY changed)
+    Q_PROPERTY(QVariantMap fileOffset READ fileOffset NOTIFY changed)
+    Q_PROPERTY(bool batchPrepared READ batchPrepared NOTIFY changed)
+    Q_PROPERTY(bool batchRunning READ batchRunning NOTIFY changed)
+    Q_PROPERTY(QVariantMap batchOverview READ batchOverview NOTIFY changed)
+    Q_PROPERTY(QVariantMap batchResult READ batchResult NOTIFY changed)
 public:
     enum Role { CandidateKey=Qt::UserRole+1,Title,Artist,Album,Source,Timed };
     LyricsSearchBridge(Library *library,PlaybackFacade *facade,LyricsSearchCoordinator *service,QObject *parent=nullptr);
@@ -42,6 +48,18 @@ public:
     Q_INVOKABLE bool saveText(const QString &text,bool confirmed=false,const QString &editToken={});
     Q_INVOKABLE bool importLocalLyrics(const QUrl &file,bool confirmed=false,const QString &editToken={});
     Q_INVOKABLE bool markInstrumental(bool confirmed=false);
+    QVariantMap fileOffset() const { return m_offsetView; }
+    Q_INVOKABLE bool beginFileOffset();
+    Q_INVOKABLE bool previewFileOffset(double milliseconds);
+    Q_INVOKABLE bool saveFileOffset(bool discardTranslation=false);
+    Q_INVOKABLE void cancelFileOffset();
+    bool batchPrepared() const { return m_batchPrepared; }
+    bool batchRunning() const { return m_batchRunning; }
+    QVariantMap batchOverview() const { return m_batch.overview(); }
+    QVariantMap batchResult() const { return m_batch.result(); }
+    Q_INVOKABLE bool prepareInstrumentalBatch(const QStringList &keys);
+    Q_INVOKABLE bool startInstrumentalBatch(bool replaceRisks=false);
+    Q_INVOKABLE void cancelInstrumentalBatch();
     Q_INVOKABLE void stop();
     Q_INVOKABLE bool select(int row);
     Q_INVOKABLE bool selectRecommended(bool requireTimed = false);
@@ -54,6 +72,7 @@ signals:
     void changed();
     void replacementRequested(const QString &token,const QString &reason);
     void saved(const QString &trackKey);
+    void editCompleted(const QString &category,const QString &operation,const QString &message,const QString &details);
 private:
     Library *m_library;PlaybackFacade *m_facade;LyricsSearchCoordinator *m_service;
     LyricsCandidateSnapshot m_snapshot;LyricsSaveSnapshot m_guard;
@@ -87,5 +106,14 @@ private:
     void resetForTrack();
     void rememberReview(qint64 id,bool pending);
     void restoreReviews(const QVector<qint64> &ids);
+    LyricsOffsetPlan m_offsetPlan;
+    LyricsSaveSnapshot m_offsetSnapshot;
+    QVariantMap m_offsetView;
+    LyricsInstrumentalBatch m_batch;
+    QString m_batchOperation;
+    bool m_batchPrepared=false,m_batchRunning=false,m_batchReplace=false,m_batchStep=false,m_batchCancelRequested=false;
+    quint64 m_batchEpoch=0;
+    void processInstrumental(quint64 epoch);
+    void finishInstrumental();
 };
 }

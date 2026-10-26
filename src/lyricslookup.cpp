@@ -1,4 +1,5 @@
 #include <QApplication>
+#include "lyrics-edit-service.h"
 #include <QScreen>
 #include <QClipboard>
 #include <QCloseEvent>
@@ -169,17 +170,7 @@ QVector<QJsonObject> LyricsLookup::rankCandidates(const Track &query,const QVect
 
 
 QByteArray LyricsLookup::withOffset(const QByteArray &data,int ms){
-    if(ms==0)return data;
-    const bool utf16=data.startsWith("\xff\xfe")||data.startsWith("\xfe\xff");
-    const bool bom8=data.startsWith("\xef\xbb\xbf");
-    QString text;
-    if(utf16){QStringDecoder decoder(data.startsWith("\xff\xfe")?QStringConverter::Utf16LE:QStringConverter::Utf16BE);text=decoder(data.mid(2));}
-    else text=QString::fromLatin1(bom8?data.mid(3):data);
-    if(!QRegularExpression("\\[\\d+:\\d{1,2}(?:[.:]\\d{1,3})?\\]").match(text).hasMatch())return data;
-    text.remove(QRegularExpression("^\\[offset:[+-]?\\d+\\][ \\t]*\\r?\\n?",QRegularExpression::MultilineOption|QRegularExpression::CaseInsensitiveOption));
-    text=QString("[offset:%1]\n").arg(ms)+text;
-    if(utf16){QStringEncoder encoder(data.startsWith("\xff\xfe")?QStringConverter::Utf16LE:QStringConverter::Utf16BE);const QByteArray encoded=encoder(text);return data.left(2)+encoded;}
-    return (bom8?data.left(3):QByteArray())+text.toLatin1();
+    return LyricsEditService::withOffset(data,ms);
 }
 QString LyricsLookup::matchReason(const Track &t,const QJsonObject &r){
     QStringList reasons;const auto clean=searchTrack(t);
@@ -995,8 +986,14 @@ bool LyricsLookup::importLyricsFile(const QString &path,const LyricsSaveSnapshot
 void LyricsLookup::importLyrics(){if(m_multi||m_tracks->currentRow()<0)return;const auto target=trackIdAt(m_tracks->currentRow());const auto path=QFileDialog::getOpenFileName(this,"导入歌词",{},"歌词 (*.lrc *.txt)");if(target!=trackIdAt(m_tracks->currentRow())){m_status->setText("歌曲已切换，本次未保存");return;}if(!path.isEmpty())importLyricsFile(path);}
 void LyricsLookup::saveOffsets(){
     const auto rows=batchRows();if(rows.isEmpty())return;const int offset=m_offset->value();stop();int saved=0,skipped=0,failed=0;
-    for(int row:rows){const auto track=m_library->track(trackIdAt(row));if(track.lyrics.isEmpty()){++skipped;continue;}const auto document=LyricsDocumentReader::readDocument(m_library->absolute(track.lyrics));if(!document.file.opened||document.file.tooLarge){++skipped;continue;}const auto &data=document.file.bytes;const auto &parsed=document.lyrics;if(!parsed.timed||parsed.instrumental){++skipped;continue;}
-        ensureLyricsSnapshot(track.id);if(track.id==aiTrackId()&&(aiTaskId()||hasAiPreview())&&QMessageBox::question(this,"替换歌词",QStringLiteral("保存偏移会替换当前歌词并清除未保存的 AI 结果，是否继续？"),QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes){++skipped;continue;}if(store(track,withOffset(data,offset),true,true)){cancelAiTranslationForTrack(track.id);++saved;setRowStatus(row,"已保存时间偏移");}else{++failed;setRowStatus(row,"未保存："+m_storeError);}
+    for(int row:rows){const auto id=trackIdAt(row);ensureLyricsSnapshot(id);
+        auto plan=LyricsEditService::prepareOffset(*m_library,m_lyricsSnapshots.value(id),offset,m_translation);
+        if(!plan.valid()){++skipped;setRowStatus(row,"未处理："+plan.error());continue;}
+        const bool consent=plan.confirmationRequired();
+        if(consent&&QMessageBox::question(this,"保存文件偏移",QStringLiteral("明确保存此文件偏移？仅在保存成功后放弃该曲翻译任务或未保存译文。"),QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes){++skipped;continue;}
+        if(LyricsEditService::commitOffset(*m_library,plan,id,consent,m_translation,&m_storeError)){
+            ++saved;remember(id);m_translationAssessments.remove(id);m_lyricsSnapshots.insert(id,m_library->lyricsSaveSnapshot(id));setRowStatus(row,"已保存时间偏移");
+        }else{++failed;setRowStatus(row,"未保存："+m_storeError);}
     }
     m_search->noteManualSave(saved);selectTrack();m_status->setText(QString("时间偏移已保存 %1 首，跳过 %2 首，失败 %3 首。").arg(saved).arg(skipped).arg(failed));controls();
 }
@@ -1005,20 +1002,19 @@ void LyricsLookup::markInstrumental(){
     if(m_replacementSubmitting)return;
     QScopedValueRollback<bool> submitting(m_replacementSubmitting,true);
     const auto rows=batchRows();if(rows.isEmpty())return;
-    QVector<LyricsReplacementPlan> plans;int conflicts=0;
-    for(int row:rows){const auto id=trackIdAt(row);ensureLyricsSnapshot(id);
-        plans.append(LyricsReplacementService::prepare(*m_library,m_lyricsSnapshots.value(id),QStringLiteral("纯音乐，请欣赏").toUtf8(),QString::number(id)+":instrumental",m_translation));
-        conflicts+=plans.last().decision.confirmationRequired;
-    }
+    QVector<qint64> ids;for(int row:rows){const auto id=trackIdAt(row);ensureLyricsSnapshot(id);ids.append(id);}
+    auto batch=LyricsEditService::prepareInstrumental(*m_library,ids,m_translation,m_lyricsSnapshots);
+    if(!batch.valid()){m_status->setText(batch.error());return;}
+    const int conflicts=batch.overview()["risk"].toInt();
     if(conflicts&&QMessageBox::question(this,"批量标记纯音乐",QString("将所选 %1 首标记为纯音乐，其中 %2 首有覆盖冲突。明确替换会删除这些歌曲的已有歌词和译文，并放弃相关翻译任务或预览。是否继续？").arg(rows.size()).arg(conflicts),QMessageBox::Yes|QMessageBox::No,QMessageBox::No)!=QMessageBox::Yes)return;
     if(batchRows()!=rows){m_status->setText("所选歌曲已变化，请重新确认");return;}
-    stop();int saved=0,failed=0;
-    for(int i=0;i<rows.size();++i){const int row=rows[i];auto &plan=plans[i];
-        if(LyricsReplacementService::commit(*m_library,plan,LyricsReplacementChoice::Replace,trackIdAt(row),QString::number(trackIdAt(row))+":instrumental",m_translation,&m_storeError)){
-            cancelAiTranslationForTrack(plan.snapshot.id);remember(plan.snapshot.id);m_lyricsSnapshots.insert(plan.snapshot.id,m_library->lyricsSaveSnapshot(plan.snapshot.id));
-            ++saved;m_search->clearCandidates(plan.snapshot.id);setRowStatus(row,"已保存纯音乐标记");
-        }else{++failed;setRowStatus(row,"未保存："+(plan.decision.valid?m_storeError:plan.decision.reason));}}
-    m_search->noteManualSave(saved);updateFilter();selectTrack();m_status->setText(QString("已标记纯音乐 %1 首，失败 %2 首。").arg(saved).arg(failed));controls();
+    stop();while(LyricsEditService::stepInstrumental(*m_library,batch,true,m_translation)){}
+    const auto result=batch.result();
+    for(const auto &value:result["results"].toList()) {const auto entry=value.toMap();const auto id=entry["trackKey"].toString().toLongLong();const int row=rowForTrack(id);
+        if(entry["state"]=="succeeded"){remember(id);m_lyricsSnapshots.insert(id,m_library->lyricsSaveSnapshot(id));m_translationAssessments.remove(id);m_search->clearCandidates(id);setRowStatus(row,"已保存纯音乐标记");}
+        else setRowStatus(row,entry["reason"].toString());}
+    m_search->noteManualSave(result["succeeded"].toInt());updateFilter();selectTrack();
+    m_status->setText(QString("已标记纯音乐 %1 首，跳过 %2 首，失败 %3 首。\n%4").arg(result["succeeded"].toInt()).arg(result["skipped"].toInt()).arg(result["failed"].toInt()).arg(result["details"].toString()));controls();
 }
 
 void LyricsLookup::translateSelected(){

@@ -91,7 +91,7 @@ ApplicationWindow {
         bulkKeys = active ? keys.slice() : []
         bulkScope = active && owner === localPage ? libraryBridge.playlistId : "0"
     }
-    function clearBulk() { if (bulkOwner) bulkOwner.clearBulk(); bulkActive = false; bulkKeys = []; bulkOwner = null }
+    function clearBulk() { if(lyricsSearchBridge.batchRunning)lyricsSearchBridge.cancelInstrumentalBatch(); if (bulkOwner) bulkOwner.clearBulk(); bulkActive = false; bulkKeys = []; bulkOwner = null }
     function selectBulk(all) {
         if (!bulkOwner) return
         bulkOwner.setBulkKeys(all ? libraryBridge.visibleTrackKeys() : [])
@@ -223,6 +223,7 @@ ApplicationWindow {
         else if(!playbackBridge.requestExit()){close.accepted=false;exitSaveFailure.open()}
         else if(importBridge.busy){close.accepted=false;root.awaitingImportClose=true;if(!importBridge.closing)importBridge.beginShutdown()}
         if(!close.accepted)feedbackBridge.setClosing(false)
+        else lyricsSearchBridge.cancelInstrumentalBatch()
     }
     ConfirmDialog {
         id:exitSaveFailure;parent:root.popupLayer;objectName:"exitSaveFailureDialog";anchors.centerIn:parent
@@ -356,11 +357,12 @@ ApplicationWindow {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;anchors.topMargin:10;anchors.bottomMargin:10;spacing:4
             RowLayout {
                 Layout.fillWidth:true
-                UiText {objectName:"bulkCount";text:"已选 "+root.bulkKeys.length+" 首歌曲";color:Theme.text;font.pixelSize: 15}
+                UiText {objectName:"bulkCount";text:"已选 "+root.bulkKeys.length+" 首歌曲"+(lyricsSearchBridge.batchRunning?" · 剩余 "+lyricsSearchBridge.batchResult.pending:"");color:Theme.text;font.pixelSize: 15}
                 ShellButton{objectName:"bulkSelectAll";text:"全选";flat:true;onClicked:root.selectBulk(true)}
                 ShellButton{objectName:"bulkClear";text:"取消选择";flat:true;onClicked:root.selectBulk(false)}
                 Item{Layout.fillWidth:true}
                 ShellButton{objectName:"bulkLyrics";text:"查找歌词";flat:true;enabled:root.bulkKeys.length>0;onClicked:root.openLyricsTools(root.bulkKeys,false)}
+                ShellButton{objectName:"bulkInstrumental";text:lyricsSearchBridge.batchRunning?"取消纯音乐处理":"标记纯音乐…";flat:true;enabled:root.bulkKeys.length>0;onClicked:{if(lyricsSearchBridge.batchRunning)lyricsSearchBridge.cancelInstrumentalBatch();else batchInstrumental.review(root.bulkKeys.slice())}}
                 ShellButton{objectName:"bulkExit";text:"退出多选";flat:true;onClicked:root.clearBulk()}
             }
             RowLayout {
@@ -538,7 +540,8 @@ ApplicationWindow {
     }
     ImportDialog{id:importDialog;parent:root.popupLayer}
     PlaylistEditor{id:playlistEditor;parent:root.popupLayer;onCreated:key=>root.openPlaylist(key)}
-    LyricsWorkspace{id:lyricsWorkspace;parent:root.contentItem;z:6}
+    LyricsWorkspace{id:lyricsWorkspace;parent:root.contentItem;z:6;onBatchInstrumentalRequested:keys=>batchInstrumental.review(keys)}
+    BatchInstrumentalDialog{id:batchInstrumental;parent:root.popupLayer}
     FeedbackPanel{id:feedbackPanel;parent:root.popupLayer;z:100}
     Toast{id:toast;anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:playerBar.top;anchors.bottomMargin:16;z:20}
     ConfirmDialog {

@@ -70,6 +70,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     connect(&m_translationBridge,&TranslationBridge::feedback,this,[this](const QString &category,const QString &task,const QString &target,const QString &message,const QString &details){m_feedback.post("Translation",category,message+" · "+m_translationBridge.targetTitle(),details,task,target,category=="Error",category=="ConfirmationRequired");});
     connect(&m_translationBridge,&TranslationBridge::feedbackCleared,this,[this]{m_feedback.clearSource("Translation");});
     connect(&m_searchBridge,&LyricsSearchBridge::saved,this,[this]{m_feedback.clearSource("Lyrics");});
+    connect(&m_searchBridge,&LyricsSearchBridge::editCompleted,this,[this](const QString &category,const QString &operation,const QString &message,const QString &details){m_feedback.post("LyricsEdit",category,message,details,operation,{},category=="Error");});
     m_facade.restore();
     QCoreApplication::instance()->installEventFilter(this);
 }
@@ -92,7 +93,7 @@ QQuickWindow *QmlShell::window() const {
     return m_engine && !m_engine->rootObjects().isEmpty()
         ? qobject_cast<QQuickWindow *>(m_engine->rootObjects().first()) : nullptr;
 }
-bool QmlShell::shutdown() {m_feedback.setClosing(true);m_search.shutdown();m_translation.shutdown();m_import.shutdown();return m_facade.shutdown(true);}
+bool QmlShell::shutdown() {m_feedback.setClosing(true);m_searchBridge.cancelInstrumentalBatch();m_search.shutdown();m_translation.shutdown();m_import.shutdown();return m_facade.shutdown(true);}
 bool QmlShell::eventFilter(QObject *object,QEvent *event){
     if(object==QCoreApplication::instance()&&event->type()==QEvent::Quit&&
        object->property("relaxerInteractiveExit").toBool()&&!m_facade.isShutdown()&&window()){
