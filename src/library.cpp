@@ -66,6 +66,7 @@ bool Library::open(QString *error) {
         if (!QDir().mkpath(absolute(d))) {
             if (error)
                 *error = "无法创建音乐资料目录：" + m_root;
+            m_error = "无法创建音乐资料目录：" + m_root;
             return false;
         }
     m_db = QSqlDatabase::addDatabase("QSQLITE", m_connection);
@@ -163,8 +164,8 @@ qint64 Library::trackCount() const {
         return 0;
     }
     QSqlQuery query(m_db);
-    if (query.exec("SELECT COUNT(*) FROM tracks") && query.next()) return query.value(0).toLongLong();
-    m_error = query.lastError().text();
+    if (query.exec("SELECT COUNT(*) FROM tracks") && query.next()) { emit querySucceeded("trackCount"); return query.value(0).toLongLong(); }
+    m_error = query.lastError().text();emit queryFailed("trackCount",m_error);
     return 0;
 }
 QVector<Track> Library::tracks(qint64 list, const QString &f) const {
@@ -181,7 +182,7 @@ QVector<Track> Library::tracks(qint64 list, const QString &f) const {
             "AND (t.title LIKE ? ESCAPE '\\' OR t.artist LIKE ? ESCAPE '\\' OR t.album LIKE ? ESCAPE '\\') ";
     sql += list > 0 ? "ORDER BY p.position,t.id" : "ORDER BY t.added DESC,t.id DESC";
     QSqlQuery q(m_db);
-    q.prepare(sql);
+    if (!q.prepare(sql)) { m_error=q.lastError().text();emit queryFailed("tracks",m_error);return {}; }
     if (list > 0)
         q.addBindValue(list);
     if (!f.isEmpty()) {
@@ -191,11 +192,11 @@ QVector<Track> Library::tracks(qint64 list, const QString &f) const {
             q.addBindValue("%" + escaped + "%");
     }
     QVector<Track> r;
-    if (q.exec())
-        while (q.next())
-            r.push_back(fromQuery(q));
-    else
-        m_error = q.lastError().text();
+    if (q.exec()) {
+        while (q.next()) r.push_back(fromQuery(q));
+        emit querySucceeded("tracks");
+    }
+    else { m_error = q.lastError().text(); emit queryFailed("tracks",m_error); }
     return r;
 }
 Track Library::track(qint64 id) const {
@@ -205,7 +206,9 @@ Track Library::track(qint64 id) const {
         "tracks "
         "WHERE id=?");
     q.addBindValue(id);
-    if (q.exec() && q.next())
+    if (!q.exec()) { m_error=q.lastError().text();emit queryFailed("track",m_error);return {}; }
+    emit querySucceeded("track");
+    if (q.next())
         return fromQuery(q);
     return {};
 }
@@ -227,7 +230,7 @@ QHash<qint64,LyricsFilterState> Library::lyricsFilterStates(const QVector<qint64
                   "LEFT JOIN settings s ON s.key='lyrics.translationJudgment.v1.'||t.id "
                   "WHERE t.id IN ("+binds.join(',')+")");
         for(int i=0;i<count;++i)q.addBindValue(unique[start+i]);
-        if(!q.exec()){m_error=q.lastError().text();return {};}
+        if(!q.exec()){m_error=q.lastError().text();emit queryFailed("lyricsFilterStates",m_error);return {};}
         while(q.next()){
             LyricsFilterState state;state.track=fromQuery(q);state.instrumental=q.value(14).toBool();
             const auto doc=QJsonDocument::fromJson(q.value(15).toByteArray());
@@ -239,6 +242,7 @@ QHash<qint64,LyricsFilterState> Library::lyricsFilterStates(const QVector<qint64
             result.insert(state.track.id,state);
         }
     }
+    emit querySucceeded("lyricsFilterStates");
     return result;
 }
 QHash<qint64, Track> Library::tracksByIds(const QVector<qint64> &ids) const {
@@ -260,21 +264,23 @@ QHash<qint64, Track> Library::tracksByIds(const QVector<qint64> &ids) const {
         QSqlQuery query(m_db);
         query.prepare("SELECT id,hash,file,title,artist,album,cover,lyrics,duration,plays,heard,favorite,cover_origin,added FROM tracks WHERE id IN (" + placeholders.join(',') + ')');
         for (int i = 0; i < count; ++i) query.addBindValue(unique[start + i]);
-        if (!query.exec()) { m_error = query.lastError().text(); return {}; }
+        if (!query.exec()) { m_error = query.lastError().text(); emit queryFailed("tracksByIds",m_error); return {}; }
         while (query.next()) { auto row = fromQuery(query); result.insert(row.id, std::move(row)); }
     }
+    emit querySucceeded("tracksByIds");
     return result;
 }
 QVector<Track> Library::recent() const {
     QSqlQuery q(m_db);
-    q.exec("SELECT "
+    if (!q.exec("SELECT "
            "t.id,t.hash,t.file,t.title,t.artist,t.album,t.cover,t.lyrics,t.duration,t.plays,t.heard,t."
            "favorite,t.cover_origin,t.added FROM tracks t JOIN (SELECT track,MAX(id) latest FROM sessions GROUP BY "
            "track) s ON "
-           "s.track=t.id ORDER BY s.latest DESC LIMIT 200");
+           "s.track=t.id ORDER BY s.latest DESC LIMIT 200")) { m_error=q.lastError().text();emit queryFailed("recent",m_error);return {}; }
     QVector<Track> r;
     while (q.next())
         r.push_back(fromQuery(q));
+    emit querySucceeded("recent");
     return r;
 }
 qint64 Library::insert(const Track &t) {return insertImportedTrack(t,nullptr);}
@@ -323,9 +329,9 @@ qint64 Library::insertImportedTrack(const Track &t,bool *added) {
 }
 QVector<Playlist> Library::playlists() const {
     QSqlQuery q(m_db);
-    q.exec("SELECT p.id,p.name,p.cover,COUNT(pt.track),COALESCE(SUM(t.plays),0),p.tags,p.description "
+    if (!q.exec("SELECT p.id,p.name,p.cover,COUNT(pt.track),COALESCE(SUM(t.plays),0),p.tags,p.description "
            "FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlist=p.id "
-           "LEFT JOIN tracks t ON t.id=pt.track GROUP BY p.id ORDER BY p.id");
+           "LEFT JOIN tracks t ON t.id=pt.track GROUP BY p.id ORDER BY p.id")) { m_error=q.lastError().text();emit queryFailed("playlists",m_error);return {}; }
     QVector<Playlist> r;
     while (q.next()) {
         Playlist p;
@@ -336,6 +342,7 @@ QVector<Playlist> Library::playlists() const {
             if (saved.contains(tag)) p.tags << tag;
         r.push_back(p);
     }
+    emit querySucceeded("playlists");
     return r;
 }
 bool Library::playlistExists(qint64 id) const {

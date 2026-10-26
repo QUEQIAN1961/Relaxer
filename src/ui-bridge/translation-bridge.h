@@ -41,6 +41,11 @@ public:
     Q_INVOKABLE bool cancel();Q_INVOKABLE bool discard();Q_INVOKABLE bool save();Q_INVOKABLE bool resume();
     TranslationSummary summary()const;
 signals:void changed();
+    void feedback(const QString &category, const QString &task, const QString &target, const QString &message, const QString &details);
+    void feedbackCleared();
+private:
+    QHash<quint64,TranslationState> m_observedStates;
+    void reportFailure(const QString &message);
 private:
     Library *m_library;PlaybackFacade *m_facade;TranslationCoordinator *m_service;LyricsModel *m_lyrics;
     QHash<qint64,quint64> m_tasks;quint64 m_consent=0;QString m_error;

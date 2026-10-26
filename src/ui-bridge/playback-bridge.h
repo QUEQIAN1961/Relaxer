@@ -76,6 +76,9 @@ class PlaybackBridge final : public QObject {
     void modeChanged();
     void availableChanged();
     void errorChanged();
+    void failure(quint64 operation, const QString &target, const QString &title, const QString &message, int code);
+    void persistenceFailure(const QString &message);
+    void recovered();
   private:
     QPointer<PlaybackFacade> m_facade;
     QPointer<Library> m_library;
@@ -83,7 +86,7 @@ class PlaybackBridge final : public QObject {
     Track m_metadata;
     QUrl m_coverUrl;
     QString m_artworkRevision;
-    QString m_error;
+    QString m_error, m_saveError;
     bool m_available = false;
     bool m_canPlay = false;
     int m_lastVolume = 65;

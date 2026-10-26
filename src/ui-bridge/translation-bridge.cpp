@@ -6,6 +6,16 @@ TranslationBridge::TranslationBridge(Library *library,PlaybackFacade *facade,Tra
     :QObject(parent),m_library(library),m_facade(facade),m_service(service),m_lyrics(lyrics){
     connect(service,&TranslationCoordinator::taskChanged,this,[this](const TranslationSummary &value){
         if(m_tasks.value(value.trackId)!=value.taskId)return;
+        const bool transitioned = !m_observedStates.contains(value.taskId) || m_observedStates.value(value.taskId) != value.state;
+        m_observedStates[value.taskId] = value.state;
+        if (transitioned && value.trackId == targetId()) {
+            const auto category = value.state == TranslationState::Failed ? "Error" :
+                value.state == TranslationState::Invalidated ? "Warning" :
+                value.state == TranslationState::Cancelled ? "Cancellation" :
+                value.state == TranslationState::NeedsAttention ? "ConfirmationRequired" : "";
+            if (*category) emit feedback(category, QString::number(value.taskId), QString::number(value.trackId), value.status, value.details);
+            if (value.state == TranslationState::Saved || value.state == TranslationState::Running) emit feedbackCleared();
+        }
         refresh();
     });
     connect(facade,&PlaybackFacade::trackChanged,this,[this]{
@@ -36,7 +46,7 @@ bool TranslationBridge::setTargetTrack(const QString &key){
     if(!valid||id<0||(id&&!m_library->track(id).id))return false;
     if(m_target==id)return true;
     if(m_consent)m_service->discard(m_consent);m_consent=0;
-    m_target=id;m_error.clear();refresh();return true;
+    m_target=id;m_error.clear();emit feedbackCleared();refresh();return true;
 }
 QString TranslationBridge::taskKey()const{const auto s=summary();return s.taskId?QString::number(s.taskId):QString();}
 bool TranslationBridge::unfinished()const{for(auto task:m_tasks)if(!m_service->summary(task).terminal())return true;return false;}
@@ -59,15 +69,16 @@ void TranslationBridge::refresh(){
 }
 bool TranslationBridge::classify(int value){
     if(!targetId()||value<0||value>2)return false;
-    const bool ok=m_library->setTranslationJudgment(targetId(),TranslationJudgment(value));refresh();return ok;
+    const bool ok=m_library->setTranslationJudgment(targetId(),TranslationJudgment(value));if(!ok)reportFailure(m_library->lastError());refresh();return ok;
 }
 QString TranslationBridge::prepared(quint64 task,const QString &error){
     m_error=error;
+    if(!task&&!error.isEmpty())reportFailure(error);
     if(task){
         m_tasks.insert(targetId(),task);m_consent=task;
         // Retire only old terminal summaries; pending/preview state is retained.
         if(m_tasks.size()>32)for(auto it=m_tasks.begin();it!=m_tasks.end();){
-            if(it.value()!=task&&m_service->summary(it.value()).terminal()){m_service->forget(it.value());it=m_tasks.erase(it);}else ++it;
+            if(it.value()!=task&&m_service->summary(it.value()).terminal()){m_observedStates.remove(it.value());m_service->forget(it.value());it=m_tasks.erase(it);}else ++it;
         }
     }
     refresh();return task?QString::number(task):QString();
@@ -76,7 +87,7 @@ bool TranslationBridge::canPrepare(){
     if(summary().taskId&&!summary().terminal()){m_error="已有任务或未保存预览，请先保存、取消或明确放弃";emit changed();return false;}
     for(auto it=m_tasks.begin();it!=m_tasks.end();){
         const auto old=m_service->summary(it.value());
-        if(old.terminal()||!old.taskId){m_service->forget(it.value());it=m_tasks.erase(it);}else ++it;
+        if(old.terminal()||!old.taskId){m_observedStates.remove(it.value());m_service->forget(it.value());it=m_tasks.erase(it);}else ++it;
     }
     return true;
 }
@@ -90,6 +101,15 @@ bool TranslationBridge::start(const QString &exactConsentTask){
 void TranslationBridge::declineConsent(){if(m_consent)m_service->discard(m_consent);m_consent=0;refresh();}
 bool TranslationBridge::cancel(){const bool ok=m_service->cancel(summary().taskId);refresh();return ok;}
 bool TranslationBridge::discard(){const auto task=summary().taskId;const bool ok=m_service->discard(task);if(m_consent==task)m_consent=0;refresh();return ok;}
-bool TranslationBridge::save(){m_error.clear();const bool ok=m_service->save(summary().taskId,&m_error);m_lyrics->reload();refresh();return ok;}
+void TranslationBridge::reportFailure(const QString &message){
+    emit feedback("Error",taskKey(),targetTrackKey(),"翻译操作失败",message.isEmpty()?QStringLiteral("操作未完成，请检查当前任务状态"):message);
+}
+bool TranslationBridge::save(){
+    m_error.clear();const bool ok=m_service->save(summary().taskId,&m_error);
+    // Invalidated is already reported by taskChanged; a retained preview's save
+    // failure does not change state and needs its own event on every attempt.
+    if(!ok && summary().state != TranslationState::Invalidated)reportFailure(m_error);
+    m_lyrics->reload();refresh();return ok;
+}
 bool TranslationBridge::resume(){const bool ok=m_service->resume(summary().taskId);refresh();return ok;}
 }

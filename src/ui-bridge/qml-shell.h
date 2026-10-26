@@ -1,5 +1,6 @@
 #pragma once
 #include "app-bridge.h"
+#include "feedback-bridge.h"
 #include "playback-bridge.h"
 #include "library-bridge.h"
 #include "queue-model.h"
@@ -29,6 +30,7 @@ class QmlShell final : public QObject {
     QQuickWindow *window() const;
     AppBridge *appBridge() { return &m_appBridge; }
     PlaybackBridge *playbackBridge() { return &m_playbackBridge; }
+    FeedbackBridge *feedbackBridge() { return &m_feedback; }
     PlaybackFacade *facade() { return &m_facade; }
     TrackFilterModel *libraryModel() { return &m_trackView; }
     LibraryBridge *libraryBridge() { return &m_libraryBridge; }
@@ -47,6 +49,7 @@ class QmlShell final : public QObject {
   protected:
     bool eventFilter(QObject *object,QEvent *event) override;
   private:
+    FeedbackBridge m_feedback;
     PlaybackFacade m_facade;
     AppBridge m_appBridge;
     PlaybackBridge m_playbackBridge;

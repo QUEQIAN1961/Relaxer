@@ -30,12 +30,29 @@ LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackList
     connect(library, &QObject::destroyed, this, [this] {
         m_library = nullptr; m_statisticsTimer.stop(); refreshStatistics(); emit profileChanged(); emit playlistChanged();
     });
+    connect(library,&Library::queryFailed,this,[this](const QString &query,const QString &message){
+        if(m_queryErrors.value(query)==message)return;
+        m_queryErrors[query]=message;
+        const auto revision=++m_queryRevision;
+        m_queryRevisions[query]=revision;
+        // Context ownership prevents use after destruction; a successful retry
+        // or a later operation invalidates this exact deferred failure.
+        QTimer::singleShot(0,this,[this,query,message,revision]{
+            if(m_queryRevisions.value(query)==revision)emit operationFailed(message);
+        });
+    });
+    connect(library,&Library::querySucceeded,this,[this](const QString &query){
+        m_queryErrors.remove(query);m_queryRevisions.remove(query);
+    });
     refreshStatistics();
 }
 bool LibraryBridge::result(bool ok, const QString &fallback) {
     Q_ASSERT(QThread::currentThread() == thread());
+    if(ok){m_queryErrors.clear();m_queryRevisions.clear();}
     const auto error = ok ? QString() : (!fallback.isEmpty() ? fallback : m_library ? m_library->lastError() : QString("资料库不可用"));
     if (m_error != error) { m_error = error; emit errorChanged(); }
+    if (!ok) emit operationFailed(error.isEmpty() ? QStringLiteral("资料库操作失败") : error);
+    else emit operationSucceeded();
     return ok;
 }
 QString LibraryBridge::playlistName() const {
@@ -154,24 +171,27 @@ bool LibraryBridge::removeTrack(const QString &id) {
     return result(m_library->remove({track.id}));
 }
 QString LibraryBridge::createPlaylist(const QString &name) {
-    const auto id = m_library && !name.trimmed().isEmpty() ? m_library->createPlaylist(name) : 0;
-    result(id != 0, id ? QString() : QString("请输入歌单名称")); return QString::number(id);
+    if (!m_library || name.trimmed().isEmpty()) { result(false,"请输入歌单名称");return "0"; }
+    const auto id = m_library->createPlaylist(name);
+    result(id != 0); return QString::number(id);
 }
 bool LibraryBridge::renamePlaylist(const QString &id, const QString &name) {
     const auto value = id.toLongLong();
-    return result(m_library && hasPlaylist(value) && !name.trimmed().isEmpty() && m_library->renamePlaylist(value, name),
-                  "歌单不存在或名称为空");
+    if (!m_library || !hasPlaylist(value) || name.trimmed().isEmpty()) return result(false,"歌单不存在或名称为空");
+    return result(m_library->renamePlaylist(value,name));
 }
 bool LibraryBridge::deletePlaylist(const QString &id) {
     const auto value = id.toLongLong();
-    return result(m_library && hasPlaylist(value) && m_library->deletePlaylist(value), "歌单不存在或删除失败");
+    if (!m_library || !hasPlaylist(value)) return result(false,"歌单不存在");
+    return result(m_library->deletePlaylist(value));
 }
 bool LibraryBridge::addToPlaylist(const QString &playlist, const QString &track) {
-    return result(m_library && hasPlaylist(playlist.toLongLong()) && m_library->track(track.toLongLong()).id &&
-                  m_library->addToPlaylist(playlist.toLongLong(), {track.toLongLong()}), "请选择有效歌单和歌曲");
+    if (!m_library || !hasPlaylist(playlist.toLongLong()) || !m_library->track(track.toLongLong()).id) return result(false,"请选择有效歌单和歌曲");
+    return result(m_library->addToPlaylist(playlist.toLongLong(), {track.toLongLong()}));
 }
 bool LibraryBridge::removeFromPlaylist(const QString &track) {
-    return result(m_library && m_source->playlist() > 0 && m_library->removeFromPlaylist(m_source->playlist(), {track.toLongLong()}), "请选择歌单内歌曲");
+    if (!m_library || m_source->playlist() <= 0) return result(false,"请选择歌单内歌曲");
+    return result(m_library->removeFromPlaylist(m_source->playlist(), {track.toLongLong()}));
 }
 bool LibraryBridge::moveInPlaylist(const QString &track, int direction) {
     return moveTracksInPlaylist({track}, direction);
@@ -189,18 +209,20 @@ QVector<qint64> LibraryBridge::checkedIds(const QStringList &keys) const {
 }
 bool LibraryBridge::applyFavorite(const QStringList &tracks, bool favorite) {
     const auto ids = checkedIds(tracks);
-    return result(!ids.isEmpty() && m_library->favorites(ids, favorite), "请选择有效歌曲");
+    if (ids.isEmpty()) return result(false,"请选择有效歌曲");
+    return result(m_library->favorites(ids, favorite));
 }
 bool LibraryBridge::addTracksToPlaylist(const QString &playlist, const QStringList &tracks) {
     const auto ids = checkedIds(tracks);
-    return result(!ids.isEmpty() && hasPlaylist(playlist.toLongLong()) &&
-                  m_library->addToPlaylist(playlist.toLongLong(), ids), "请选择有效歌单和歌曲");
+    if (ids.isEmpty() || !hasPlaylist(playlist.toLongLong())) return result(false,"请选择有效歌单和歌曲");
+    return result(m_library->addToPlaylist(playlist.toLongLong(), ids));
 }
 bool LibraryBridge::removeTracksFromPlaylist(const QStringList &tracks) {
     const auto ids = checkedIds(tracks); const auto members = m_source->ids();
     bool valid = m_source->playlist() > 0 && !ids.isEmpty();
     for (auto id : ids) valid = valid && members.contains(id);
-    return result(valid && m_library->removeFromPlaylist(m_source->playlist(), ids), "请选择当前歌单内歌曲");
+    if (!valid) return result(false,"请选择当前歌单内歌曲");
+    return result(m_library->removeFromPlaylist(m_source->playlist(), ids));
 }
 bool LibraryBridge::removeTracks(const QStringList &tracks, bool managed) {
     const auto ids = checkedIds(tracks);
@@ -230,12 +252,12 @@ bool LibraryBridge::setPlaylistCover(const QString &id, const QUrl &source) {
                   m_library->playlistCover(id.toLongLong(), source.toLocalFile()), "请选择有效歌单和本地图片");
 }
 bool LibraryBridge::setPlaylistTags(const QString &id, const QStringList &tags) {
-    return result(m_library && hasPlaylist(id.toLongLong()) && m_library->playlistTags(id.toLongLong(), tags),
-                  "歌单不存在或标签无效");
+    if (!m_library || !hasPlaylist(id.toLongLong())) return result(false,"歌单不存在");
+    return result(m_library->playlistTags(id.toLongLong(), tags));
 }
 bool LibraryBridge::setPlaylistDescription(const QString &id, const QString &description) {
-    return result(m_library && hasPlaylist(id.toLongLong()) && m_library->playlistDescription(id.toLongLong(), description),
-                  "歌单不存在或简介无效");
+    if (!m_library || !hasPlaylist(id.toLongLong())) return result(false,"歌单不存在");
+    return result(m_library->playlistDescription(id.toLongLong(), description));
 }
 void LibraryBridge::forgetMissing(const QVector<qint64> &ids) {
     if (!m_library || !m_facade || m_facade->isShutdown()) return;

@@ -3,6 +3,7 @@
 #include "phase-c-version.h"
 #include "ui-run-diagnostics.h"
 #include <QTextStream>
+#include <QMessageBox>
 #include <QThread>
 
 namespace {
@@ -13,7 +14,15 @@ int runQml(QCoreApplication *app, const relaxer::QmlLaunchOptions *options,
     // Library; no business QObject, vtable or ownership crosses the DLL ABI.
     relaxer::Library library(options->dataRoot);
     QString error;
-    if (!library.open(&error)) { QTextStream(stderr) << error << '\n'; return 2; }
+    if (!library.open(&error)) {
+        diagnostics->result["startupError"] = error;
+        diagnostics->result["exitCode"] = 2;
+        if (!options->diagnostics.isEmpty()) diagnostics->write(options->diagnostics);
+        QTextStream(stderr) << error << '\n';
+        if (options->diagnostics.isEmpty() && !options->quitAfter && options->screenshot.isEmpty())
+            QMessageBox::critical(nullptr, "Relaxer", "无法打开音乐资料库：\n" + error);
+        return 2;
+    }
     diagnostics->mark("databaseReadyMs");
     diagnostics->result["mode"] = "qml";
     diagnostics->result["version"] = QString::fromLatin1(relaxer::phaseC::Version);

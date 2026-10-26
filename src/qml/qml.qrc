@@ -18,6 +18,7 @@
   <file>components/UpcomingPanel.qml</file>
   <file>components/LyricsWorkspace.qml</file>
   <file>components/Toast.qml</file>
+    <file>components/FeedbackPanel.qml</file>
   <file>components/ImportDialog.qml</file>
   <file>components/PlaylistEditor.qml</file>
   <file>components/PlaylistHeader.qml</file>

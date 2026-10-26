@@ -54,6 +54,8 @@ class LibraryBridge final : public QObject {
   signals:
     void playlistChanged();
     void errorChanged();
+    void operationFailed(const QString &message);
+    void operationSucceeded();
     void statisticsChanged();
     void profileChanged();
   private:
@@ -63,6 +65,9 @@ class LibraryBridge final : public QObject {
     TrackFilterModel *m_view;
     PlaylistListModel *m_playlists;
     QString m_error;
+    QHash<QString, quint64> m_queryRevisions;
+    QHash<QString, QString> m_queryErrors;
+    quint64 m_queryRevision = 0;
     QVariantMap m_statistics;
     QTimer m_statisticsTimer;
     bool result(bool ok, const QString &fallback = {});

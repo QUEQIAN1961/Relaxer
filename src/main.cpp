@@ -137,7 +137,9 @@ int main(int argc, char **argv) {
         if (parser.isSet("screenshot") || parser.isSet("self-test") || parser.isSet("audio-device-smoke") || parser.isSet("diagnostics"))
             return 3;
         QMessageBox::information(nullptr, "Relaxer",
-                                 "此音乐资料库已在另一个 Relaxer 窗口中打开。请切换到已有窗口。");
+                                 lock.error() == QLockFile::LockFailedError ?
+                                 "此音乐资料库已在另一个 Relaxer 窗口中打开。请切换到已有窗口。" :
+                                 "无法创建或访问资料库锁。请检查资料目录是否可写。");
         return 3;
     }
 #ifdef RELAXER_ENABLE_QML

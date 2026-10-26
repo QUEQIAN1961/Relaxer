@@ -206,18 +206,21 @@ ApplicationWindow {
     Shortcut {sequence:"Ctrl+F";enabled:!lyricsWorkspace.visible;onActivated:{root.navigateOriginal(0);searchFocus.restart()}}
     Timer{id:searchFocus;interval:260;onTriggered:localPage.focusSearch()}
     onClosing: close => {
+        feedbackBridge.setClosing(true)
         if(playbackBridge.nonInteractiveExit()){playbackBridge.requestExit(1);return}
         if (settingsBridge.appearanceDirty) {
             close.accepted=false
             pendingAppearanceClose=true
             pendingPageAction=null
             appearancePage.confirmLeave()
+            feedbackBridge.setClosing(false)
             return
         }
         if (!allowClose && (importBridge.busy || translationBridge.unfinished || lyricsSearchBridge.busy)) { close.accepted=false; closeConfirm.open() }
         else if(!allowClose && !exitRequested && settingsBridge.values.closeToTray && uiIntegration.trayAvailable){close.accepted=false;root.hide();uiIntegration.showTray()}
         else if(!playbackBridge.requestExit()){close.accepted=false;exitSaveFailure.open()}
         else if(importBridge.busy){close.accepted=false;root.awaitingImportClose=true;if(!importBridge.closing)importBridge.beginShutdown()}
+        if(!close.accepted)feedbackBridge.setClosing(false)
     }
     ConfirmDialog {
         id:exitSaveFailure;parent:root.popupLayer;objectName:"exitSaveFailureDialog";anchors.centerIn:parent
@@ -402,6 +405,7 @@ ApplicationWindow {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;spacing:16
             UiText {id:importStatus;objectName:"importStatusText";Layout.fillWidth:true;text:importPanel.shownStatus;color:Theme.secondary;font.pixelSize:14;textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:5;elide:Text.ElideRight}
             ProgressBar{objectName:"importProgress";visible:importBridge.busy;Layout.preferredWidth:Math.min(230,root.width*.22);from:0;to:Math.max(1,importBridge.total);value:importBridge.current;indeterminate:importBridge.total===0}
+            ShellButton{objectName:"importResultDetails";visible:!importBridge.busy;text:"详情";implicitHeight:28;onClicked:feedbackPanel.openDetails({message:importPanel.completionText,details:importBridge.result.details})}
             ShellButton{visible:importBridge.busy;text:"取消导入";implicitHeight:28;onClicked:importBridge.cancel()}
         }
     }
@@ -533,6 +537,7 @@ ApplicationWindow {
     ImportDialog{id:importDialog;parent:root.popupLayer}
     PlaylistEditor{id:playlistEditor;parent:root.popupLayer;onCreated:key=>root.openPlaylist(key)}
     LyricsWorkspace{id:lyricsWorkspace;parent:root.contentItem;z:6}
+    FeedbackPanel{id:feedbackPanel;parent:root.popupLayer;z:100}
     Toast{id:toast;anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:playerBar.top;anchors.bottomMargin:16;z:20}
     ConfirmDialog {
         id:closeConfirm;parent:root.popupLayer;objectName:"closeTasksConfirmation";anchors.centerIn:parent;width:Math.min(480,root.width-40);modal:true

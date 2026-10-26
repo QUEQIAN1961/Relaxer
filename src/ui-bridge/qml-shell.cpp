@@ -10,7 +10,7 @@ static void initializeQmlResources() { Q_INIT_RESOURCE(qml); }
 namespace relaxer {
 QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRuntime *runtime,
                    std::unique_ptr<TranslationBrowserBackend> browser, SettingsBridge::SystemThemeReader systemTheme)
-    : QObject(parent), m_facade(library, this, decodeOnly), m_appBridge(library, this),
+    : QObject(parent), m_feedback(this), m_facade(library, this, decodeOnly), m_appBridge(library, this),
       m_playbackBridge(&m_facade, this, library), m_tracks(library, this), m_trackView(&m_tracks, this),
       m_playlists(library, this), m_libraryBridge(library, &m_facade, &m_tracks, &m_trackView, &m_playlists, this),
       m_queue(library, &m_facade, this),
@@ -54,11 +54,27 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     connect(m_engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
         for (const auto &error : errors) m_warnings.append(error.toString());
     });
+    m_engine->rootContext()->setContextProperty("feedbackBridge", &m_feedback);
+    QQmlEngine::setObjectOwnership(&m_feedback, QQmlEngine::CppOwnership);
+    connect(&m_playbackBridge,&PlaybackBridge::failure,this,[this](quint64 operation,const QString &target,const QString &title,const QString &message,int code){
+        m_feedback.post("Playback","Error",title.isEmpty()?QStringLiteral("播放失败"):QStringLiteral("无法播放：")+title,message,QString::number(operation),target,true,false,code);
+    });
+    connect(&m_playbackBridge,&PlaybackBridge::recovered,this,[this]{m_feedback.clearSource("Playback");});
+    connect(&m_playbackBridge,&PlaybackBridge::persistenceFailure,this,[this](const QString &message){m_feedback.post("Library","Error","播放状态或资料修改未能保存",message,{}, {},true);});
+    connect(&m_libraryBridge,&LibraryBridge::operationFailed,this,[this](const QString &message){m_feedback.post("Library","Error","资料库操作失败",message,{}, {},true);});
+    connect(&m_libraryBridge,&LibraryBridge::operationSucceeded,this,[this]{m_feedback.clearSource("Library");});
+    connect(&m_importBridge,&ImportBridge::started,this,[this]{m_feedback.clearSource("Import");});
+    connect(&m_importBridge,&ImportBridge::completed,this,[this](const QString &category,const QString &task,const QString &message,const QString &details){m_feedback.post("Import",category,message,details,task,{},category=="Error");});
+    connect(&m_importBridge,&ImportBridge::rejected,this,[this](const QString &message){m_feedback.post("Import","Error","无法开始导入",message,{}, {},true);});
+    connect(&m_searchBridge,&LyricsSearchBridge::operationFailed,this,[this](const QString &target,const QString &message){m_feedback.post("Lyrics","Error","歌词未能保存："+m_searchBridge.targetTitle(),message,{},target,true);});
+    connect(&m_translationBridge,&TranslationBridge::feedback,this,[this](const QString &category,const QString &task,const QString &target,const QString &message,const QString &details){m_feedback.post("Translation",category,message+" · "+m_translationBridge.targetTitle(),details,task,target,category=="Error",category=="ConfirmationRequired");});
+    connect(&m_translationBridge,&TranslationBridge::feedbackCleared,this,[this]{m_feedback.clearSource("Translation");});
+    connect(&m_searchBridge,&LyricsSearchBridge::saved,this,[this]{m_feedback.clearSource("Lyrics");});
     m_facade.restore();
     QCoreApplication::instance()->installEventFilter(this);
 }
 QmlShell::~QmlShell() {
-    m_engine.reset();shutdown();
+    m_feedback.setClosing(true);m_engine.reset();shutdown();
     // Direct owner destruction also waits for ImportCoordinator's existing
     // cancellation/result/thread-exit barrier before the Library can disappear.
     if(!m_import.isIdle()){
@@ -76,7 +92,7 @@ QQuickWindow *QmlShell::window() const {
     return m_engine && !m_engine->rootObjects().isEmpty()
         ? qobject_cast<QQuickWindow *>(m_engine->rootObjects().first()) : nullptr;
 }
-bool QmlShell::shutdown() {m_search.shutdown();m_translation.shutdown();m_import.shutdown();return m_facade.shutdown(true);}
+bool QmlShell::shutdown() {m_feedback.setClosing(true);m_search.shutdown();m_translation.shutdown();m_import.shutdown();return m_facade.shutdown(true);}
 bool QmlShell::eventFilter(QObject *object,QEvent *event){
     if(object==QCoreApplication::instance()&&event->type()==QEvent::Quit&&
        object->property("relaxerInteractiveExit").toBool()&&!m_facade.isShutdown()&&window()){

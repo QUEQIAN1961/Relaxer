@@ -2,7 +2,7 @@
 
 namespace relaxer {
 PlaybackFacade::PlaybackFacade(Library *library, QObject *parent, bool decodeOnly)
-    : QObject(parent), m_playback(new Playback(library, this, decodeOnly)), m_saveTimer(this) {
+    : QObject(parent), m_playback(new Playback(library, this, decodeOnly)), m_library(library), m_saveTimer(this) {
     Q_ASSERT(library && library->thread() == thread());
     connect(m_playback, &Playback::trackChanged, this, [this] { notify(Notice::Track); });
     connect(m_playback, &Playback::stateChanged, this, [this] { notify(Notice::State); });
@@ -46,6 +46,10 @@ void PlaybackFacade::notify(Notice notice, qint64 pos, qint64 duration, const QS
     if (isShutdown())
         return;
     const auto value = snapshot();
+    if (notice == Notice::State && value.playing && m_failedTrack) {
+        m_failedTrack = 0;
+        emit playbackRecovered();
+    }
     // New value notifications run after the engine unwinds. Keep the original
     // UI signal timing: animations and immediate error toasts depend on it.
     QMetaObject::invokeMethod(
@@ -68,9 +72,18 @@ void PlaybackFacade::notify(Notice notice, qint64 pos, qint64 duration, const QS
     case Notice::Seekable:
         emit seekableChanged(value.seekable);
         break;
-    case Notice::Error:
+    case Notice::Error: {
+        const auto target = m_requestedTrack ? m_library->track(m_requestedTrack) : value.track;
+        const auto key = QString::number(target.id) + ':' + message;
+        m_failedTrack = target.id;
+        if (!m_reportedFailures.contains(key)) {
+            if (m_reportedFailures.size() >= 64) m_reportedFailures.clear();
+            m_reportedFailures.insert(key);
+            emit playbackFailure(m_operation, target.id, target.title, message, int(m_playback->media()->error()));
+        }
         emit error(message);
         break;
+    }
     case Notice::Snapshot:
         break;
     }
@@ -82,32 +95,47 @@ void PlaybackFacade::publish() {
 QVector<qint64> PlaybackFacade::upcoming() {
     return isShutdown() ? QVector<qint64>{} : m_playback->upcoming();
 }
+void PlaybackFacade::beginAttempt(qint64 requested) {
+    ++m_operation; m_requestedTrack = requested; m_reportedFailures.clear();
+    emit playbackAttemptStarted(m_operation);
+}
 void PlaybackFacade::play(const QVector<qint64> &ids, qint64 start) {
     if (!isShutdown()) {
+        beginAttempt(start ? start : ids.value(0));
         m_playback->play(ids, start);
+        m_requestedTrack = 0;
         publish();
     }
 }
 void PlaybackFacade::toggle() {
     if (!isShutdown()) {
-        m_playback->toggle();
+        const bool retry = !playing() && m_failedTrack == current().id && m_failedTrack;
+        if (!playing()) beginAttempt(current().id);
+        // An explicit retry uses the existing play command, which resets the engine's
+        // failed-track guard. No change to automatic skip or transport algorithms.
+        if (retry) m_playback->play(queue().items, current().id);
+        else m_playback->toggle();
+        m_requestedTrack = 0;
         publish();
     }
 }
 void PlaybackFacade::next() {
     if (!isShutdown()) {
+        beginAttempt();
         m_playback->next();
         publish();
     }
 }
 void PlaybackFacade::previous() {
     if (!isShutdown()) {
+        beginAttempt();
         m_playback->previous();
         publish();
     }
 }
 void PlaybackFacade::playUpcoming(int index) {
     if (!isShutdown()) {
+        beginAttempt();
         m_playback->playUpcoming(index);
         publish();
     }
@@ -134,6 +162,7 @@ void PlaybackFacade::forget(const QVector<qint64> &ids) {
 }
 void PlaybackFacade::restore() {
     if (!isShutdown()) {
+        beginAttempt();
         m_playback->restore();
         publish();
     }

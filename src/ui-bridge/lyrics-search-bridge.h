@@ -50,6 +50,7 @@ public:
     Q_INVOKABLE void cancelReplacement(const QString &token);
     void setTranslationCoordinator(TranslationCoordinator *service){m_translation=service;}
 signals:
+    void operationFailed(const QString &target, const QString &message);
     void changed();
     void replacementRequested(const QString &token,const QString &reason);
     void saved(const QString &trackKey);

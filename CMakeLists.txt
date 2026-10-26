@@ -444,6 +444,7 @@ if(RELAXER_ENABLE_QML)
   target_include_directories(relaxer_library_models PUBLIC src)
   target_link_libraries(relaxer_library_models PUBLIC relaxer_core)
   add_library(relaxer_qml STATIC
+    src/ui-bridge/feedback-bridge.cpp src/ui-bridge/feedback-bridge.h
     src/ui-bridge/app-bridge.cpp src/ui-bridge/app-bridge.h
     src/ui-bridge/playback-bridge.cpp src/ui-bridge/playback-bridge.h
     src/ui-bridge/library-bridge.cpp src/ui-bridge/library-bridge.h
@@ -463,6 +464,12 @@ if(RELAXER_ENABLE_QML)
   target_link_libraries(relaxer_qml PUBLIC relaxer_ui relaxer_library_models relaxer_playback_facade relaxer_translation relaxer_lyrics_search relaxer_services Qt6::Qml Qt6::Quick Qt6::QuickControls2)
   if(BUILD_TESTING)
   add_executable(relaxer_library_model_tests tests/library-model-tests.cpp)
+  add_executable(relaxer_qml_error_feedback_tests tests/qml-error-feedback-tests.cpp)
+  target_link_libraries(relaxer_qml_error_feedback_tests PRIVATE relaxer_qml Qt6::Test)
+  add_dependencies(relaxer_qml_error_feedback_tests Relaxer)
+  target_compile_definitions(relaxer_qml_error_feedback_tests PRIVATE RELAXER_APP_PATH="$<TARGET_FILE:Relaxer>")
+  relaxer_add_qt_test(relaxer_qml_error_feedback relaxer_qml_error_feedback_tests)
+  relaxer_qml_test_environment(relaxer_qml_error_feedback)
   target_link_libraries(relaxer_library_model_tests PRIVATE relaxer_library_models Qt6::Test)
   relaxer_add_qt_test(relaxer_library_models relaxer_library_model_tests)
   endif()

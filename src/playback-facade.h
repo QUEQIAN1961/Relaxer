@@ -1,5 +1,6 @@
 #pragma once
 #include "playback.h"
+#include <QSet>
 
 namespace relaxer {
 // A value read from the authoritative engine. Reading never forecasts shuffle bags.
@@ -58,9 +59,18 @@ class PlaybackFacade final : public QObject {
     void error(const QString &message);
     void saveFailed(const QString &message);
     void saved(bool success);
+    void playbackAttemptStarted(quint64 operation);
+    void playbackFailure(quint64 operation, qint64 trackId, const QString &title,
+                         const QString &message, int code);
+    void playbackRecovered();
 
   private:
     Playback *m_playback;
+    Library *m_library;
+    quint64 m_operation = 0;
+    qint64 m_requestedTrack = 0, m_failedTrack = 0;
+    QSet<QString> m_reportedFailures;
+    void beginAttempt(qint64 requested = 0);
     QTimer m_saveTimer;
     enum class Notice { Track, State, Position, Seekable, Error, Snapshot };
     bool m_shuttingDown = false;

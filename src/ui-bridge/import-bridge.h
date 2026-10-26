@@ -21,7 +21,10 @@ public:
     Q_INVOKABLE bool start(const QList<QUrl> &urls,const QString &playlistKey="0");
     Q_INVOKABLE bool cancel();
     Q_INVOKABLE void beginShutdown();
-signals:void changed();void contentsChanged();void readyToClose();
+signals:void completed(const QString &category, const QString &task, const QString &message, const QString &details);
+    void rejected(const QString &message);
+    void started();
+    void changed();void contentsChanged();void readyToClose();
 private:
     Library *m_library;QPointer<ImportCoordinator> m_coordinator;quint64 m_task=0;
     int m_current=0,m_total=0;QString m_status;QVariantMap m_result;bool m_closing=false;

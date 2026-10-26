@@ -90,6 +90,8 @@ class Library : public QObject {
     QString lastError() const { return m_error; }
     void deferChanges(bool on);
   signals:
+    void queryFailed(const QString &query, const QString &message) const;
+    void querySucceeded(const QString &query) const;
     void changed();
     void statsChanged();
 

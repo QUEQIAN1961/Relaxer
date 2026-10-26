@@ -229,7 +229,7 @@ QString LyricsSearchBridge::draftText()const{
 bool LyricsSearchBridge::saveSelected(const QString &key,bool confirmed){
     if(m_submitting||!confirmed||key.isEmpty()||key!=m_selectedKey||m_guard.id!=targetId())return false;
     const auto latest=m_service->candidates(targetId());
-    if(latest.trackHash!=m_snapshot.trackHash||latest.revision!=m_snapshot.revision){m_status="候选版本已变化，请重新选择";emit changed();return false;}
+    if(latest.trackHash!=m_snapshot.trackHash||latest.revision!=m_snapshot.revision){m_status="候选版本已变化，请重新选择";emit changed();emit operationFailed(QString::number(targetId()),m_status);return false;}
     const auto timed=m_selected["syncedLyrics"].toString();
     auto bytes=(timed.isEmpty()?m_selected["plainLyrics"].toString():timed).toUtf8();if(m_selected["instrumental"].toBool())bytes=QString("纯音乐，请欣赏").toUtf8();
     m_showDraft=false;
@@ -238,12 +238,12 @@ bool LyricsSearchBridge::saveSelected(const QString &key,bool confirmed){
 QString LyricsSearchBridge::beginLocalEdit(){
     if(m_submitting||!targetId())return {};
     m_editGuard=m_library->lyricsSaveSnapshot(targetId());
-    if(!m_editGuard.valid){m_status=m_editGuard.error;emit changed();return {};}
+    if(!m_editGuard.valid){m_status=m_editGuard.error;emit changed();emit operationFailed(QString::number(targetId()),m_status);return {};}
     m_editToken=QUuid::createUuid().toString(QUuid::WithoutBraces);return m_editToken;
 }
 bool LyricsSearchBridge::saveBytes(const QByteArray &bytes,bool confirmed,const QString &editToken){
     if(m_submitting||!confirmed||!targetId())return false;
-    if(!editToken.isEmpty()&&(editToken!=m_editToken||m_editGuard.id!=targetId())){m_status="导入或粘贴的目标已变化，本次未保存";emit changed();return false;}
+    if(!editToken.isEmpty()&&(editToken!=m_editToken||m_editGuard.id!=targetId())){m_status="导入或粘贴的目标已变化，本次未保存";emit changed();emit operationFailed(QString::number(targetId()),m_status);return false;}
     const auto identity=QString::number(targetId())+":"+QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());
     if(identity==m_lastSavedIdentity&&m_library->lyricsSnapshotMatches(m_guard))return false;
     if(bytes.size()<=LyricsDocumentReader::MaximumBytes){m_manualDrafts.insert(targetId(),bytes);m_showDraft=true;}
@@ -254,7 +254,7 @@ bool LyricsSearchBridge::saveText(const QString &text,bool confirmed,const QStri
 bool LyricsSearchBridge::importLocalLyrics(const QUrl &file,bool confirmed,const QString &editToken){
     if(!confirmed||!file.isLocalFile())return false;
     const auto input=LyricsDocumentReader::readFile(file.toLocalFile());
-    if(!input.opened||!input.complete||input.tooLarge){m_status=input.error;emit changed();return false;}
+    if(!input.opened||!input.complete||input.tooLarge){m_status=input.error;emit changed();emit operationFailed(QString::number(targetId()),m_status);return false;}
     return saveBytes(input.bytes,true,editToken);
 }
 bool LyricsSearchBridge::markInstrumental(bool confirmed){
@@ -264,7 +264,7 @@ void LyricsSearchBridge::invalidatePlan(){m_planToken.clear();m_planSelection.cl
 bool LyricsSearchBridge::prepareSave(const QByteArray &bytes,const QString &identity,const LyricsSaveSnapshot &snapshot,bool selected){
     invalidatePlan();
     m_plan=LyricsReplacementService::prepare(*m_library,snapshot,bytes,identity,m_translation);
-    if(!m_plan.decision.valid){m_status=m_plan.decision.reason;emit changed();return false;}
+    if(!m_plan.decision.valid){m_status=m_plan.decision.reason;emit changed();emit operationFailed(QString::number(targetId()),m_status);return false;}
     m_planSelection=selected?m_selectedKey:QString();
     m_planToken=QUuid::createUuid().toString(QUuid::WithoutBraces);
     if(m_plan.decision.confirmationRequired){
@@ -277,7 +277,7 @@ bool LyricsSearchBridge::commitPlan(LyricsReplacementChoice choice){
     if(!m_planSelection.isEmpty()){
         const auto latest=m_service->candidates(targetId());
         if(m_planSelection!=m_selectedKey||latest.revision!=m_snapshot.revision||latest.trackHash!=m_snapshot.trackHash){
-            m_status="候选版本已变化，请重新选择";invalidatePlan();emit changed();return false;
+            m_status="候选版本已变化，请重新选择";invalidatePlan();emit changed();emit operationFailed(QString::number(targetId()),m_status);return false;
         }
     }
     const auto id=m_plan.snapshot.id;
@@ -296,11 +296,11 @@ bool LyricsSearchBridge::commitPlan(LyricsReplacementChoice choice){
         }
         invalidatePlan();
     }
-    emit changed();if(ok)emit saved(QString::number(id));return ok;
+    emit changed();if(ok)emit saved(QString::number(id));else emit operationFailed(QString::number(id),m_status);return ok;
 }
 bool LyricsSearchBridge::resolveReplacement(const QString &token,int choice){
-    if(token.isEmpty()||token!=m_planToken){m_status="替换确认已失效，请重新选择后评估；本次未保存";emit changed();return false;}
     if(choice==0||choice==2){cancelReplacement(token);return false;}
+    if(token.isEmpty()||token!=m_planToken){m_status="替换确认已失效，请重新选择后评估；本次未保存";emit changed();emit operationFailed(QString::number(targetId()),m_status);return false;}
     return choice==1&&commitPlan(LyricsReplacementChoice::Replace);
 }
 void LyricsSearchBridge::cancelReplacement(const QString &token){

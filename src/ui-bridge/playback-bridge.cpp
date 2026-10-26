@@ -10,9 +10,19 @@ PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent, Library 
     Q_ASSERT(facade && facade->thread() == thread());
     connect(facade, &PlaybackFacade::snapshotChanged, this, [this] { refresh(); });
     connect(facade, &PlaybackFacade::saved, this, [this] { refresh(); });
-    connect(facade, &PlaybackFacade::error, this, &PlaybackBridge::setError);
-    connect(facade, &PlaybackFacade::saveFailed, this, &PlaybackBridge::setError);
-    connect(facade, &PlaybackFacade::trackChanged, this, [this] { setError({}); });
+    connect(facade, &PlaybackFacade::playbackFailure, this,
+        [this](quint64 operation, qint64 target, const QString &title, const QString &message, int code) {
+            setError(message); refresh();
+            emit failure(operation, QString::number(target), title, message, code);
+        });
+    connect(facade, &PlaybackFacade::saveFailed, this, [this](const QString &message) {
+        const auto reason = message.isEmpty() ? QStringLiteral("播放状态保存失败") : message;
+        if (m_saveError == reason) return; // periodic save: one outstanding failure until recovery
+        m_saveError = reason; emit persistenceFailure(reason);
+    });
+    connect(facade, &PlaybackFacade::saved, this, [this](bool ok) { if(ok) m_saveError.clear(); });
+    connect(facade, &PlaybackFacade::playbackAttemptStarted, this, [this] { setError({}); emit recovered(); });
+    connect(facade, &PlaybackFacade::playbackRecovered, this, [this] { setError({}); });
     if (library) {
         Q_ASSERT(library->thread() == thread());
         connect(library, &Library::changed, this, &PlaybackBridge::refreshMetadata);
@@ -40,8 +50,8 @@ void PlaybackBridge::refresh() {
         previous.track.artist != next.track.artist || previous.track.cover != next.track.cover)
         readMetadata();
     m_available = available();
-    m_canPlay = available() && next.track.id && next.mediaStatus != QMediaPlayer::InvalidMedia &&
-        (!m_library || QFileInfo::exists(m_library->absolute(next.track.file)));
+    // A failed/missing resource remains retryable after the user repairs it.
+    m_canPlay = available() && next.track.id;
     if (next.volume > 0) m_lastVolume = next.volume;
     if (previous.track.id != next.track.id || previousTitle != title() || previousArtist != artist()) emit trackChanged();
     if (previousFavorite != currentFavorite()) emit currentFavoriteChanged();
@@ -81,7 +91,7 @@ void PlaybackBridge::playUpcoming(int index) {
 void PlaybackBridge::toggleFavorite() {
     if (!available() || !m_library || !hasTrack()) return;
     const auto track = m_library->track(m_state.track.id);
-    if (track.id && !m_library->favorite(track.id, !track.favorite)) setError(m_library->lastError());
+    if (track.id && !m_library->favorite(track.id, !track.favorite)) emit persistenceFailure(m_library->lastError());
 }
 void PlaybackBridge::beginTransition(int direction) {
     if (m_transitionDirection != direction) { m_transitionDirection = direction; emit transitionDirectionChanged(); }
