@@ -1,5 +1,9 @@
 #include "import-coordinator.h"
 #include "library.h"
+#include "artwork-recovery.h"
+#include <QJsonObject>
+#include <QScopeGuard>
+#include <QSet>
 #include <QEventLoopLocker>
 #include <QFileInfo>
 #include <QSignalBlocker>
@@ -77,7 +81,10 @@ struct ImportCoordinator::Impl {
     std::unique_ptr<Task> task;
     QPointer<ImportWorkerSession> artwork;
     bool artworkSealed=false,artworkExited=false;
-    int corrected=0;
+    ArtworkSummary artworkSummary;
+    struct Plan {Track track;ArtworkFileVersion source,cover;QString identity;};
+    QHash<qint64,Plan> artworkPlans;
+    QSet<QString> attempted;
     bool shuttingDown=false,readySent=false;
     quint64 nextId=0;
     QString error;
@@ -86,7 +93,7 @@ struct ImportCoordinator::Impl {
 ImportCoordinator::ImportCoordinator(Library *library,QObject *parent):QObject(parent),d(std::make_unique<Impl>()){
     d->library=library;d->timer.setParent(this);d->timer.setInterval(40);
     connect(&d->timer,&QTimer::timeout,this,&ImportCoordinator::flushProgress);
-    qRegisterMetaType<ImportResult>();qRegisterMetaType<ArtworkResult>();qRegisterMetaType<ImportSummary>();
+    qRegisterMetaType<ImportResult>();qRegisterMetaType<ArtworkResult>();qRegisterMetaType<ImportSummary>();qRegisterMetaType<ArtworkSummary>();
 }
 ImportCoordinator::~ImportCoordinator(){
     d->timer.stop();
@@ -185,10 +192,19 @@ void ImportCoordinator::finishImport(){
     summary.partialSuccess=summary.added+summary.duplicates>0&&(summary.failed||summary.cancelled||summary.playlistFailures||summary.unstarted||!summary.fatalError.isEmpty());
     d->task.reset();emit finished(summary);if(self)finishShutdown();
 }
-bool ImportCoordinator::repairLegacyArtwork(){
+bool ImportCoordinator::repairLegacyArtwork(bool retryFailed){
     if(!ownerThread()||!d->library||d->library->thread()!=thread()||d->shuttingDown||d->artwork)return false;
-    QVector<Track> pending;
-    for(const auto &track:d->library->tracks())if(track.coverOrigin.isEmpty()&&track.cover=="Artwork/"+track.hash+".png")pending<<track;
+    QVector<Track> pending;d->artworkPlans.clear();
+    // Read catalog identities only, never scan/decode every audio file at startup.
+    for(const auto &track:d->library->tracks())if(isLegacyArtwork(track)) {
+        const auto identity=artworkAttemptKey(d->library->root(),track);
+        const auto receipt=d->library->setting(QString("artwork.recovery.v1.%1").arg(track.id)).toObject();
+        const bool cooling=receipt["identity"].toString()==identity &&
+            (receipt["retryAt"].toDouble()==0||receipt["retryAt"].toDouble()>QDateTime::currentMSecsSinceEpoch());
+        if(!retryFailed&&(cooling||d->attempted.contains(identity)))continue;
+        pending<<track;d->artworkPlans.insert(track.id,{track,artworkFileVersion(d->library->absolute(track.file)),
+            artworkFileVersion(d->library->absolute(track.cover)),identity});
+    }
     if(pending.isEmpty())return false;
     auto token=std::make_shared<std::atomic_bool>(false);ArtworkRepair *worker=nullptr;
     try {worker=createArtworkRepair(pending,token);}catch(...){d->error=QStringLiteral("无法创建封面修复任务");}
@@ -196,25 +212,59 @@ bool ImportCoordinator::repairLegacyArtwork(){
         if(worker&&worker->thread()==thread()&&!worker->parent())delete worker;
         return false;
     }
+    const auto gate=std::make_shared<QSemaphore>();worker->setResultGate(gate);
     worker->setCancellationToken(token);auto *session=new ImportWorkerSession(worker,[worker]{worker->run();});session->shared->cancel=token;
-    d->artwork=session;d->corrected=0;d->artworkSealed=false;d->artworkExited=false;
+    d->artwork=session;d->artworkSummary={};d->artworkSummary.taskId=++d->nextId;d->artworkSummary.total=pending.size();
+    d->artworkSealed=false;d->artworkExited=false;
     connect(worker,&ArtworkRepair::finished,session,[session]{session->seal(false);},Qt::DirectConnection);
-    connect(worker,&ArtworkRepair::repaired,this,[this,session](const ArtworkResult &result){
+    connect(worker,&ArtworkRepair::repaired,this,[this,session,token,gate](const ArtworkResult &result){
+        const auto release=qScopeGuard([&]{gate->release();});
         if(d->artwork!=session||d->artworkSealed||!d->library||d->library->thread()!=QThread::currentThread())return;
-        bool corrected=false;
-        {QSignalBlocker batch(d->library);corrected=d->library->applyArtworkRepair(result);}
-        if(corrected){++d->corrected;emit artworkUpdated(result.id);}
+        if(d->shuttingDown||token->load())return; // No queued writes after cancellation.
+        auto &summary=d->artworkSummary;const auto plan=d->artworkPlans.take(result.id);
+        if(!plan.track.id)return; // Duplicate or unexpected result cannot enlarge the frozen set.
+        ++summary.processed;
+        if(result.hash!=plan.track.hash||result.trackFile!=plan.track.file||result.previousCover!=plan.track.cover||
+           !(result.sourceVersion==plan.source)||!(result.previousVersion==plan.cover)||!d->library->artworkSnapshotMatches(result)) {
+            ++summary.stale;return;
+        }
+        d->attempted.insert(plan.identity);
+        auto diagnostic=[&](const QString &error){if(summary.errors.size()<8)summary.errors<<QString("目标 %1：%2").arg(result.id).arg(error.left(1000));};
+        bool changed=false,transient=false;
+        switch(result.outcome) {
+        case ArtworkOutcome::Recovered: {
+            {QSignalBlocker batch(d->library);changed=d->library->applyArtworkRepair(result);}
+            if(changed)++summary.recovered;
+            else {++summary.failed;transient=true;diagnostic(d->library->lastError());}
+            break;
+        }
+        case ArtworkOutcome::NoSource:++summary.noSource;break;
+        case ArtworkOutcome::InvalidImage:++summary.invalid;diagnostic(result.error);break;
+        case ArtworkOutcome::ReadFailed:++summary.failed;transient=true;diagnostic(result.error);break;
+        case ArtworkOutcome::Cancelled:summary.cancelled=true;return;
+        }
+        if(!changed) {if(result.previousUsable)++summary.retained;else ++summary.placeholder;}
+        const auto receiptKey=QString("artwork.recovery.v1.%1").arg(result.id);
+        const auto retryAt=transient?QDateTime::currentMSecsSinceEpoch()+24LL*60*60*1000:0;
+        if(!d->library->setSetting(receiptKey,QJsonObject{{"identity",plan.identity},{"outcome",int(result.outcome)},
+            {"recovered",changed},{"retryAt",double(retryAt)}}))diagnostic("封面处理回执未能保存；本次会话不会重复尝试");
+        if(changed)emit artworkUpdated(result.id);
     },Qt::QueuedConnection);
-    connect(session,&ImportWorkerSession::sealed,this,[this,session](bool,const QString &error){
+    connect(session,&ImportWorkerSession::sealed,this,[this,session](bool cancelled,const QString &error){
         if(d->artwork!=session)return;
-        d->artworkSealed=true;if(!error.isEmpty())d->error=error;finishArtwork();
+        d->artworkSealed=true;d->artworkSummary.cancelled|=cancelled;
+        if(!error.isEmpty()){d->error=error;if(d->artworkSummary.errors.size()<8)d->artworkSummary.errors<<error.left(1000);}
+        finishArtwork();
     },Qt::QueuedConnection);
     connect(session,&ImportWorkerSession::exited,this,[this,session]{if(d->artwork==session){d->artworkExited=true;finishArtwork();}});
-    session->launch();return true;
+    emit artworkStarted(pending.size());session->launch();return true;
 }
 void ImportCoordinator::finishArtwork(){
     if(!d->artwork||!d->artworkSealed||!d->artworkExited)return;
-    QPointer<ImportCoordinator> self(this);d->artwork=nullptr;emit artworkFinished(d->corrected);if(self)finishShutdown();
+    auto summary=d->artworkSummary;summary.unstarted=qMax(0,summary.total-summary.processed);
+    QPointer<ImportCoordinator> self(this);d->artwork=nullptr;d->artworkPlans.clear();
+    emit artworkCompleted(summary);if(!self)return;
+    emit artworkFinished(summary.recovered);if(self)finishShutdown();
 }
 void ImportCoordinator::shutdown(){
     if(!ownerThread())return;

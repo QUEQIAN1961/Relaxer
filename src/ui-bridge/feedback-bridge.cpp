@@ -7,7 +7,7 @@ Q_LOGGING_CATEGORY(relaxerFeedback, "relaxer.feedback")
 namespace relaxer {
 void FeedbackBridge::post(const QString &source, const QString &category, const QString &message,
                           const QString &details, const QString &operation, const QString &target,
-                          bool retryable, bool actionRequired, int code) {
+                          bool retryable, bool actionRequired, int code, bool silent) {
     if (m_closing || message.isEmpty()) return;
     QString reason;
     if(category=="Error"||category=="Warning") {
@@ -24,18 +24,18 @@ void FeedbackBridge::post(const QString &source, const QString &category, const 
         {"source", source}, {"category", category}, {"message", message.left(512)}, {"reason",reason},
         {"details", details.left(16384)}, {"operationId", operation.isEmpty() ? id : operation},
         {"targetId", target}, {"retryable", retryable}, {"actionRequired", actionRequired},
-        {"code", code}, {"presented", false}, {"detailsTruncated", details.size() > 16384}};
+        {"code", code}, {"silent",silent}, {"presented", false}, {"detailsTruncated", details.size() > 16384}};
     m_history.prepend(event);
     while (m_history.size() > 20) m_history.removeLast();
     // Silent decisions must not erase an unrelated visible failure.
-    if (category != "Cancellation" && category != "ConfirmationRequired") {
+    if (!silent && category != "Cancellation" && category != "ConfirmationRequired") {
         m_current = event; m_visible = true;
     }
     // Metadata only: no titles, paths, lyric text, provider response, keys or tokens.
     qCInfo(relaxerFeedback).noquote() << event.value("timestamp").toString()
         << "event=" + id << "source=" + source << "category=" + category
         << "operation=" + event.value("operationId").toString() << "target=" + target << "code=" << code
-        << (category == "Cancellation" || category == "ConfirmationRequired" ? "ui=local-decision" : "ui=pending");
+        << (silent ? "ui=history-only" : category == "Cancellation" || category == "ConfirmationRequired" ? "ui=local-decision" : "ui=pending");
     emit changed();
 }
 void FeedbackBridge::clearSource(const QString &source) {

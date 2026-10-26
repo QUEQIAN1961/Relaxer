@@ -37,6 +37,21 @@ ImportBridge::ImportBridge(Library *library,ImportCoordinator *coordinator,QObje
         if(s.added||s.duplicates)emit contentsChanged();emit changed();
     });
     connect(coordinator,&ImportCoordinator::requestRejected,this,[this](const QString &error){m_status=error;emit changed();if(!m_closing)emit rejected(error);});
+    connect(coordinator,&ImportCoordinator::artworkStarted,this,[this](int){m_artworkResult.clear();emit changed();});
+    connect(coordinator,&ImportCoordinator::artworkCompleted,this,[this](const ArtworkSummary &s){
+        const QString category=s.cancelled?"Cancellation":s.failed||s.invalid||s.stale||!s.errors.isEmpty()?"Warning":"Information";
+        const QString message=QString("旧封面检查完成：恢复 %1，保留旧图 %2，占位 %3").arg(s.recovered).arg(s.retained).arg(s.placeholder);
+        QString details=QString("计划 %1；已处理 %2；恢复 %3；无内嵌来源 %4；图片损坏 %5；失败 %6；目标变化 %7；未完成 %8；取消 %9。")
+            .arg(s.total).arg(s.processed).arg(s.recovered).arg(s.noSource).arg(s.invalid).arg(s.failed).arg(s.stale).arg(s.unstarted).arg(s.cancelled);
+        for(const auto &error:s.errors)details+='\n'+error;
+        const int omitted=qMax(0,s.failed+s.invalid+s.stale-int(s.errors.size()));
+        if(omitted)details+=QString("\n另有 %1 项未展开；详情最多保留8项。").arg(omitted);
+        m_artworkResult={{"taskId",QString::number(s.taskId)},{"total",s.total},{"processed",s.processed},{"recovered",s.recovered},
+            {"retained",s.retained},{"placeholder",s.placeholder},{"noSource",s.noSource},{"invalid",s.invalid},{"failed",s.failed},
+            {"stale",s.stale},{"cancelled",s.cancelled},{"unstarted",s.unstarted},{"errors",s.errors},{"details",details},{"category",category}};
+        if(!m_closing)emit artworkCompleted(category,QString::number(s.taskId),message,details);
+        if(s.recovered)emit contentsChanged();emit changed();
+    });
     connect(coordinator,&ImportCoordinator::shutdownReady,this,[this]{emit changed();emit readyToClose();});
 }
 bool ImportBridge::start(const QList<QUrl> &urls,const QString &playlistKey){

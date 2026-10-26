@@ -24,7 +24,7 @@ $env:RELAXER_SKIP_AUDIO_DEVICE_TESTS = '1'
 $env:RELAXER_D203_EVIDENCE = Join-Path $EvidenceDirectory 'd203-interaction'
 $env:RELAXER_D204_EVIDENCE = Join-Path $EvidenceDirectory 'search-interaction'
 $env:RELAXER_D2_ESCAPE_EVIDENCE = Join-Path $EvidenceDirectory 'escape-interaction'
-$targets = @('relaxer_legacy_ui_hardening_tests','relaxer_qml_lyrics_model_tests','relaxer_d204_search_fixture','relaxer_lyrics_search_parameters_tests','relaxer_lyrics_search_coordinator_tests','Relaxer','relaxer_d203_fixture','relaxer_lyrics_edit_tests','relaxer_qml_error_feedback_tests',
+$targets = @('relaxer_d205_fixture','relaxer_artwork_recovery_tests','relaxer_tests','relaxer_importer_contract_tests','relaxer_legacy_ui_hardening_tests','relaxer_qml_lyrics_model_tests','relaxer_d204_search_fixture','relaxer_lyrics_search_parameters_tests','relaxer_lyrics_search_coordinator_tests','Relaxer','relaxer_d203_fixture','relaxer_lyrics_edit_tests','relaxer_qml_error_feedback_tests',
     'relaxer_lyrics_persistence_tests','relaxer_lyrics_save_work_tests','relaxer_lyrics_replacement_policy_tests',
     'relaxer_playback_facade_tests','relaxer_import_coordinator_tests','relaxer_lyrics_replacement_integration_tests',
     'relaxer_qml_lyrics_workspace_parity_tests','relaxer_qml_search_bridge_tests','relaxer_translation_coordinator_tests')
@@ -39,6 +39,6 @@ if ($Build) {
     & "$QtPrefix/bin/cmake.exe" --build $BuildDirectory --target @targets --parallel 4 *> (Join-Path $EvidenceDirectory 'build.log')
     if ($LASTEXITCODE) { throw 'Build failed; see build.log' }
 }
-$selection = '^(relaxer_legacy_ui_hardening|relaxer_qml_lyrics_model|relaxer_lyrics_search_parameters|relaxer_lyrics_search_coordinator|relaxer_lyrics_edit|relaxer_lyrics_persistence|relaxer_lyrics_save_work|relaxer_lyrics_replacement_policy|relaxer_qml_error_feedback|relaxer_playback_facade|relaxer_import_coordinator|relaxer_lyrics_replacement_integration|relaxer_qml_lyrics_workspace_parity|relaxer_qml_search_bridge|relaxer_translation_coordinator)$'
+$selection = '^(relaxer_artwork_recovery|relaxer_core|relaxer_importer_contract|relaxer_legacy_ui_hardening|relaxer_qml_lyrics_model|relaxer_lyrics_search_parameters|relaxer_lyrics_search_coordinator|relaxer_lyrics_edit|relaxer_lyrics_persistence|relaxer_lyrics_save_work|relaxer_lyrics_replacement_policy|relaxer_qml_error_feedback|relaxer_playback_facade|relaxer_import_coordinator|relaxer_lyrics_replacement_integration|relaxer_qml_lyrics_workspace_parity|relaxer_qml_search_bridge|relaxer_translation_coordinator)$'
 & "$QtPrefix/bin/ctest.exe" --test-dir $BuildDirectory -j 1 --output-on-failure -R $selection --output-log (Join-Path $EvidenceDirectory 'ctest.log')
 if ($LASTEXITCODE) { throw 'Targeted tests failed; retain the original output.' }

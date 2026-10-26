@@ -1,4 +1,5 @@
 #include "library.h"
+#include "artwork-recovery.h"
 #include "lyrics-replacement-policy.h"
 #include "lyric-text.h"
 #include "lyrics.h"
@@ -637,17 +638,42 @@ bool Library::updateArtwork(qint64 id, const QString &source) {
         notifyChanged();
     return ok;
 }
+bool Library::artworkSnapshotMatches(const ArtworkResult &r) const {
+    if(QThread::currentThread()!=thread())return false;
+    const auto current=track(r.id);
+    return isLegacyArtwork(current) && current.hash==r.hash && current.file==r.trackFile && current.cover==r.previousCover &&
+        r.sourceVersion==artworkFileVersion(absolute(current.file)) && r.previousVersion==artworkFileVersion(absolute(current.cover));
+}
 bool Library::applyArtworkRepair(const ArtworkResult &result) {
-    const auto current = track(result.id);
-    // A manual replacement or re-import performed while the worker runs takes precedence.
-    if (!result.error.isEmpty() || result.origin.isEmpty() || !current.id || current.hash != result.hash ||
-        current.cover != result.previousCover || !current.coverOrigin.isEmpty())
+    m_error.clear();
+    if(!artworkSnapshotMatches(result)) {m_error="封面目标或来源已变化，本次未保存";return false;}
+    // No source/invalid image is never permission to discard a valid old cover.
+    if(result.outcome!=ArtworkOutcome::Recovered||result.origin!="embedded"||!result.error.isEmpty()||
+       decodeRecoveredArtwork(result.png).isNull()||!managedArtworkSource(m_root,track(result.id))) {
+        m_error="没有可安全提交的内嵌封面";return false;
+    }
+    const auto digest=QString::fromLatin1(QCryptographicHash::hash(result.png,QCryptographicHash::Sha256).toHex());
+    const auto relative="Artwork/"+result.hash+"-v2-"+digest+".png",path=absolute(relative);
+    const bool existed=QFileInfo::exists(path);
+    if(existed) {
+        QFile existing(path);
+        if(!existing.open(QIODevice::ReadOnly)||existing.size()!=result.png.size()||existing.read(maximumArtworkBytes+1)!=result.png) {
+            m_error="目标封面缓存已存在但内容不符，未覆盖原文件";return false;
+        }
+    } else {
+        QSaveFile out(path);
+        if(!out.open(QIODevice::WriteOnly)||out.write(result.png)!=result.png.size()||
+           !artworkSnapshotMatches(result)||!out.commit()) {m_error="无法原子保存封面缓存，原封面已保留";return false;}
+    }
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE tracks SET cover=?,cover_origin='embedded' WHERE id=? AND hash=? AND file=? AND cover=? AND cover_origin=''");
+    for(const auto &v:QVariantList{relative,result.id,result.hash,result.trackFile,result.previousCover})q.addBindValue(v);
+    if(!artworkSnapshotMatches(result)||!q.exec()||q.numRowsAffected()!=1) {
+        m_error=q.lastError().text();if(m_error.isEmpty())m_error="封面目标已变化或资料库拒绝保存";
+        if(!existed)QFile::remove(path);
         return false;
-    const bool ok =
-        exec("UPDATE tracks SET cover=?,cover_origin=? WHERE id=?", {result.cover, result.origin, result.id});
-    if (ok)
-        notifyChanged();
-    return ok;
+    }
+    notifyChanged();return true;
 }
 bool Library::updateLyrics(qint64 id, const QString &source) {
     const auto snapshot=lyricsSaveSnapshot(id);

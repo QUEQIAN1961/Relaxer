@@ -1,4 +1,5 @@
 #include "importer.h"
+#include "artwork-recovery.h"
 #include "midi-transport.h"
 #include "lyric-text.h"
 #include <QCoreApplication>
@@ -125,10 +126,11 @@ static bool atomicWrite(const QString &path, const QByteArray &bytes) {
     return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size() && f.commit();
 }
 static ArtworkResult readArtwork(const QString &root, const QString &source, const QString &hash,
-                                 const QJsonObject &json, bool allowSidecar,std::atomic_bool *cancel=nullptr) {
+                                 const QJsonObject &json, bool allowSidecar,std::atomic_bool *cancel=nullptr,bool writeCache=true) {
     ArtworkResult result;
     result.hash = hash;
     result.origin = "none";
+    result.outcome=ArtworkOutcome::NoSource;
     const QString relative = "Artwork/" + hash + "-v2.png";
     const QString destination = QDir(root).filePath(relative);
     QJsonObject picture;
@@ -144,6 +146,7 @@ static ArtworkResult readArtwork(const QString &root, const QString &source, con
         }
     }
     if (!picture.isEmpty()) {
+        result.outcome=ArtworkOutcome::InvalidImage;
         const qint64 pixels = qint64(picture["width"].toInt()) * picture["height"].toInt();
         if (pixels <= 0 || pixels > 120000000) {
             result.error = "内嵌封面尺寸无效或过大";
@@ -155,11 +158,13 @@ static ArtworkResult readArtwork(const QString &root, const QString &source, con
                                       "-vf", "scale=800:800:force_original_aspect_ratio=decrease", "-f",
                                       "image2pipe", "-vcodec", "png", "pipe:1"},
                                      20000, &result.error,cancel);
-            if (!png.isEmpty() && png.size() < 12 * 1024 * 1024 && atomicWrite(destination, png)) {
-                result.cover = relative;
-                result.origin = "embedded";
-                result.error.clear();
-                return result;
+            if (!decodeRecoveredArtwork(png).isNull()) {
+                if(!writeCache || atomicWrite(destination,png)) {
+                    result.cover=relative;result.origin="embedded";result.outcome=ArtworkOutcome::Recovered;
+                    if(!writeCache)result.png=png;
+                    result.error.clear();return result;
+                }
+                result.outcome=ArtworkOutcome::ReadFailed;
             }
             if (result.error.isEmpty())
                 result.error = "无法保存歌曲内嵌封面";
@@ -169,13 +174,7 @@ static ArtworkResult readArtwork(const QString &root, const QString &source, con
         const QFileInfo audio(source);
         for (const auto &suffix : QStringList{".png", ".jpg", ".jpeg", ".webp"}) {
             // A shared folder cover is ambiguous in a directory containing unrelated songs.
-            QImageReader reader(audio.dir().filePath(audio.completeBaseName() + suffix));
-            const auto size = reader.size();
-            if (!size.isValid() || qint64(size.width()) * size.height() > 120000000)
-                continue;
-            reader.setAutoTransform(true);
-            reader.setScaledSize(size.scaled(800, 800, Qt::KeepAspectRatio));
-            const auto image = reader.read();
+            const auto image=readArtworkImage(audio.dir().filePath(audio.completeBaseName()+suffix),QSize(800,800));
             QSaveFile out(destination);
             if (!image.isNull() && out.open(QIODevice::WriteOnly) && image.save(&out, "PNG") &&
                 out.commit()) {
@@ -189,32 +188,29 @@ static ArtworkResult readArtwork(const QString &root, const QString &source, con
     return result;
 }
 ArtworkResult Importer::repairArtwork(const QString &root, const Track &track, std::atomic_bool *cancel) {
-    ArtworkResult result;
-    result.id = track.id;
-    result.hash = track.hash;
-    result.previousCover = track.cover;
-    if (cancel && cancel->load()) {
-        result.error = "已取消";
+    ArtworkResult result;result.id=track.id;result.hash=track.hash;result.previousCover=track.cover;result.trackFile=track.file;
+    const auto source=QDir(root).filePath(track.file);
+    result.sourceVersion=artworkFileVersion(source);
+    result.previousVersion=artworkFileVersion(QDir(root).filePath(track.cover));
+    auto stop=[&]{return cancel&&cancel->load();};
+    if(stop()){result.outcome=ArtworkOutcome::Cancelled;result.error="已取消";return result;}
+    result.previousUsable=!readArtworkImage(QDir(root).filePath(track.cover),QSize(64,64)).isNull();
+    if(!managedArtworkSource(root,track)){result.error="原音乐不存在或已离开受管音乐目录";return result;}
+    const auto bytes=process(toolPath("ffprobe"),{"-v","error","-show_streams","-of","json",source},20000,&result.error,cancel);
+    QJsonParseError parseError;const auto document=QJsonDocument::fromJson(bytes,&parseError);
+    if(bytes.isEmpty()||parseError.error!=QJsonParseError::NoError||!document.isObject()) {
+        if(result.error.isEmpty())result.error="无法读取原音乐的封面信息";
+        if(stop())result.outcome=ArtworkOutcome::Cancelled;
         return result;
     }
-    const auto source = QDir(root).filePath(track.file);
-    const auto bytes = process(toolPath("ffprobe"), {"-v", "error", "-show_streams", "-of", "json", source},
-                               20000, &result.error,cancel);
-    QJsonParseError parseError;
-    const auto document = QJsonDocument::fromJson(bytes, &parseError);
-    if (bytes.isEmpty() || parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        if (result.error.isEmpty())
-            result.error = "无法读取原音乐的封面信息";
-        return result;
+    auto artwork=readArtwork(root,source,track.hash,document.object(),false,cancel,false);
+    result.cover=artwork.cover;result.origin=artwork.origin;result.error=artwork.error;
+    result.png=std::move(artwork.png);result.outcome=artwork.outcome;
+    if(stop()){result.png.clear();result.outcome=ArtworkOutcome::Cancelled;result.error="已取消";}
+    if(!(result.sourceVersion==artworkFileVersion(source))) {
+        result.png.clear();result.outcome=ArtworkOutcome::ReadFailed;result.error="读取期间原音乐已变化";
     }
-    if (cancel && cancel->load()) {
-        result.error = "已取消";
-        return result;
-    }
-    auto artwork = readArtwork(root, source, track.hash, document.object(), false,cancel);
-    artwork.id = track.id;
-    artwork.previousCover = track.cover;
-    return artwork;
+    return result;
 }
 ImportResult Importer::importOne(const QString &root, const QString &source, std::atomic_bool *cancel) {
     ImportResult r;
@@ -436,8 +432,12 @@ void ArtworkRepair::run() {
         if (m_cancel->load())
             break;
         const auto result = Importer::repairArtwork(m_root, track, m_cancel.get());
-        if (!m_cancel->load())
+        if (!m_cancel->load()) {
             emit repaired(result);
+            // Only one result/image may wait for the owner. Cancellation also
+            // releases this wait when the receiving coordinator is destroyed.
+            if(m_resultGate)while(!m_cancel->load()&&!m_resultGate->tryAcquire(1,50)){}
+        }
     }
     emit finished();
 }

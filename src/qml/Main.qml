@@ -216,7 +216,11 @@ ApplicationWindow {
     Timer{id:searchFocus;interval:260;onTriggered:localPage.focusSearch()}
     onClosing: close => {
         feedbackBridge.setClosing(true)
-        if(playbackBridge.nonInteractiveExit()){playbackBridge.requestExit(1);return}
+        if(playbackBridge.nonInteractiveExit()){
+            playbackBridge.requestExit(1)
+            if(importBridge.unfinished){close.accepted=false;root.awaitingImportClose=true;if(!importBridge.closing)importBridge.beginShutdown()}
+            return
+        }
         if (settingsBridge.appearanceDirty) {
             close.accepted=false
             pendingAppearanceClose=true
@@ -228,7 +232,7 @@ ApplicationWindow {
         if (!allowClose && (importBridge.busy || translationBridge.unfinished || lyricsSearchBridge.busy)) { close.accepted=false; closeConfirm.open() }
         else if(!allowClose && !exitRequested && settingsBridge.values.closeToTray && uiIntegration.trayAvailable){close.accepted=false;root.hide();uiIntegration.showTray()}
         else if(!playbackBridge.requestExit()){close.accepted=false;exitSaveFailure.open()}
-        else if(importBridge.busy){close.accepted=false;root.awaitingImportClose=true;if(!importBridge.closing)importBridge.beginShutdown()}
+        else if(importBridge.unfinished){close.accepted=false;root.awaitingImportClose=true;if(!importBridge.closing)importBridge.beginShutdown()}
         if(!close.accepted)feedbackBridge.setClosing(false)
         else lyricsSearchBridge.cancelInstrumentalBatch()
     }

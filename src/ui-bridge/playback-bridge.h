@@ -79,6 +79,8 @@ class PlaybackBridge final : public QObject {
     void failure(quint64 operation, const QString &target, const QString &title, const QString &message, int code);
     void persistenceFailure(const QString &message);
     void recovered();
+  public:
+    void refreshArtwork(qint64 trackId) {if(m_state.track.id==trackId)refreshMetadata();}
   private:
     QPointer<PlaybackFacade> m_facade;
     QPointer<Library> m_library;

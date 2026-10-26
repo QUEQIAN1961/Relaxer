@@ -82,8 +82,9 @@ class GuiTests : public QObject {
         QVERIFY(library.saveSession(session, 800, 80));
         Window window(&library);if(qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))window.playback()->media()->setAudioOutput(nullptr);
         window.show();
-        QTRY_COMPARE_WITH_TIMEOUT(library.track(id).coverOrigin, QString("none"), 6000);
-        QVERIFY(library.track(id).cover.isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(library.setting(QString("artwork.recovery.v1.%1").arg(id)).isObject(),6000);
+        QVERIFY(library.track(id).coverOrigin.isEmpty());
+        QCOMPARE(library.track(id).cover,imported.track.cover);
         QCOMPARE(library.track(id).plays, 1);
         QCOMPARE(library.track(id).heard, 800);
         QCOMPARE(library.tracks(list).first().id, id);

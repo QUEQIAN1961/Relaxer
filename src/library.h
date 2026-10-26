@@ -68,6 +68,7 @@ class Library : public QObject {
     bool lyricsSnapshotMatches(const LyricsSaveSnapshot &snapshot,QString *error=nullptr) const;
     bool saveLyricsChecked(qint64 id,const QByteArray &data,const LyricsSaveSnapshot &snapshot,bool preserveText=false);
     bool updateArtwork(qint64 id, const QString &source);
+    bool artworkSnapshotMatches(const ArtworkResult &result) const;
     bool applyArtworkRepair(const ArtworkResult &result);
     bool updateLyrics(qint64 id, const QString &source);
     LookupCache lookupCache(qint64 id) const;

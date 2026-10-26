@@ -259,15 +259,15 @@ class Tests : public QObject {
                 QVERIFY(track.coverOrigin.isEmpty());
                 const auto repaired = Importer::repairArtwork(root, track);
                 QVERIFY2(repaired.error.isEmpty(), qPrintable(repaired.error));
-                QVERIFY(library.applyArtworkRepair(repaired));
+                QCOMPARE(library.applyArtworkRepair(repaired),track.hash==embedded.hash);
                 QVERIFY(!library.applyArtworkRepair(repaired));
                 const auto updated = library.track(track.id);
                 if (track.hash == embedded.hash) {
                     QCOMPARE(updated.coverOrigin, QString("embedded"));
                     QVERIFY(artworkMatches(root, updated, Qt::red));
                 } else {
-                    QCOMPARE(updated.coverOrigin, QString("none"));
-                    QVERIFY(updated.cover.isEmpty());
+                    QVERIFY(updated.coverOrigin.isEmpty());
+                    QCOMPARE(updated.cover,track.cover); // No-source recovery preserves valid legacy data.
                 }
                 QCOMPARE(updated.title, QString("Legacy title"));
                 QCOMPARE(updated.plays, 7);

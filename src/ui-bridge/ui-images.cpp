@@ -1,4 +1,5 @@
 #include "ui-images.h"
+#include "artwork-recovery.h"
 #include "appearance-image.h"
 #include <QPainter>
 #include <QPainterPath>
@@ -172,7 +173,7 @@ QImage UiImages::requestImage(const QString &id,QSize *resultSize,const QSize &r
     const int preferred=query.queryItemValue("resolution").toInt();
     const int size=qBound(64,requested.isValid()?qMax(requested.width(),requested.height()):(preferred>0?preferred:640),960);
     const QFileInfo info(QUrl(query.queryItemValue("file",QUrl::FullyDecoded)).toLocalFile());
-    const QString cacheKey=id+QString::number(size)+QString::number(info.size())+QString::number(info.lastModified().toMSecsSinceEpoch());
+    const QString cacheKey=id+QString::number(size)+QString::number(info.size())+artworkVersionKey(artworkFileVersion(info.absoluteFilePath()));
     {QMutexLocker lock(&m_mutex);if(auto *cached=m_cache.object(cacheKey)){if(resultSize)*resultSize=cached->size();return *cached;}}
     const auto seed=query.queryItemValue("seed",QUrl::FullyDecoded);const auto file=QUrl(query.queryItemValue("file",QUrl::FullyDecoded));QImage out;
     if(url.path()=="/background"){
@@ -184,11 +185,8 @@ QImage UiImages::requestImage(const QString &id,QSize *resultSize,const QSize &r
     }
 
     if(file.isLocalFile()) {
-        QImageReader reader(file.toLocalFile());reader.setAutoTransform(true);const auto original=reader.size();
-        if(original.isValid()&&qint64(original.width())*original.height()<=120000000){
-            reader.setScaledSize(original.scaled(size,size,Qt::KeepAspectRatioByExpanding));out=reader.read();
-            if(!out.isNull()){out=out.scaled(size,size,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation);out=out.copy((out.width()-size)/2,(out.height()-size)/2,size,size);}
-        }
+        out=readArtworkImage(file.toLocalFile(),QSize(size,size),Qt::KeepAspectRatioByExpanding);
+        if(!out.isNull()){out=out.scaled(size,size,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation);out=out.copy((out.width()-size)/2,(out.height()-size)/2,size,size);}
     }
     if (out.isNull()) {
         auto h = QCryptographicHash::hash(seed.toUtf8(), QCryptographicHash::Sha256);

@@ -74,5 +74,6 @@ class QmlShell final : public QObject {
     LyricsSearchBridge m_searchBridge;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QStringList m_warnings;
+    bool m_artworkRecoveryScheduled=false;
 };
 }

@@ -17,7 +17,7 @@ public:
     bool visible() const { return m_visible && !m_closing; }
     void post(const QString &source, const QString &category, const QString &message,
               const QString &details = {}, const QString &operation = {}, const QString &target = {},
-              bool retryable = false, bool actionRequired = false, int code = 0);
+              bool retryable = false, bool actionRequired = false, int code = 0, bool silent = false);
     void clearSource(const QString &source);
     Q_INVOKABLE void dismiss();
     Q_INVOKABLE void setClosing(bool closing);

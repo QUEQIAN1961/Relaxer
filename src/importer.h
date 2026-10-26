@@ -1,6 +1,7 @@
 #pragma once
 #include "model.h"
 #include <QObject>
+#include <QSemaphore>
 #include <QStringList>
 #include <atomic>
 #include <memory>
@@ -39,6 +40,7 @@ class ArtworkRepair : public QObject {
         : m_root(std::move(root)), m_tracks(std::move(tracks)) {}
     void cancel() { m_cancel->store(true); }
     void setCancellationToken(std::shared_ptr<std::atomic_bool> token) { m_cancel=std::move(token); }
+    void setResultGate(std::shared_ptr<QSemaphore> gate) {m_resultGate=std::move(gate);}
   public slots:
     virtual void run();
   signals:
@@ -48,6 +50,7 @@ class ArtworkRepair : public QObject {
   private:
     QString m_root;
     QVector<Track> m_tracks;
+    std::shared_ptr<QSemaphore> m_resultGate;
     std::shared_ptr<std::atomic_bool> m_cancel=std::make_shared<std::atomic_bool>(false);
 };
 } // namespace relaxer

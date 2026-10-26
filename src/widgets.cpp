@@ -1,4 +1,5 @@
 #include "widgets.h"
+#include "artwork-recovery.h"
 #include <QScrollBar>
 #include <QTextLayout>
 #include <QResizeEvent>
@@ -254,22 +255,15 @@ QIcon symbol(const QString &name, const QColor &c) {
 }
 QPixmap coverPixmap(const QString &path, const QString &seed, int size) {
     QString key = path + "|" + seed + "|" + QString::number(size) + "|" +
-                  QString::number(QFileInfo(path).lastModified().toMSecsSinceEpoch());
+                  artworkVersionKey(artworkFileVersion(path));
     QPixmap out;
     if (QPixmapCache::find(key, &out))
         return out;
     if (!path.isEmpty()) {
-        QImageReader r(path);
-        r.setAutoTransform(true);
-        auto s = r.size();
-        if (s.isValid() && qint64(s.width()) * s.height() <= 120000000) {
-            r.setScaledSize(s.scaled(size, size, Qt::KeepAspectRatioByExpanding));
-            auto img = r.read();
-            if (!img.isNull()) {
-                auto scaled = QPixmap::fromImage(img).scaled(size, size, Qt::KeepAspectRatioByExpanding,
-                                                             Qt::SmoothTransformation);
-                out = scaled.copy((scaled.width() - size) / 2, (scaled.height() - size) / 2, size, size);
-            }
+        const auto img=readArtworkImage(path,QSize(size,size),Qt::KeepAspectRatioByExpanding);
+        if(!img.isNull()) {
+            const auto scaled=QPixmap::fromImage(img).scaled(size,size,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation);
+            out=scaled.copy((scaled.width()-size)/2,(scaled.height()-size)/2,size,size);
         }
     }
     if (out.isNull()) {

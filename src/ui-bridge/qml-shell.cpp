@@ -5,6 +5,7 @@
 #include <QEventLoop>
 #include <QCoreApplication>
 #include <QEvent>
+#include <QTimer>
 
 static void initializeQmlResources() { Q_INIT_RESOURCE(qml); }
 namespace relaxer {
@@ -52,6 +53,11 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     }
     connect(&m_queue, &QueueListModel::missingTracks, &m_libraryBridge, &LibraryBridge::forgetMissing, Qt::QueuedConnection);
     connect(&m_importBridge,&ImportBridge::contentsChanged,this,[this]{m_tracks.refresh();m_playlists.refresh();m_appBridge.refresh();});
+    connect(&m_import,&ImportCoordinator::artworkUpdated,this,[this](qint64 id){
+        m_playbackBridge.refreshArtwork(id);
+        if(m_facade.current().id==id)m_lyrics.reload();
+    });
+    connect(&m_import,&ImportCoordinator::artworkFinished,this,[this](int recovered){if(recovered)m_upcoming.refresh();});
     connect(m_engine.get(), &QQmlEngine::warnings, this, [this](const QList<QQmlError> &errors) {
         for (const auto &error : errors) m_warnings.append(error.toString());
     });
@@ -66,6 +72,11 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     connect(&m_libraryBridge,&LibraryBridge::operationSucceeded,this,[this]{m_feedback.clearSource("Library");});
     connect(&m_importBridge,&ImportBridge::started,this,[this]{m_feedback.clearSource("Import");});
     connect(&m_importBridge,&ImportBridge::completed,this,[this](const QString &category,const QString &task,const QString &message,const QString &details){m_feedback.post("Import",category,message,details,task,{},category=="Error");});
+    connect(&m_importBridge,&ImportBridge::artworkCompleted,this,[this](const QString &category,const QString &task,const QString &message,const QString &details){
+        // Background migration records one bounded history entry, without
+        // replacing a playback error or interrupting normal placeholder use.
+        m_feedback.post("Artwork",category,message,details,task,{},false,false,0,true);
+    });
     connect(&m_importBridge,&ImportBridge::rejected,this,[this](const QString &message){m_feedback.post("Import","Error","无法开始导入",message,{}, {},true);});
     connect(&m_searchBridge,&LyricsSearchBridge::operationFailed,this,[this](const QString &target,const QString &message){m_feedback.post("Lyrics","Error","歌词未能保存："+m_searchBridge.targetTitle(),message,{},target,true);});
     connect(&m_translationBridge,&TranslationBridge::feedback,this,[this](const QString &category,const QString &task,const QString &target,const QString &message,const QString &details){m_feedback.post("Translation",category,message+" · "+m_translationBridge.targetTitle(),details,task,target,category=="Error",category=="ConfirmationRequired");});
@@ -88,7 +99,10 @@ QmlShell::~QmlShell() {
 bool QmlShell::load() {
     if (!m_engine->rootObjects().isEmpty()) return window() != nullptr;
     m_engine->load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
-    if (auto *loaded = window()) m_uiIntegration.attach(loaded);
+    if (auto *loaded = window()) {
+        m_uiIntegration.attach(loaded);
+        if(!m_artworkRecoveryScheduled){m_artworkRecoveryScheduled=true;QTimer::singleShot(0,this,[this]{m_import.repairLegacyArtwork();});}
+    }
     return window() != nullptr;
 }
 QQuickWindow *QmlShell::window() const {

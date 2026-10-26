@@ -1,5 +1,6 @@
 #pragma once
 #include <QMetaType>
+#include <QDateTime>
 #include <QString>
 #include <QStringList>
 #include <QTextBoundaryFinder>
@@ -49,9 +50,25 @@ struct ImportResult {
     Track track;
     QString source, error;
 };
+// Value-only file identity. Captured before work and rechecked at commit; no open
+// QObject or database handle crosses the worker boundary.
+struct ArtworkFileVersion {
+    QString path, canonical;
+    qint64 size=-1;
+    QDateTime modified, metadataChanged, created;
+    bool operator==(const ArtworkFileVersion &other) const {
+        return path==other.path && canonical==other.canonical && size==other.size &&
+            modified==other.modified && metadataChanged==other.metadataChanged && created==other.created;
+    }
+};
+enum class ArtworkOutcome { Recovered, NoSource, InvalidImage, ReadFailed, Cancelled };
 struct ArtworkResult {
     qint64 id = 0;
-    QString hash, previousCover, cover, origin, error;
+    QString hash, previousCover, cover, origin, error, trackFile;
+    ArtworkFileVersion sourceVersion, previousVersion;
+    QByteArray png;
+    ArtworkOutcome outcome=ArtworkOutcome::ReadFailed;
+    bool previousUsable=false;
 };
 inline QString durationText(qint64 ms) {
     auto s = qMax<qint64>(0, ms / 1000);

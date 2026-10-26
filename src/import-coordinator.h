@@ -12,6 +12,13 @@ struct ImportRequest {
     // Zero retains the existing limit: min(CPU count, 8).
     int maximumWorkers=0;
 };
+struct ArtworkSummary {
+    quint64 taskId=0;
+    int total=0,processed=0,recovered=0,retained=0,placeholder=0;
+    int noSource=0,invalid=0,failed=0,stale=0,unstarted=0;
+    bool cancelled=false;
+    QStringList errors;
+};
 struct ImportSummary {
     quint64 taskId=0;
     qint64 targetPlaylist=0;
@@ -38,13 +45,15 @@ public:
     bool isShuttingDown() const;
     quint64 activeTaskId() const;
     QString lastError() const;
-    bool repairLegacyArtwork();
+    bool repairLegacyArtwork(bool retryFailed=false);
     void shutdown();
 signals:
     void progress(quint64 taskId,int current,int total,const QString &name);
     void trackCommitted(quint64 taskId,qint64 trackId,bool added);
     void finished(const relaxer::ImportSummary &summary);
     void requestRejected(const QString &error);
+    void artworkStarted(int total);
+    void artworkCompleted(const relaxer::ArtworkSummary &summary);
     void artworkUpdated(qint64 trackId);
     void artworkFinished(int corrected);
     void shutdownReady();
@@ -64,3 +73,4 @@ private:
 }
 Q_DECLARE_METATYPE(relaxer::ImportRequest)
 Q_DECLARE_METATYPE(relaxer::ImportSummary)
+Q_DECLARE_METATYPE(relaxer::ArtworkSummary)
