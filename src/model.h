@@ -66,6 +66,7 @@ struct ArtworkResult {
     qint64 id = 0;
     QString hash, previousCover, cover, origin, error, trackFile;
     ArtworkFileVersion sourceVersion, previousVersion;
+    QByteArray sourceSha256, sourceObjectIdentity;
     QByteArray png;
     ArtworkOutcome outcome=ArtworkOutcome::ReadFailed;
     bool previousUsable=false;

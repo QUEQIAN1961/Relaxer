@@ -638,20 +638,34 @@ bool Library::updateArtwork(qint64 id, const QString &source) {
         notifyChanged();
     return ok;
 }
-bool Library::artworkSnapshotMatches(const ArtworkResult &r) const {
+bool Library::artworkMetadataMatches(const ArtworkResult &r) const {
     if(QThread::currentThread()!=thread())return false;
     const auto current=track(r.id);
     return isLegacyArtwork(current) && current.hash==r.hash && current.file==r.trackFile && current.cover==r.previousCover &&
         r.sourceVersion==artworkFileVersion(absolute(current.file)) && r.previousVersion==artworkFileVersion(absolute(current.cover));
 }
+bool Library::artworkSnapshotMatches(const ArtworkResult &r) const {
+    if(!artworkMetadataMatches(r))return false;
+    if(r.outcome!=ArtworkOutcome::Recovered)return true;
+    ArtworkSourceGuard guard(absolute(r.trackFile));
+    return r.sourceSha256.size()==32&&!r.sourceObjectIdentity.isEmpty()&&
+        guard.objectIdentity()==r.sourceObjectIdentity&&guard.sha256()==r.sourceSha256&&artworkMetadataMatches(r);
+}
 bool Library::applyArtworkRepair(const ArtworkResult &result) {
     m_error.clear();
-    if(!artworkSnapshotMatches(result)) {m_error="封面目标或来源已变化，本次未保存";return false;}
+    if(!artworkMetadataMatches(result)) {m_error="封面目标或来源已变化，本次未保存";return false;}
     // No source/invalid image is never permission to discard a valid old cover.
     if(result.outcome!=ArtworkOutcome::Recovered||result.origin!="embedded"||!result.error.isEmpty()||
        decodeRecoveredArtwork(result.png).isNull()||!managedArtworkSource(m_root,track(result.id))) {
         m_error="没有可安全提交的内嵌封面";return false;
     }
+    // Keep the same guarded source open from the final streaming digest through
+    // QSaveFile::commit and the conditional SQL update. A digest alone leaves a
+    // check-to-use race; ordinary Windows writers/deleters cannot enter here.
+    ArtworkSourceGuard sourceGuard(absolute(result.trackFile));
+    if(result.sourceSha256.size()!=32||result.sourceObjectIdentity.isEmpty()||
+       sourceGuard.objectIdentity()!=result.sourceObjectIdentity||sourceGuard.sha256()!=result.sourceSha256||
+       !artworkMetadataMatches(result)) {m_error="原音乐内容或文件对象已变化，封面未保存";return false;}
     const auto digest=QString::fromLatin1(QCryptographicHash::hash(result.png,QCryptographicHash::Sha256).toHex());
     const auto relative="Artwork/"+result.hash+"-v2-"+digest+".png",path=absolute(relative);
     const bool existed=QFileInfo::exists(path);
@@ -663,12 +677,12 @@ bool Library::applyArtworkRepair(const ArtworkResult &result) {
     } else {
         QSaveFile out(path);
         if(!out.open(QIODevice::WriteOnly)||out.write(result.png)!=result.png.size()||
-           !artworkSnapshotMatches(result)||!out.commit()) {m_error="无法原子保存封面缓存，原封面已保留";return false;}
+           !artworkMetadataMatches(result)||!out.commit()) {m_error="无法原子保存封面缓存，原封面已保留";return false;}
     }
     QSqlQuery q(m_db);
     q.prepare("UPDATE tracks SET cover=?,cover_origin='embedded' WHERE id=? AND hash=? AND file=? AND cover=? AND cover_origin=''");
     for(const auto &v:QVariantList{relative,result.id,result.hash,result.trackFile,result.previousCover})q.addBindValue(v);
-    if(!artworkSnapshotMatches(result)||!q.exec()||q.numRowsAffected()!=1) {
+    if(!artworkMetadataMatches(result)||!q.exec()||q.numRowsAffected()!=1) {
         m_error=q.lastError().text();if(m_error.isEmpty())m_error="封面目标已变化或资料库拒绝保存";
         if(!existed)QFile::remove(path);
         return false;

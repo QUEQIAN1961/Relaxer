@@ -196,6 +196,11 @@ ArtworkResult Importer::repairArtwork(const QString &root, const Track &track, s
     if(stop()){result.outcome=ArtworkOutcome::Cancelled;result.error="已取消";return result;}
     result.previousUsable=!readArtworkImage(QDir(root).filePath(track.cover),QSize(64,64)).isNull();
     if(!managedArtworkSource(root,track)){result.error="原音乐不存在或已离开受管音乐目录";return result;}
+    ArtworkSourceGuard guard(source);
+    result.sourceObjectIdentity=guard.objectIdentity();result.sourceSha256=guard.sha256(cancel);
+    if(result.sourceSha256.size()!=32||result.sourceObjectIdentity.isEmpty()||!(result.sourceVersion==artworkFileVersion(source))){
+        result.error="原音乐无法安全读取或已变化";if(stop())result.outcome=ArtworkOutcome::Cancelled;return result;
+    }
     const auto bytes=process(toolPath("ffprobe"),{"-v","error","-show_streams","-of","json",source},20000,&result.error,cancel);
     QJsonParseError parseError;const auto document=QJsonDocument::fromJson(bytes,&parseError);
     if(bytes.isEmpty()||parseError.error!=QJsonParseError::NoError||!document.isObject()) {

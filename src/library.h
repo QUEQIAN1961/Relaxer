@@ -97,6 +97,7 @@ class Library : public QObject {
     void statsChanged();
 
   private:
+    bool artworkMetadataMatches(const ArtworkResult &result) const;
     friend class LibraryDiagnostics;
     mutable LyricsSaveMetrics m_lyricsSaveMetrics;
     QString m_root, m_connection;

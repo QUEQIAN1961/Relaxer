@@ -8,7 +8,54 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <io.h>
+#include <fcntl.h>
+#elif defined(Q_OS_UNIX)
+#include <sys/file.h>
+#include <sys/stat.h>
+#endif
 namespace relaxer {
+ArtworkSourceGuard::ArtworkSourceGuard(const QString &path) {
+#ifdef Q_OS_WIN
+    const auto handle=CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()),GENERIC_READ,
+        FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_SEQUENTIAL_SCAN,nullptr);
+    if(handle==INVALID_HANDLE_VALUE)return;
+    BY_HANDLE_FILE_INFORMATION info{};
+    if(!GetFileInformationByHandle(handle,&info)||(info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)) {CloseHandle(handle);return;}
+    const auto fd=_open_osfhandle(reinterpret_cast<intptr_t>(handle),_O_RDONLY|_O_BINARY);
+    if(fd==-1){CloseHandle(handle);return;}
+    if(!file.open(fd,QIODevice::ReadOnly,QFileDevice::AutoCloseHandle)){_close(fd);return;}
+    identity=QByteArray::number(info.dwVolumeSerialNumber)+":"+QByteArray::number(info.nFileIndexHigh)+":"+QByteArray::number(info.nFileIndexLow);
+#elif defined(Q_OS_UNIX)
+    file.setFileName(path);
+    if(!file.open(QIODevice::ReadOnly))return;
+    struct stat info{};
+    // Advisory on Unix: non-cooperating writers are additionally detected by
+    // digest/metadata checks, but cannot be excluded as Windows sharing does.
+    if(flock(file.handle(),LOCK_SH|LOCK_NB)!=0||fstat(file.handle(),&info)!=0||!S_ISREG(info.st_mode)){file.close();return;}
+    identity=QByteArray::number(qulonglong(info.st_dev))+":"+QByteArray::number(qulonglong(info.st_ino));
+#else
+    Q_UNUSED(path); // No integrity guard available: fail closed.
+#endif
+}
+QByteArray ArtworkSourceGuard::sha256(std::atomic_bool *cancel) {
+    if(!isOpen()||!file.seek(0))return {};
+    const auto size=file.size();if(size<0)return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);QByteArray chunk(256*1024,Qt::Uninitialized);qint64 total=0;
+    while(total<size){
+        if(cancel&&cancel->load())return {};
+        const auto n=file.read(chunk.data(),qMin(qint64(chunk.size()),size-total));
+        if(n<=0)return {};
+        hash.addData(QByteArrayView(chunk.constData(),n));total+=n;
+    }
+    if((cancel&&cancel->load())||file.error()!=QFileDevice::NoError||file.size()!=size||!file.atEnd())return {};
+    return hash.result();
+}
 ArtworkFileVersion artworkFileVersion(const QString &path) {
     ArtworkFileVersion v;const QFileInfo f(path);v.path=f.absoluteFilePath();
     if(f.isFile()) {v.canonical=f.canonicalFilePath();v.size=f.size();v.modified=f.lastModified();

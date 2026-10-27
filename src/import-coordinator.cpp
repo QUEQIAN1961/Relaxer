@@ -225,7 +225,8 @@ bool ImportCoordinator::repairLegacyArtwork(bool retryFailed){
         if(!plan.track.id)return; // Duplicate or unexpected result cannot enlarge the frozen set.
         ++summary.processed;
         if(result.hash!=plan.track.hash||result.trackFile!=plan.track.file||result.previousCover!=plan.track.cover||
-           !(result.sourceVersion==plan.source)||!(result.previousVersion==plan.cover)||!d->library->artworkSnapshotMatches(result)) {
+           !(result.sourceVersion==plan.source)||!(result.previousVersion==plan.cover)||
+           (result.outcome!=ArtworkOutcome::Recovered&&!d->library->artworkSnapshotMatches(result))) {
             ++summary.stale;return;
         }
         d->attempted.insert(plan.identity);
@@ -233,6 +234,8 @@ bool ImportCoordinator::repairLegacyArtwork(bool retryFailed){
         bool changed=false,transient=false;
         switch(result.outcome) {
         case ArtworkOutcome::Recovered: {
+            // applyArtworkRepair validates and holds the strong source guard;
+            // avoid hashing the same source again in an unlocked preflight.
             {QSignalBlocker batch(d->library);changed=d->library->applyArtworkRepair(result);}
             if(changed)++summary.recovered;
             else {++summary.failed;transient=true;diagnostic(d->library->lastError());}
