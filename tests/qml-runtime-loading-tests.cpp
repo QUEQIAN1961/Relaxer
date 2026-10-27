@@ -39,6 +39,16 @@ class QmlRuntimeLoadingTests : public QObject {
         QVERIFY(runtime.error().contains("Optional QML module"));
         QVERIFY(QDir(dir.path()).entryList(QDir::Files).isEmpty());
     }
+    void corruptModuleIsDiagnosable() {
+        QTemporaryDir dir;
+        QFile file(dir.filePath("invalid.dll"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write("not a shared library"), qint64(20));
+        file.close();
+        OptionalQmlRuntime runtime(file.fileName());
+        QVERIFY(!runtime.load());
+        QVERIFY(runtime.error().contains("Optional QML module"));
+    }
     void incompatibleInterfaceIsDiagnosable() {
         const auto deployedCore = QFileInfo(hostPath()).dir().filePath("Qt6Core.dll");
         OptionalQmlRuntime runtime(QFile::exists(deployedCore) ? deployedCore : QString::fromUtf8(RELAXER_QT_CORE_PATH));
@@ -90,6 +100,39 @@ class QmlRuntimeLoadingTests : public QObject {
         QCOMPARE(process.exitCode(), 11);
         QVERIFY(process.readAllStandardError().contains("Optional QML module"));
         QVERIFY(!QFile::exists(root));
+    }
+    void widgetsHostRunsWithoutOptionalModule() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const auto bin = dir.filePath("bin");
+        QVERIFY(QDir().mkpath(bin));
+        const auto app = bin + "/Relaxer.exe";
+        QVERIFY(QFile::copy(hostPath(), app));
+        const auto origin = QFileInfo(hostPath()).dir();
+        for (const auto &name : origin.entryList({"*.dll"}, QDir::Files)) {
+            if (name == "RelaxerQmlUi.dll" || name.startsWith("Qt6Quick") || name.startsWith("Qt6Qml")) continue;
+            QVERIFY(QFile::copy(origin.filePath(name), bin + "/" + name));
+        }
+        if (QFile::exists(origin.filePath("qt.conf"))) {
+            QVERIFY(QFile::copy(origin.filePath("qt.conf"), bin + "/qt.conf"));
+            QVERIFY(QDir().mkpath(bin + "/platforms"));
+            const auto platforms = QDir(origin.filePath("platforms"));
+            for (const auto &name : platforms.entryList({"*.dll"}, QDir::Files))
+                QVERIFY(QFile::copy(platforms.filePath(name), bin + "/platforms/" + name));
+        }
+        QVERIFY(!QFile::exists(bin + "/RelaxerQmlUi.dll"));
+        const auto report = dir.filePath("widgets-run.json");
+        QProcess process;
+        process.start(app, {"--ui=widgets", "--data", dir.filePath("data"),
+                            "--diagnostics", report, "--quit-after", "200"});
+        QVERIFY(process.waitForFinished(15000));
+        QCOMPARE(process.exitStatus(), QProcess::NormalExit);
+        QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
+        QFile result(report);
+        QVERIFY(result.open(QIODevice::ReadOnly));
+        const auto diagnostics = QJsonDocument::fromJson(result.readAll()).object();
+        QCOMPARE(diagnostics["mode"].toString(), QString("widgets"));
+        QVERIFY(diagnostics["saveSucceeded"].toBool());
     }
     void hostPeImportsExcludeOptionalQuick() {
         // GNU objdump's narrow Windows filename handling cannot open a

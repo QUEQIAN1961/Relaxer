@@ -1,5 +1,5 @@
 #include "ui-integration.h"
-#include "shortcuts.h"
+#include "shortcut-rules.h"
 #include <QApplication>
 #include <QQuickItem>
 #include <QAction>
@@ -28,7 +28,7 @@ void UiIntegration::attach(QQuickWindow *window){
         m_tray=std::make_unique<QSystemTrayIcon>(QIcon(":/icon.svg"));m_tray->setToolTip("Relaxer");m_tray->setContextMenu(m_menu.get());
         connect(m_tray.get(),&QSystemTrayIcon::activated,this,[this](auto reason){if(reason==QSystemTrayIcon::Trigger||reason==QSystemTrayIcon::DoubleClick){m_window->show();m_window->raise();m_window->requestActivate();}});
     }
-    QString error;apply(m_library->setting("shortcuts",PlayerShortcuts::defaults()).toObject(),&error);if(!error.isEmpty()){m_status=error;emit changed();}
+    QString error;apply(m_library->setting("shortcuts",ShortcutRules::defaults()).toObject(),&error);if(!error.isEmpty()){m_status=error;emit changed();}
 }
 bool UiIntegration::eventFilter(QObject *object,QEvent *event){
     if(object!=m_window || m_recording || (event->type()!=QEvent::ShortcutOverride && event->type()!=QEvent::KeyPress))
@@ -58,7 +58,7 @@ void UiIntegration::releaseGlobals(){
 bool UiIntegration::registerGlobals(const QJsonObject &config,QString *error){
     if(!config["globalEnabled"].toBool()||m_recording)return true;
 #ifdef Q_OS_WIN
-    const auto keys=PlayerShortcuts::actionKeys();for(int i=0;i<keys.size();++i){const auto sequence=QKeySequence::fromString(config["global"].toObject()[keys[i]].toString(),QKeySequence::PortableText);if(sequence.isEmpty())continue;const auto key=PlayerShortcuts::nativeKey(sequence);
+    const auto keys=ShortcutRules::actionKeys();for(int i=0;i<keys.size();++i){const auto sequence=QKeySequence::fromString(config["global"].toObject()[keys[i]].toString(),QKeySequence::PortableText);if(sequence.isEmpty())continue;const auto key=ShortcutRules::nativeKey(sequence);
         if(!RegisterHotKey(nullptr,m_base+i,key.modifiers|(i>=3?0:MOD_NOREPEAT),key.key)){releaseGlobals();if(error)*error="全局快捷键被其他应用占用："+sequence.toString(QKeySequence::NativeText);return false;}m_registered.append(m_base+i);}
     return true;
 #else
@@ -66,9 +66,9 @@ bool UiIntegration::registerGlobals(const QJsonObject &config,QString *error){
 #endif
 }
 bool UiIntegration::apply(const QJsonObject &config,QString *error){
-    if(!m_window||!PlayerShortcuts::validate(config,error))return false;
+    if(!m_window||!ShortcutRules::validate(config,error))return false;
     releaseGlobals();if(!registerGlobals(config,error)){QString ignored;registerGlobals(m_config,&ignored);return false;}
-    m_bindings.clear();const auto keys=PlayerShortcuts::actionKeys();
+    m_bindings.clear();const auto keys=ShortcutRules::actionKeys();
     for(int i=0;i<keys.size();++i){
         const auto sequence=QKeySequence::fromString(config["app"].toObject()[keys[i]].toString(),QKeySequence::PortableText);
         if(!sequence.isEmpty())m_bindings.append({sequence,i,false});

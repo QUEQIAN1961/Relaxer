@@ -1,4 +1,5 @@
 #pragma once
+#include "shortcut-rules.h"
 #include <QAbstractNativeEventFilter>
 #include <QJsonObject>
 #include <QKeySequenceEdit>
@@ -7,9 +8,6 @@
 
 namespace relaxer {
 enum class PlayerAction { Toggle, Previous, Next, VolumeUp, VolumeDown };
-struct NativeKey {
-    unsigned modifiers = 0, key = 0;
-};
 class GlobalKeyBackend {
   public:
     virtual ~GlobalKeyBackend() = default;

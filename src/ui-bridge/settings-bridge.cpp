@@ -1,6 +1,6 @@
 #include "settings-bridge.h"
 #include "appearance-image.h"
-#include "shortcuts.h"
+#include "shortcut-rules.h"
 #include <QColor>
 #include <QColorDialog>
 #include <QApplication>
@@ -79,7 +79,7 @@ QVariantMap SettingsBridge::values() const {
             {"lyricColor", m_store.get("lyricColor", QString()).toString()},
             {"reduceMotion", m_store.get("qml.reduceMotion", false).toBool()},
             {"songColumnWidths", m_store.get("songColumnWidths", QJsonObject()).toObject().toVariantMap()},
-            {"shortcuts", m_store.get("shortcuts", PlayerShortcuts::defaults()).toObject().toVariantMap()},
+            {"shortcuts", m_store.get("shortcuts", ShortcutRules::defaults()).toObject().toVariantMap()},
             {"uiFont", m_store.get("uiFont", QJsonObject()).toObject().toVariantMap()},
             {"windowBounds", QVariantMap{{"width", m_store.get("windowWidth", 1240).toInt()},
                                           {"height", m_store.get("windowHeight", 790).toInt()},
@@ -258,17 +258,17 @@ bool SettingsBridge::resetFont() {
     updateFont(); emit settingsChanged(); message("已恢复系统字体"); return true;
 }
 QVariantList SettingsBridge::shortcutActions() const {
-    QVariantList result; const auto keys = PlayerShortcuts::actionKeys(), names = PlayerShortcuts::actionNames();
+    QVariantList result; const auto keys = ShortcutRules::actionKeys(), names = ShortcutRules::actionNames();
     for (int i = 0; i < keys.size(); ++i) result.append(QVariantMap{{"key", keys[i]}, {"name", names[i]}});
     return result;
 }
 QString SettingsBridge::shortcutText(int key, int modifiers) const {
     return QKeySequence(QKeyCombination(Qt::KeyboardModifiers(modifiers), Qt::Key(key))).toString(QKeySequence::PortableText);
 }
-QVariantMap SettingsBridge::defaultShortcuts() const { return PlayerShortcuts::defaults().toVariantMap(); }
+QVariantMap SettingsBridge::defaultShortcuts() const { return ShortcutRules::defaults().toVariantMap(); }
 bool SettingsBridge::saveShortcuts(const QVariantMap &configuration) {
     const auto candidate = QJsonObject::fromVariantMap(configuration); QString error;
-    if (!candidate["globalEnabled"].isBool() || !PlayerShortcuts::validate(candidate, &error)) { message(error.isEmpty() ? "快捷键配置无效" : error); return false; }
+    if (!candidate["globalEnabled"].isBool() || !ShortcutRules::validate(candidate, &error)) { message(error.isEmpty() ? "快捷键配置无效" : error); return false; }
     if (!m_store.set("shortcuts", candidate)) { message(m_library->lastError()); return false; }
     emit settingsChanged(); message("快捷键已保存"); return true;
 }
