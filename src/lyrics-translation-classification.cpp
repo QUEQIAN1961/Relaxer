@@ -122,8 +122,11 @@ TranslationClassification LyricsTranslationClassification::decide(const Translat
                       QStringLiteral("没有歌词，或本地歌词文件不存在"),
                       translateJudged ? QStringLiteral("需要翻译") : QString());
     if (!input.fileReadable)
+        // Keep the long-standing Widgets/QML tooltip copy for an unreadable
+        // lyrics file; TranslationStatus::Unreadable already carries the
+        // machine-readable distinction for both frontends.
         return result(TranslationStatus::Unreadable, translateJudged, false, false,
-                      QStringLiteral("歌词文件存在但无法完整读取"),
+                      QStringLiteral("歌词无法完整读取"),
                       translateJudged ? QStringLiteral("需要翻译") : QString());
 
     const bool translated = input.verifiedBilingual || input.content.need == Need::Translated;

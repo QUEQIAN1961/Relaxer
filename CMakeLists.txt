@@ -608,6 +608,10 @@ if(RELAXER_ENABLE_QML)
   target_link_libraries(relaxer_artwork_recovery_tests PRIVATE relaxer_qml Qt6::Test)
   add_dependencies(relaxer_artwork_recovery_tests relaxer_import_process_fixture)
   relaxer_add_qt_test(relaxer_artwork_recovery relaxer_artwork_recovery_tests)
+  # This suite links relaxer_qml and drives QmlShell, so it needs the same
+  # Declarative search path and split-prefix DLL path as every other QML suite.
+  # Without it CTest starts the process with STATUS_DLL_NOT_FOUND (0xC0000135).
+  relaxer_qml_test_environment(relaxer_artwork_recovery)
   add_executable(relaxer_legacy_ui_hardening_tests tests/legacy-ui-hardening-tests.cpp)
   target_link_libraries(relaxer_legacy_ui_hardening_tests PRIVATE relaxer_qml Qt6::Test)
   relaxer_add_qt_test(relaxer_legacy_ui_hardening relaxer_legacy_ui_hardening_tests)

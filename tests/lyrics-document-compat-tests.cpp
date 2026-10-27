@@ -1,5 +1,6 @@
 #include "library.h"
 #include "lyrics-document-reader.h"
+#include "lyrics-replacement-policy.h"
 
 #include <QFile>
 #include <QTemporaryDir>
@@ -46,9 +47,25 @@ class LyricsDocumentCompatibilityTests final : public QObject {
         QCOMPARE(document.lyrics.lines.size(), 2);
         QVERIFY(!library.isInstrumental(id));
 
+        // D2-01 turned this compatible entry point into a guarded save: an
+        // unattended call must refuse to overwrite different existing lyrics and
+        // must report why. Overwriting requires an explicit confirmation, which
+        // the shared service turns into the same checked write used below (the
+        // service itself is exercised by relaxer_lyrics_replacement_integration).
         const auto instrumentalSource = dir.filePath("instrumental.txt");
-        QVERIFY(writeFile(instrumentalSource, QString("纯音乐，请欣赏").toUtf8()));
-        QVERIFY(library.updateLyrics(id, instrumentalSource));
+        const QByteArray candidate = QStringLiteral("纯音乐，请欣赏").toUtf8();
+        QVERIFY(writeFile(instrumentalSource, candidate));
+        QVERIFY(!library.updateLyrics(id, instrumentalSource));
+        QVERIFY(!library.lastError().isEmpty());
+        QCOMPARE(library.track(id).lyrics, storedTrack.lyrics);
+        QCOMPARE(LyricsDocumentReader::readDocument(storedPath).file.bytes, original);
+
+        const auto policy = LyricsReplacementPolicy::analyze(original, candidate);
+        QVERIFY(policy.valid);
+        QVERIFY(policy.confirmationRequired);
+        const auto snapshot = library.lyricsSaveSnapshot(id);
+        QVERIFY(snapshot.valid);
+        QVERIFY(library.saveLyricsChecked(id, policy.content, snapshot, true));
         const auto instrumental = LyricsDocumentReader::readDocument(library.absolute(library.track(id).lyrics));
         QVERIFY(instrumental.lyrics.instrumental);
         QVERIFY(library.isInstrumental(id));
