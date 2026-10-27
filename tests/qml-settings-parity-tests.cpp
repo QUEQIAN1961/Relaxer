@@ -1,6 +1,6 @@
 #include "ui-bridge/settings-bridge.h"
 #include "storage/appearance-store.h"
-#include "shortcuts.h"
+#include "shortcut-rules.h"
 #include "system-theme-fixture.h"
 #include <QApplication>
 #include <QTemporaryDir>
@@ -258,13 +258,13 @@ private slots:
     void shortcutConfigurationUsesOriginalValidatorAndPortableText() {
         Fixture f; QVERIFY(f.ok);
         auto candidate = f.bridge->defaultShortcuts();
-        QCOMPARE(QJsonObject::fromVariantMap(candidate), PlayerShortcuts::defaults());
+        QCOMPARE(QJsonObject::fromVariantMap(candidate), ShortcutRules::defaults());
         QVERIFY(f.bridge->saveShortcuts(candidate));
-        QCOMPARE(f.library.setting("shortcuts").toObject(), PlayerShortcuts::defaults());
+        QCOMPARE(f.library.setting("shortcuts").toObject(), ShortcutRules::defaults());
         QCOMPARE(f.bridge->shortcutText(Qt::Key_Right, Qt::ControlModifier), QString("Ctrl+Right"));
         auto keys = candidate.value("app").toMap(); keys["next"] = "Ctrl+O"; candidate["app"] = keys;
         QVERIFY(!f.bridge->saveShortcuts(candidate));
-        QCOMPARE(f.library.setting("shortcuts").toObject(), PlayerShortcuts::defaults());
+        QCOMPARE(f.library.setting("shortcuts").toObject(), ShortcutRules::defaults());
         candidate = f.bridge->defaultShortcuts(); keys = candidate.value("app").toMap(); keys["next"] = "Space"; candidate["app"] = keys;
         QVERIFY(!f.bridge->saveShortcuts(candidate));
         QCOMPARE(f.bridge->shortcutActions().size(), 5);

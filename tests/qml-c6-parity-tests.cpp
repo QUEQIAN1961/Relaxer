@@ -1,5 +1,5 @@
 #include "c4c5-ui-fixture.h"
-#include "shortcuts.h"
+#include "shortcut-rules.h"
 #include "ui-bridge/ui-integration.h"
 #include <QAction>
 #include <QApplication>
@@ -83,8 +83,8 @@ private slots:
         QTest::keyClick(window,Qt::Key_Up,Qt::ControlModifier);QCOMPARE(fixture.shell->playbackBridge()->volume(),45);
         window->contentItem()->forceActiveFocus();
 #ifdef Q_OS_WIN
-        auto config=PlayerShortcuts::defaults();auto global=config["global"].toObject();
-        for(const auto &key:PlayerShortcuts::actionKeys())global[key]="";
+        auto config=ShortcutRules::defaults();auto global=config["global"].toObject();
+        for(const auto &key:ShortcutRules::actionKeys())global[key]="";
         global["volumeUp"]="Ctrl+Alt+Shift+F24";config["global"]=global;config["globalEnabled"]=true;
         QVERIFY(integration->saveShortcuts(config.toVariantMap()));
         {Reservation busy(VK_F24);QVERIFY(!busy.registered);}
