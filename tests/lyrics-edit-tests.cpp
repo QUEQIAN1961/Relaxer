@@ -176,6 +176,20 @@ private slots:
         while(LyricsEditService::stepInstrumental(l,b,true)){}
         QCOMPARE(b.result()["succeeded"].toInt(),1);QCOMPARE(b.result()["failed"].toInt(),3);QCOMPARE(read(l,ids[1]),external);QVERIFY(!l.isInstrumental(ids[2]));QVERIFY(l.track(ids[2]).lyrics.isEmpty());QVERIFY(l.track(extra.id).lyrics.isEmpty());
     }
+    void instrumentalBatchFailureDoesNotAbortRemainingTargets(){
+        QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());
+        const auto denied=seed(l,"u06-denied"),risky=seed(l,"u06-risk"),done=seed(l,"u06-already");
+        QVERIFY(l.saveLyricsPreservingText(risky.id,bilingual()));QVERIFY(l.markInstrumental(done.id));
+        QSqlQuery q(import_fixture::database(l));
+        QVERIFY(q.exec(QString("CREATE TRIGGER deny_first BEFORE UPDATE OF lyrics ON tracks WHEN NEW.id=%1 BEGIN SELECT RAISE(ABORT,'controlled first target failure'); END").arg(denied.id)));
+        auto batch=LyricsEditService::prepareInstrumental(l,{denied.id,risky.id,done.id});
+        QCOMPARE(batch.overview()["total"].toInt(),3);QCOMPARE(batch.overview()["risk"].toInt(),1);QCOMPARE(batch.overview()["already"].toInt(),1);
+        while(LyricsEditService::stepInstrumental(l,batch,true)){}
+        QCOMPARE(batch.result()["succeeded"].toInt(),1);QCOMPARE(batch.result()["failed"].toInt(),1);QCOMPARE(batch.result()["skipped"].toInt(),1);QCOMPARE(batch.result()["pending"].toInt(),0);
+        QVERIFY(!l.isInstrumental(denied.id));QVERIFY(l.track(denied.id).lyrics.isEmpty());
+        QVERIFY(l.isInstrumental(risky.id));QCOMPARE(read(l,risky.id),QStringLiteral("纯音乐，请欣赏").toUtf8());
+        QVERIFY(l.isInstrumental(done.id));
+    }
     void offsetIdentityDestinationAndBatchTeardown(){
         QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());auto a=seed(l,"identity"),b=seed(l,"not-started");QVERIFY(l.saveLyricsPreservingText(a.id,mono()));
         auto plan=LyricsEditService::prepareOffset(l,l.lyricsSaveSnapshot(a.id),100);QVERIFY(plan.valid());QSqlQuery q(import_fixture::database(l));
@@ -237,7 +251,20 @@ private slots:
         QVERIFY(click(w,visual(root,"bulkInstrumental")));auto *dialog=w->findChild<QObject *>("batchInstrumentalDialog");QVERIFY(dialog);QTRY_VERIFY(dialog->property("opened").toBool());QTRY_VERIFY(w->property("popupOpen").toBool());QVERIFY(shot(shell,"ui-batch-review"));
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!dialog->property("visible").toBool());QVERIFY(w->property("bulkActive").toBool());QVERIFY(l.track(a.id).lyrics.isEmpty());QTRY_VERIFY(!w->property("popupOpen").toBool());
         QVERIFY(click(w,visual(root,"bulkInstrumental")));QTRY_VERIFY(dialog->property("opened").toBool());if(authorize)QVERIFY(click(w,visual(root,"batchInstrumentalRiskConsent")));
-        QVERIFY(click(w,visual(root,"batchInstrumentalCommit")));QTRY_VERIFY(!shell.lyricsSearchBridge()->batchRunning());
+        // A synthetic click on a control inside a freshly re-opened modal Dialog is
+        // occasionally swallowed before the popup accepts pointer input: the button
+        // reports visible+enabled and QTest::mouseClick returns, yet the button never
+        // emits clicked and the batch stays prepared with the database untouched.
+        // The batch itself finishes in a few milliseconds, so neither "still running"
+        // nor a single click can be used as the synchronisation point. Drive the
+        // interaction until every entry has been consumed, yielding to the event loop
+        // between attempts.
+        for(int commitAttempt=0;commitAttempt<20&&shell.lyricsSearchBridge()->batchResult()["pending"].toInt()>0;++commitAttempt){
+            if(!dialog->property("visible").toBool())break;
+            click(w,visual(root,"batchInstrumentalCommit"));
+            QTest::qWait(50);
+        }
+        QTRY_VERIFY_WITH_TIMEOUT(shell.lyricsSearchBridge()->batchResult()["pending"].toInt()==0,5000);
         QCOMPARE(l.isInstrumental(a.id),!deny);QVERIFY(l.isInstrumental(c.id));QCOMPARE(l.isInstrumental(b.id),authorize);if(!authorize)QCOMPARE(read(l,b.id),bilingual());QVERIFY(shell.feedbackBridge()->visible());
         QCOMPARE(shell.lyricsSearchBridge()->batchResult()["failed"].toInt(),deny?1:0);QCOMPARE(shell.feedbackBridge()->current()["category"].toString(),deny?QString("Warning"):QString("Information"));
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());QVERIFY(click(w,visual(root,"playbackExpandButton")));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
