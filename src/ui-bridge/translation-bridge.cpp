@@ -9,12 +9,16 @@ TranslationBridge::TranslationBridge(Library *library,PlaybackFacade *facade,Tra
         const bool transitioned = !m_observedStates.contains(value.taskId) || m_observedStates.value(value.taskId) != value.state;
         m_observedStates[value.taskId] = value.state;
         if (transitioned && value.trackId == targetId()) {
+            const auto current=m_service->summary(value.taskId);
+            const bool recovered=value.generation==current.generation&&value.state==current.state&&
+                (value.state==TranslationState::Running||value.state==TranslationState::CompletedPendingSave||value.state==TranslationState::Saved);
+            if(recovered)m_error.clear();
             const auto category = value.state == TranslationState::Failed ? "Error" :
                 value.state == TranslationState::Invalidated ? "Warning" :
                 value.state == TranslationState::Cancelled ? "Cancellation" :
                 value.state == TranslationState::NeedsAttention ? "ConfirmationRequired" : "";
             if (*category) emit feedback(category, QString::number(value.taskId), QString::number(value.trackId), value.status, value.details);
-            if (value.state == TranslationState::Saved || value.state == TranslationState::Running) emit feedbackCleared();
+            if (recovered) emit feedbackCleared();
         }
         refresh();
     });

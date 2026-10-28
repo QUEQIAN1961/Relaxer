@@ -1547,6 +1547,8 @@ void AiLyricsTranslationTests::replacementFailureKeepsPaidPreviewAndCanRetry() {
     clickConsentAndStart(dialog);
     auto *save=dialog.findChild<QPushButton *>("lyricsSaveTranslation");QTRY_VERIFY(save->isEnabled());
     auto *apply=dialog.findChild<QPushButton *>("lyricsApply");QVERIFY(apply->isEnabled());
+    auto *preview=dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview");
+    const auto paidPreview=preview->toPlainText();QVERIFY(!paidPreview.isEmpty());
     const auto path=library.absolute(library.track(track.id).lyrics);
     std::unique_ptr<void,decltype(&CloseHandle)> blocker(CreateFileW(path.toStdWString().c_str(),GENERIC_READ,
         FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr),&CloseHandle);
@@ -1555,16 +1557,18 @@ void AiLyricsTranslationTests::replacementFailureKeepsPaidPreviewAndCanRetry() {
     auto answer=[&]{QTimer::singleShot(0,&dialog,[&]{
         for(auto *widget:QApplication::topLevelWidgets())if(auto *box=qobject_cast<QMessageBox *>(widget))
             if(box->objectName()=="lyricsReplaceConfirm"){
-                sawWarning=box->informativeText().contains(QStringLiteral("未保存"));box->button(QMessageBox::Yes)->click();
+                sawWarning=(box->text()+box->informativeText()).contains(QStringLiteral("未保存"));box->button(QMessageBox::Yes)->click();
             }
     });};
     answer();apply->click();QVERIFY(sawWarning);
     QVERIFY(dialog.findChild<QLabel *>("lyricsStatus")->text().startsWith(QStringLiteral("未保存：")));
     QVERIFY(save->isEnabled());QVERIFY(apply->isEnabled());
+    QCOMPARE(preview->toPlainText(),paidPreview);
     QByteArray bytes;QVERIFY(readFile(path,&bytes));QCOMPARE(bytes,original);
     blocker.reset();
     answer();apply->click();
-    QVERIFY(!save->isEnabled());QVERIFY(readFile(path,&bytes));QCOMPARE(bytes,replacement);
+    QTRY_VERIFY(!save->isEnabled());QVERIFY(readFile(path,&bytes));QCOMPARE(bytes,replacement);
+    QVERIFY(!dialog.findChild<QLabel *>("lyricsStatus")->text().startsWith(QStringLiteral("未保存：")));
     QCOMPARE(server.requestCount(),1);
 #endif
 }

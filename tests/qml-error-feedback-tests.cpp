@@ -302,6 +302,21 @@ private slots:
         QCOMPARE(f->current()["source"].toString(),QString("Lyrics"));QCOMPARE(saved.size(),0);QVERIFY(b->draftText().contains("Another draft"));
         QCOMPARE(LyricsDocumentReader::readFile(lib.absolute(lib.track(id).lyrics)).bytes,external);
     }
+    void successfulTranslationClearsStaleCommandError(){
+        QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());const auto id=seed(lib,"stale-command");QVERIFY(id);
+        const QByteArray source="[00:01.00]Hello world\n[00:02.00]Walk home\n";QVERIFY(lib.saveLyrics(id,source));
+        auto browser=std::make_unique<Browser>();auto *backend=browser.get();QmlShell shell(&lib,nullptr,true,nullptr,std::move(browser));QVERIFY(shell.load());
+        auto *b=shell.translationBridge();QVERIFY(b->setTargetTrack(QString::number(id)));
+        const auto key=b->prepareBrowser("bing","en");QVERIFY(!key.isEmpty());QVERIFY(b->start(key));QTRY_VERIFY(backend->token);
+        // A repeated/expired consent command is rejected while the already
+        // authorised request continues. Its error must not mask later success.
+        QVERIFY(!b->start(key));QVERIFY(b->status().contains(QStringLiteral("授权身份已失效")));
+        const auto token=backend->token;backend->answer(QStringLiteral("你好世界"));QTRY_VERIFY(backend->token!=token);
+        backend->answer(QStringLiteral("走回家"));QTRY_COMPARE(b->state(),QString("CompletedPendingSave"));
+        QTRY_VERIFY(!b->status().contains(QStringLiteral("授权身份已失效")));
+        QVERIFY(!b->previewText().isEmpty());QCOMPARE(LyricsDocumentReader::readFile(lib.absolute(lib.track(id).lyrics)).bytes,source);
+        QVERIFY(b->save());QTRY_COMPARE(b->state(),QString("Saved"));QVERIFY(shell.shutdown());
+    }
     void translationFailureAndPendingSaveProtection(){
         QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());const auto id=seed(lib,"translation");QVERIFY(id);
         const QByteArray source="[00:01.00]Hello world\n[00:02.00]Walk home\n";QVERIFY(lib.saveLyrics(id,source));

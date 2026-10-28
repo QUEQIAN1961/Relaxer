@@ -117,8 +117,20 @@ private slots:
             auto *table=visual(root,"libraryListContainer"); QVERIFY(table);
             QTest::mouseClick(w,Qt::RightButton,Qt::NoModifier,table->mapToScene(QPointF(180,65)).toPoint()); QTest::qWait(80);
             auto *add=textButton(root,"加入歌单");QVERIFY(add);QVERIFY(click(w,add));
+            auto *submenu=qvariant_cast<QObject *>(add->property("subMenu"));QVERIFY(submenu);
+            QTRY_VERIFY(submenu->property("opened").toBool());
             QTRY_VERIFY(textButton(root,"创建新歌单并加入…"));
-            QVERIFY(click(w,textButton(root,"创建新歌单并加入…")));
+            auto *create=textButton(root,"创建新歌单并加入…");QSignalSpy triggered(create,SIGNAL(triggered()));
+            QVERIFY(triggered.isValid());
+            // Like U06, synthetic input can return without emitting the action.
+            // Retry only while the submenu is open and no trigger was delivered;
+            // once delivered, never submit the create action twice.
+            for(int attempt=0;attempt<20&&triggered.isEmpty()&&submenu->property("visible").toBool();++attempt){
+                QVERIFY(click(w,create));
+                if(triggered.isEmpty())QTest::qWait(50);
+                qInfo()<<"playlist submenu input attempt"<<attempt+1<<"triggered"<<triggered.count()<<"open"<<submenu->property("visible").toBool();
+            }
+            QCOMPARE(triggered.count(),1);
         }
         auto *dialog=w->findChild<QObject *>(bulk?"bulkNewPlaylistDialog":"trackNewPlaylistDialog"); QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("opened").toBool());

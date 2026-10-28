@@ -110,6 +110,25 @@ private slots:
         f.net.urls.clear();f.sources({"lrclib"});f.net.respond=[](Reply *r){r->answer(200,"[]");};QVERIFY(f.bridge->search(true));QTRY_VERIFY(!f.bridge->busy());
         QCOMPARE(QUrlQuery(f.net.urls.first()).queryItemValue("track_name"),f.track.title);
     }
+    void explicitRetryKeepsCompatibleCandidatesAfterBridgeReset_data(){
+        QTest::addColumn<bool>("networkFailure");QTest::newRow("empty")<<false;QTest::newRow("failure")<<true;
+    }
+    void explicitRetryKeepsCompatibleCandidatesAfterBridgeReset(){
+        QFETCH(bool,networkFailure);
+        Fixture f;QVERIFY(f.ok);f.sources({"lrclib"});
+        f.net.respond=[&](Reply *r){r->answer(200,json(QJsonArray{record(f.track,"Retained preview")}));};
+        QVERIFY(f.bridge->searchDetailed("Temporary","Artist","Album","",true));QTRY_VERIFY(!f.bridge->busy());
+        QCOMPARE(f.bridge->rowCount(),1);const auto preview=f.bridge->previewText();QVERIFY(!preview.isEmpty());
+        f.net.respond=[&](Reply *r){if(networkFailure)r->answer(503,"{}");else r->answer(r->url().path().endsWith("/get")?404:200,r->url().path().endsWith("/get")?"{}":"[]");};
+        QSignalSpy feedback(f.bridge.get(),&LyricsSearchBridge::searchFeedback);
+        const auto sent=f.net.urls.size();
+        QVERIFY(f.bridge->searchDetailed("Temporary","Artist","Album","",true));QTRY_VERIFY(!f.bridge->busy());
+        QVERIFY(f.net.urls.size()>sent);QCOMPARE(f.bridge->rowCount(),1);QCOMPARE(f.bridge->previewText(),preview);
+        QTRY_COMPARE(feedback.size(),1);QCOMPARE(feedback[0][0].toString(),networkFailure?QString("Warning"):QString("Information"));
+        QVERIFY(f.lib.track(f.track.id).lyrics.isEmpty());QVERIFY(!f.lib.lookupCache(f.track.id).noResult);
+        QVERIFY(f.bridge->searchDetailed("Changed","Artist","Album","",true));QTRY_VERIFY(!f.bridge->busy());
+        QCOMPARE(f.bridge->rowCount(),0);
+    }
     void cacheIdentityAndUnknownOrigin(){
         Fixture f;QVERIFY(f.ok);auto a=record(f.track);a["source"]="Lyrics.ovh";auto unknown=record(f.track,"Unknown");
         QVERIFY(f.lib.saveLookupCache(f.track.id,{a,unknown},false));f.service->loadCached({f.track.id});

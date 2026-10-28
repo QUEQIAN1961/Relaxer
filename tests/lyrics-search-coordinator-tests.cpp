@@ -461,6 +461,41 @@ class LyricsSearchTests final : public QObject {
         QCOMPARE(c.summary().saved, 0);
         QVERIFY(l.lookupCache(t.id).noResult);
     }
+    void explicitRefreshRetainsOnlyCompatibleCandidates_data() {
+        QTest::addColumn<QString>("change");QTest::addColumn<bool>("networkFailure");
+        for(const auto &change:QStringList{"same","title","artist","album","duration","fragment","timed","source","hash"})
+            for(bool failure:{false,true})QTest::newRow(qPrintable(change+(failure?"-failure":"-empty")))<<change<<failure;
+    }
+    void explicitRefreshRetainsOnlyCompatibleCandidates() {
+        QFETCH(QString,change);QFETCH(bool,networkFailure);
+        QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());const auto t=seed(l);
+        const auto old=record(t,"Old candidate","Kept for explicit review");
+        QVERIFY(l.saveLookupCache(t.id,{old},false));
+        ControlledNetwork net;net.responder=[&](ControlledReply *r){
+            if(networkFailure)r->respond(503,"{}");else emptyResponse(r);
+        };
+        LyricsSearchCoordinator c(&l,nullptr,QUrl("http://primary.test/api"),{},&net,providers());
+        c.loadCached({t.id});QCOMPARE(c.candidates(t.id).records.size(),1);
+        const auto before=c.candidates(t.id);auto request=input(t,true);
+        if(change=="title")request.match.title="Changed";
+        if(change=="artist")request.match.artist="Changed";
+        if(change=="album")request.match.album="Changed";
+        if(change=="duration")request.match.duration+=1000;
+        if(change=="fragment")request.fragment="Changed";
+        if(change=="timed")request.requireTimed=true;
+        if(change=="source")request.enabledSources=QStringList{"Primary"};
+        if(change=="hash")request.original.hash="Changed";
+        QSignalSpy done(&c,&LyricsSearchCoordinator::finished),terminal(&c,&LyricsSearchCoordinator::taskFinished);
+        c.start({request},{3000,500,1,0});QTRY_COMPARE(done.size(),1);
+        QVERIFY(c.candidates(t.id).revision>before.revision);QVERIFY(l.track(t.id).lyrics.isEmpty());
+        if(change=="same"){
+            QCOMPARE(c.candidates(t.id).records,before.records);QVERIFY(!net.urls.isEmpty());
+            QCOMPARE(c.summary().candidateTracks,1);
+            QVERIFY(!l.lookupCache(t.id).noResult);QCOMPARE(l.lookupCache(t.id).records.size(),1);
+            QTRY_COMPARE(terminal.size(),1);
+            QCOMPARE(qvariant_cast<LyricsSearchEvent>(terminal.first().first()).state,LyricsSearchState::AwaitingChoice);
+        }else QVERIFY(c.candidates(t.id).records.isEmpty());
+    }
     void acceptanceGuards_data() {
         QTest::addColumn<QString>("scenario");
         for (const auto &s : QStringList{"trusted", "manual", "artist", "live", "remix", "cover",

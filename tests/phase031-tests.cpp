@@ -321,8 +321,8 @@ private slots:
         LyricsLookup dialog(&library, {track.id}, nullptr, server.endpoint());
         dialog.show();
         relaxerClickSearch(&dialog);
-        QTRY_VERIFY_WITH_TIMEOUT(server.requests > 0, 3000);
-        QTRY_VERIFY_WITH_TIMEOUT(statusAt(dialog, 0).contains("数据库无结果"), 8000);
+        QVERIFY(relaxerWaitForNoResult(&dialog,track.id,0));
+        QVERIFY(server.requests > 0);QVERIFY(library.lookupCache(track.id).noResult);
     }
     void parenthesisQueryIsSentBeforeSlowRankingReturns() {
         QTemporaryDir dir;

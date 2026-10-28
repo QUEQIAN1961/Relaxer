@@ -68,7 +68,11 @@ class C2C3Tests : public QObject {
         // disappearance, after the previous player has released its handle.
         QVERIFY(QFile::remove(library.absolute("Music/fixture.wav")));
         QmlShell shell(&library,nullptr,true); QVERIFY(shell.load()); auto *bridge=shell.playbackBridge();
-        shell.libraryBridge()->playAll(); QTRY_VERIFY(!bridge->error().isEmpty()); QTRY_VERIFY(!bridge->canPlay());
+        shell.libraryBridge()->playAll(); QTRY_VERIFY(bridge->error().contains(QStringLiteral("缺失")));
+        QTRY_VERIFY(!bridge->playing());QVERIFY(bridge->canPlay());QVERIFY(bridge->hasTrack());
+        QCOMPARE(shell.facade()->queue().items.size(),3);
+        // canPlay permits an explicit retry after repairing the missing file.
+        QVERIFY(audioFixture(library));bridge->play();QTRY_VERIFY(bridge->playing());QCOMPARE(bridge->error(),QString());
         for(auto id:ids) bridge->removeFromQueue(QString::number(id));
         QTRY_COMPARE(shell.queueModel()->count(),0); QTRY_VERIFY(!bridge->hasTrack());
         QCOMPARE(library.trackCount(),qint64(3)); QVERIFY(shell.shutdown()); QVERIFY(shell.warnings().isEmpty());

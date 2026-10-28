@@ -356,7 +356,28 @@ quint64 LyricsSearchCoordinator::start(const QVector<LyricsSearchRequest> &reque
             input.match = searchTrack(input.original);
         if (!input.saveSnapshot.id)
             input.saveSnapshot = m_library->lyricsSaveSnapshot(input.original.id);
-        m_candidates[input.original.id] = {input.original.id,input.original.hash,++m_candidateRevision,{},parameterIdentity(input,m_sources)};
+        const auto context=parameterIdentity(input,m_sources);
+        const auto previous=m_candidates.value(input.original.id);
+        // A failed explicit refresh may still offer compatible old candidates
+        // for manual review. Changed parameters/sources must never revive them.
+        auto retained=previous.trackHash==input.original.hash&&previous.parameterIdentity==context
+            ?previous.records:QJsonArray{};
+        // Frontends invalidate their selection when starting a query. A modern
+        // on-disk candidate can still be reviewed if its full query identity
+        // matches; unknown legacy contexts are never inferred here.
+        if(retained.isEmpty()){
+            const auto cache=m_library->lookupCache(input.original.id);
+            if(cache.fresh&&!cache.noResult)for(const auto &value:cache.records){
+                auto record=value.toObject();
+                if(record.take("lookupContext").toString()!=context)continue;
+                record["cacheOrigin"]=true;record["legacyCache"]=false;retained.append(record);
+            }
+        }
+        m_candidates[input.original.id] = {input.original.id,input.original.hash,++m_candidateRevision,retained,context};
+        if(!retained.isEmpty()){
+            const auto snapshot=m_candidates.value(input.original.id);const auto generation=m_generation;
+            QTimer::singleShot(0,this,[this,snapshot,generation]{emit candidatesChanged(snapshot,generation);});
+        }
         m_queue.append(std::move(input));
     }
     m_summary = {};
@@ -1243,6 +1264,7 @@ void LyricsSearchCoordinator::finishOnline(const JobPtr &j) {
     }
     const auto existing = m_candidates.value(j->original.id).records;
     if (!existing.isEmpty() && m_candidates.value(j->original.id).trackHash == j->original.hash) {
+        m_found.insert(j->original.id);
         finishJob(j, QString("需选择版本（%1 个） · 本次未获得新结果，保留上次候选").arg(existing.size()) +
                          (j->failures.isEmpty() ? QString() : " · " + j->failures.join("；")));
         return;

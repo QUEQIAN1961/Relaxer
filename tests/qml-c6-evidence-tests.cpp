@@ -417,7 +417,15 @@ private slots:
         wheel();QTRY_VERIFY(panel->property("manualScroll").toBool());QTest::qWait(80);QVERIFY(QMetaObject::invokeMethod(list,"cancelFlick"));
         list->setProperty("contentY",list->property("contentY").toDouble()+800);QTest::qWait(70);
         auto *stamp=visual(w->contentItem(),"lyricsPreviewTime");QVERIFY(stamp);QVERIFY(stamp->isVisible());
-        const auto fixedY=rect(stamp).center().y();QVERIFY(qAbs(fixedY-rect(panel).center().y())<1);
+        auto *guide=visual(w->contentItem(),"lyricsPreviewGuide");QVERIFY(guide);
+        // The viewport excludes the status/return toolbar above the lyrics.
+        QTRY_VERIFY(qAbs(rect(stamp).center().y()-rect(list).center().y())<1);
+        QVERIFY(qAbs(rect(guide).center().y()-rect(list).center().y())<1);
+        const auto oldHeight=list->height();w->resize(w->width()-80,w->height()-40);
+        QTRY_VERIFY(list->height()!=oldHeight);
+        QTRY_VERIFY(qAbs(rect(stamp).center().y()-rect(list).center().y())<1);
+        QVERIFY(qAbs(rect(guide).center().y()-rect(list).center().y())<1);
+        const auto fixedY=rect(stamp).center().y();
         const auto selected=panel->property("previewIndex").toInt();QVERIFY(selected>=0);const auto time=m->timestampAt(selected);
         record("fixed-preview-timestamp",{{"row",selected},{"ms",double(time)},{"label",stamp->property("text").toString()},{"fixedY",fixedY}});shot(w,"manual-scroll-timestamp");
         QVERIFY(QMetaObject::invokeMethod(stamp,"click"));QTRY_VERIFY(qAbs(p->position()-time)<250);QTRY_VERIFY(!panel->property("manualScroll").toBool());QTRY_VERIFY(!follow->property("running").toBool());

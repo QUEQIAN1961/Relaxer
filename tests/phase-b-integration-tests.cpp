@@ -227,10 +227,12 @@ class PhaseBIntegrationTests final : public QObject {
         while (source.releaseHeld()) {
         }
         QTRY_VERIFY(!search->candidates(ids[1]).records.isEmpty());
+        QCOMPARE(search->summary().generation, generation); // Local judgment refresh starts no search.
         search->stop();
         QCOMPARE(dialog.findChild<QPlainTextEdit *>("lyricsTranslationPreview")->toPlainText(), preview);
         QVERIFY(save->isEnabled());
-        QCOMPARE(search->summary().generation, generation);
+        QCOMPARE(search->summary().generation, generation + 1); // stop invalidates queued old callbacks.
+        QVERIFY(!search->summary().running);
         save->click();
         const auto bilingual = bytes(library.absolute(library.track(ids[1]).lyrics));
         QVERIFY(bilingual.contains("relaxer-bilingual"));

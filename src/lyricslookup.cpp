@@ -922,12 +922,18 @@ bool LyricsLookup::saveManual(const QByteArray &data,const QString &status,const
     if(identity==m_lastReplacementIdentity&&m_library->lyricsSnapshotMatches(m_lyricsSnapshots.value(t.id)))return false;
     ensureLyricsSnapshot(t.id);
     auto plan=LyricsReplacementService::prepare(*m_library,m_lyricsSnapshots.value(t.id),bytes,identity,m_translation);
-    if(!plan.decision.valid){m_status->setText(plan.decision.reason);return false;}
+    const auto reject=[&](const QString &reason){
+        // The checked replacement path must expose the same explicit recovery
+        // action as store(); never silently adopt a changed external file.
+        if(!m_library->lyricsSnapshotMatches(m_lyricsSnapshots.value(t.id)))m_snapshotConflict=true;
+        setRowStatus(row,"未保存："+reason);finishFilterUpdate();m_status->setText("未保存："+reason);return false;
+    };
+    if(!plan.decision.valid)return reject(plan.decision.reason);
     if(!confirmReplacement(plan)){m_status->setText("已保留现有歌词；候选和翻译预览仍可继续处理");return false;}
     const auto currentIdentity=candidateIdentity.isEmpty()?identity:selectedReplacementIdentity();
     if(!LyricsReplacementService::commit(*m_library,plan,plan.decision.confirmationRequired?LyricsReplacementChoice::Replace:LyricsReplacementChoice::SafeSave,
         trackIdAt(m_tracks->currentRow()),currentIdentity,m_translation,&m_storeError)){
-        m_status->setText("未保存："+m_storeError);setRowStatus(row,"未保存："+m_storeError);return false;
+        return reject(m_storeError);
     }
     m_manualDrafts.remove(t.id);m_lastReplacementIdentity=identity;m_search->cancelTrack(t.id);remember(t.id);
     m_translationAssessments.remove(t.id);m_lyricsSnapshots.insert(t.id,m_library->lyricsSaveSnapshot(t.id));
