@@ -4,6 +4,7 @@
 #include "lyrics.h"
 #include "lyric-text.h"
 #include "playback.h"
+#include "audio-device-fixture.h"
 #include <QAudioDevice>
 #include <QFile>
 #include <QImage>
@@ -518,9 +519,7 @@ class Tests : public QObject {
         QVERIFY(!Importer::importOne(root, invalid.fileName()).error.isEmpty());
     }
     void realPlaybackAndSeek() {
-        if(qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))QSKIP("当前测试会话的声卡输出初始化失败；需在正常音频设备环境验证");
-        if (QMediaDevices::defaultAudioOutput().isNull())
-            QSKIP("需要音频设备或测试虚拟音频输出");
+        if (audio_device_fixture::excluded()) QSKIP(audio_device_fixture::excludedReason);
         QTemporaryDir d;
         Library lib(d.filePath("data"));
         QVERIFY(lib.open());
@@ -530,10 +529,17 @@ class Tests : public QObject {
                  {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-y", file});
         QVERIFY(ff.waitForFinished(20000));
         QCOMPARE(ff.exitCode(), 0);
+        const auto control = audio_device_fixture::probe(file);
+        QVERIFY2(control.status != audio_device_fixture::Status::FixtureError, qPrintable(control.detail));
+        if (control.status == audio_device_fixture::Status::EnvironmentBlocked) QSKIP(qPrintable(control.detail));
         auto result = Importer::importOne(lib.root(), file);
         QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
         auto id = lib.insert(result.track);
-        Playback p(&lib, nullptr, true);
+        QVERIFY(lib.setSetting("volume", 10));
+        Playback p(&lib);
+        QVERIFY(p.media()->audioOutput());
+        QVERIFY(!p.media()->audioOutput()->device().isNull());
+        QSignalSpy errors(&p, &Playback::error);
         p.setMode(Mode::Sequential);
         p.play({id});
         QTRY_VERIFY_WITH_TIMEOUT(p.position() > 600, 6000);
@@ -553,11 +559,10 @@ class Tests : public QObject {
         p.play({id});
         QTRY_COMPARE_WITH_TIMEOUT(lib.track(id).plays, 1, 6500);
         QVERIFY(lib.track(id).heard >= 5800);
+        QCOMPARE(errors.size(), 0);
     }
     void realResumeAndLoop() {
-        if(qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))QSKIP("当前测试会话的声卡输出初始化失败；需在正常音频设备环境验证");
-        if (QMediaDevices::defaultAudioOutput().isNull())
-            QSKIP("需要音频设备或测试虚拟音频输出");
+        if (audio_device_fixture::excluded()) QSKIP(audio_device_fixture::excludedReason);
         QTemporaryDir d;
         Library lib(d.filePath("data"));
         QVERIFY(lib.open());
@@ -567,12 +572,18 @@ class Tests : public QObject {
                  {"-v", "error", "-f", "lavfi", "-i", "sine=frequency=660:duration=2", "-y", file});
         QVERIFY(ff.waitForFinished(20000));
         QCOMPARE(ff.exitCode(), 0);
+        const auto control = audio_device_fixture::probe(file);
+        QVERIFY2(control.status != audio_device_fixture::Status::FixtureError, qPrintable(control.detail));
+        if (control.status == audio_device_fixture::Status::EnvironmentBlocked) QSKIP(qPrintable(control.detail));
         auto result = Importer::importOne(lib.root(), file);
         QVERIFY(result.error.isEmpty());
         auto id = lib.insert(result.track);
+        QVERIFY(lib.setSetting("volume", 10));
         qint64 position = 0;
         {
-            Playback p(&lib, nullptr, true);
+            Playback p(&lib);
+            QVERIFY(p.media()->audioOutput());
+            QVERIFY(!p.media()->audioOutput()->device().isNull());
             p.setMode(Mode::SingleLoop);
             p.play({id});
             QTRY_VERIFY_WITH_TIMEOUT(p.position() > 650, 6000);
@@ -581,7 +592,10 @@ class Tests : public QObject {
             position = p.position();
             QCOMPARE(lib.track(id).plays, 0);
         }
-        Playback restored(&lib, nullptr, true);
+        Playback restored(&lib);
+        QVERIFY(restored.media()->audioOutput());
+        QVERIFY(!restored.media()->audioOutput()->device().isNull());
+        QSignalSpy errors(&restored, &Playback::error);
         restored.restore();
         QTRY_VERIFY_WITH_TIMEOUT(restored.position() >= position - 50, 4000);
         QVERIFY(!restored.playing());
@@ -590,6 +604,7 @@ class Tests : public QObject {
         QTRY_COMPARE_WITH_TIMEOUT(lib.track(id).plays, 2, 6000);
         restored.toggle();
         QCOMPARE(lib.track(id).plays, 2);
+        QCOMPARE(errors.size(), 0);
     }
 };
 QTEST_GUILESS_MAIN(Tests)

@@ -521,6 +521,10 @@ void LyricsLookup::done(int result){if(!confirmStopTranslations())return;stop();
 void LyricsLookup::stop(){
     const auto cancelled=m_search->stop();
     for(const auto &event:cancelled)setRowStatus(rowForTrack(event.trackId),event.status);
+    // stop() invalidates queued old-generation notifications, including one
+    // for an already completed snapshot. Reconcile the view without accepting
+    // stale callbacks or changing the retained candidate revision.
+    rebuildCandidates();
     controls();
 }
 QVector<int> LyricsLookup::batchRows() const {QVector<int> rows;for(int r=0;r<m_tracks->count();++r)if(m_tracks->item(r)->isSelected()&&!m_tracks->item(r)->isHidden())rows<<r;return rows;}

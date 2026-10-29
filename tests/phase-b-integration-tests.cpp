@@ -110,12 +110,17 @@ class PhaseBIntegrationTests final : public QObject {
         QCOMPARE(search->candidates(ids[2]).trackId, ids[2]);
         QCOMPARE(search->candidates(ids[1]).records.first().toObject()["trackName"].toString(),
                  library.track(ids[1]).title);
+        // A stored snapshot precedes its queued view notification. Verify that
+        // publication before separately testing coordinator cancellation.
+        auto *versions = dialog.findChild<QListWidget *>("lyricsVersions");
+        QVERIFY(versions);
+        QTRY_VERIFY(versions->count() > 0);
+        QCOMPARE(versions->property("trackId").toLongLong(), ids[1]);
         search->stop();
         const auto revision = search->candidates(ids[1]).revision;
         QTRY_COMPARE(LyricsSearchCoordinator::computePool()->activeThreadCount(), 0);
         QCoreApplication::processEvents();
         QCOMPARE(search->candidates(ids[1]).revision, revision);
-        auto *versions = dialog.findChild<QListWidget *>("lyricsVersions");
         QTRY_VERIFY(versions->count() > 0);
         versions->setCurrentRow(0);
         auto *apply = dialog.findChild<QPushButton *>("lyricsApply");
@@ -132,6 +137,51 @@ class PhaseBIntegrationTests final : public QObject {
                                    {"candidateSignals", candidates.size()},
                                    {"mockSearchRequests", source.requestCount()},
                                    {"paidRequests", paid.requestCount()}});
+    }
+    void stopBeforeCandidateNotificationKeepsCompletedVersions() {
+        QTemporaryDir dir;
+        Library library(dir.filePath("data"));
+        QVERIFY(library.open());
+        const auto ids = seed(library);
+        QCOMPARE(ids.size(), 3);
+        TranslationHttpMock source;
+        QVERIFY(source.listen());
+        answers(source, {candidate(library.track(ids[1]))});
+        source.setHold(true);
+        LyricsLookup dialog(&library, {ids[1]}, nullptr, source.baseUrl(), {}, true);
+        dialog.show();
+        select(dialog, ids[1]);
+        auto *search = dialog.findChild<LyricsSearchCoordinator *>();
+        auto *stop = dialog.findChild<QPushButton *>("lyricsStop");
+        auto *versions = dialog.findChild<QListWidget *>("lyricsVersions");
+        QVERIFY(search && stop && versions);
+        const auto generation = search->start(requests(library, {ids[1]}), {5000, 2000, 20, 0});
+        QVERIFY(generation);
+        QTRY_VERIFY(source.heldCount() > 0);
+        QTRY_VERIFY(stop->isEnabled());
+        {
+            // Model completion before the queued view notification is a legal ordering.
+            // Hold notifications, rather than sleeping until a scheduler happens to hit it.
+            const QSignalBlocker notifications(search);
+            source.setHold(false);
+            while (source.releaseHeld()) {
+            }
+            QTRY_VERIFY(!search->candidates(ids[1]).records.isEmpty());
+            QCOMPARE(versions->count(), 0);
+            const auto revision = search->candidates(ids[1]).revision;
+            stop->click();
+            QCOMPARE(search->summary().generation, generation + 1);
+            QCOMPARE(search->candidates(ids[1]).revision, revision);
+            QVERIFY2(versions->count() > 0, "Stop must render the completed snapshot even if its old notification cannot arrive");
+        }
+        QCOMPARE(versions->property("trackId").toLongLong(), ids[1]);
+        auto *apply = dialog.findChild<QPushButton *>("lyricsApply");
+        QVERIFY(apply->isEnabled());
+        apply->click();
+        QVERIFY(bytes(library.absolute(library.track(ids[1]).lyrics)).contains("Hello world"));
+        QVERIFY(library.track(ids[0]).lyrics.isEmpty());
+        QVERIFY(library.track(ids[2]).lyrics.isEmpty());
+        QVERIFY(dialog.close());
     }
     void playbackAutomaticAdvancePreservesPaidPreview() {
         QTemporaryDir dir;
