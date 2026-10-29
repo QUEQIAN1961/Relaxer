@@ -27,5 +27,10 @@
       "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.0-rc2",
       "notes": "docs/releases/v0.2.0-rc2/V0.2.0-RC2-ReleaseNotes.md"
     }
-  ]
+  ],
+  "currentCandidate": {
+    "version": "V0.2.2-RC2",
+    "status": "private-test-unverified",
+    "publicDistributionApproved": false
+  }
 }

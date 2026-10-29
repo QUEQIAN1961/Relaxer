@@ -67,5 +67,23 @@ class PackagingPolicy(unittest.TestCase):
         (self.stage / "runtime/RelaxerQmlUi.dll").write_bytes(b"unverified replacement")
         with self.assertRaises(ValueError): packager.inventory(self.stage)
 
+    def test_private_test_requires_complete_bound_proof_without_ready_marker(self):
+        proof=json.loads((self.stage/'deployment.json').read_text())
+        proof.update(verified=False,sourceCommit='commit',sourceTree='tree',sourceFingerprint='fingerprint')
+        for name in ('TEST-ONLY-README.txt','BUILD-IDENTITY.json','RelaxerWidgets.cmd','RelaxerLockCheck.exe','runtime/qt.conf'):
+            (self.stage/name).write_bytes(b'policy fixture')
+        proof['coreBinarySHA256']={**proof['binarySHA256'],'RelaxerLockCheck.exe':hashlib.sha256(b'policy fixture').hexdigest()}
+        (self.stage/'deployment.json').write_text(json.dumps(proof))
+        qa={key:proof[key] for key in ('sourceCommit','sourceTree','sourceFingerprint','coreBinarySHA256')}
+        qa.update(purpose='private-test-unverified',publicDistributionApproved=False,
+                  checks={key:'PASS' for key in ('dependencyClosure','qmlStartup','widgetsStartup','sqliteIntegrity')})
+        with self.assertRaises(ValueError):packager.inventory(self.stage,qa)
+        (self.stage/'runtime/relaxer-ready.json').unlink()
+        packager.inventory(self.stage,qa)
+        qa['sourceCommit']='another-commit'
+        with self.assertRaises(ValueError):packager.inventory(self.stage,qa)
+        qa['sourceCommit']=proof['sourceCommit'];qa['checks']['qmlStartup']='FAIL'
+        with self.assertRaises(ValueError):packager.inventory(self.stage,qa)
+
 
 if __name__ == "__main__": unittest.main(verbosity=2)

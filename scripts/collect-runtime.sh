@@ -20,6 +20,7 @@ fi
 stage="$(pwd)/runtime.pending"
 owner="${RELAXER_SOURCE_ROOT:?}"
 [[ -f "$build/Relaxer.exe" ]] || { echo 'Relaxer.exe is missing' >&2; exit 2; }
+[[ -f "$build/RelaxerStart.exe" ]] || { echo 'Current build RelaxerStart.exe is missing; source bootstrap fallback is forbidden' >&2; exit 2; }
 if [[ -e "$stage" ]]; then
   [[ ! -L "$stage" && ! -L "$stage/.relaxer-staging-owner" && -f "$stage/.relaxer-staging-owner" && "$(cat "$stage/.relaxer-staging-owner")" == "$owner" ]] || { echo 'Staging folder ownership mismatch' >&2; exit 2; }
   rm -rf -- "$stage"
@@ -28,10 +29,7 @@ mkdir -p "$stage/bin" "$stage/resources"
 printf '%s\n' "$owner" > "$stage/.relaxer-staging-owner"
 cp "$build/Relaxer.exe" "$stage/"
 if [[ -f "$build/RelaxerQmlUi.dll" ]]; then cp "$build/RelaxerQmlUi.dll" "$stage/"; fi
-cp RelaxerStart.exe THIRD_PARTY_NOTICES.md "$stage/"
-# Prefer the newly compiled launcher when available; the first-start bootstrap
-# in the source root remains intact while Windows is executing it.
-if [[ -f "$build/RelaxerStart.exe" ]]; then cp "$build/RelaxerStart.exe" "$stage/"; fi
+cp "$build/RelaxerStart.exe" THIRD_PARTY_NOTICES.md "$stage/"
 cp resources/icon.ico "$stage/resources/"
 cp -R licenses "$stage/"
 deploy_qt=''

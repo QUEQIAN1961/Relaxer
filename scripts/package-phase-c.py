@@ -12,11 +12,24 @@ from pathlib import Path
 import zipfile
 
 
-def inventory(stage):
+def inventory(stage, test_proof=None):
     stage = stage.resolve()
     proof = json.loads((stage / "deployment.json").read_text(encoding="utf-8"))
-    if proof.get("stagingPolicy") != "fresh-build-inputs-only" or proof.get("verified") is not True:
+    if proof.get("stagingPolicy") != "fresh-build-inputs-only":
+        raise ValueError("Package only fresh build inputs")
+    if test_proof is None and proof.get("verified") is not True:
         raise ValueError("Package only a fresh stage assembled with the matching separate candidate QA proof")
+    if test_proof is not None:
+        if test_proof.get('purpose') != 'private-test-unverified' or test_proof.get('publicDistributionApproved') is not False:
+            raise ValueError('Explicit private test proof required')
+        for name in ('sourceCommit','sourceTree','sourceFingerprint','coreBinarySHA256'):
+            if not proof.get(name) or proof[name] != test_proof.get(name):
+                raise ValueError(f'Test proof identity mismatch: {name}')
+        for name in ('dependencyClosure','qmlStartup','widgetsStartup','sqliteIntegrity'):
+            if test_proof.get('checks',{}).get(name) != 'PASS':
+                raise ValueError(f'Incomplete private test validation: {name}')
+        if (stage/'runtime/relaxer-ready.json').exists():
+            raise ValueError('Private test package must not carry a launcher ready marker')
     entries = {}
     media = {".mp3", ".flac", ".wav", ".ogg", ".opus", ".mid", ".midi", ".m4a", ".lrc"}
     for file in sorted(stage.rglob("*")):
@@ -30,18 +43,27 @@ def inventory(stage):
             or any(p in {"data", "__pycache__", ".git", ".cache", "cmakefiles", "browser-translation"} for p in parts))
         if forbidden: raise ValueError(f"Runtime residue or private input is forbidden: {relative}")
         entries[relative] = hashlib.sha256(file.read_bytes()).hexdigest()
-    for name in ["RelaxerStart.exe", "RelaxerQml.cmd", "runtime/Relaxer.exe", "runtime/RelaxerQmlUi.dll",
-                 "runtime/relaxer-ready.json", "runtime/Qt6Qml.dll", "runtime/Qt6Quick.dll", "runtime/Qt6QuickControls2.dll"]:
+    required = ["RelaxerStart.exe", "RelaxerQml.cmd", "runtime/Relaxer.exe", "runtime/RelaxerQmlUi.dll",
+                "runtime/Qt6Qml.dll", "runtime/Qt6Quick.dll", "runtime/Qt6QuickControls2.dll"]
+    required += (["TEST-ONLY-README.txt", "BUILD-IDENTITY.json", "RelaxerWidgets.cmd", "RelaxerLockCheck.exe", "runtime/qt.conf"]
+                 if test_proof is not None else ["runtime/relaxer-ready.json"])
+    for name in required:
         if name not in entries: raise ValueError(f"Required release input missing: {name}")
     actual = {name: entries[("" if name == "RelaxerStart.exe" else "runtime/") + name]
               for name in ("Relaxer.exe", "RelaxerStart.exe", "RelaxerQmlUi.dll")}
     if actual != proof.get("binarySHA256"):
         raise ValueError("Stage binaries differ from the native candidate QA proof")
+    if test_proof is not None:
+        actual['RelaxerLockCheck.exe']=entries['RelaxerLockCheck.exe']
+        if actual != test_proof['coreBinarySHA256']:
+            raise ValueError('Private test core binaries differ from validated candidate')
     return entries
 
 
-def package(stage, output, prefix):
-    entries = inventory(stage)
+def package(stage, output, prefix, test_proof=None):
+    entries = inventory(stage, test_proof)
+    if test_proof is not None and 'TEST-UNVERIFIED' not in output.name:
+        raise ValueError('Private test ZIP filename must contain TEST-UNVERIFIED')
     if output.exists(): raise ValueError(f"Existing artifact preserved: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w") as archive:
@@ -58,7 +80,9 @@ if __name__ == "__main__":
     parser.add_argument("--staging", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--prefix", help="Defaults to the frozen deployment display version")
+    parser.add_argument("--test-proof", type=Path, help="Separate standalone private-test QA proof; never grants launcher/release readiness")
     args = parser.parse_args()
     proof = json.loads((args.staging / "deployment.json").read_text(encoding="utf-8"))
-    entries = package(args.staging.resolve(), args.output.resolve(), args.prefix or "Relaxer-" + proof["displayVersion"])
+    test_proof = json.loads(args.test_proof.read_text(encoding='utf-8')) if args.test_proof else None
+    entries = package(args.staging.resolve(), args.output.resolve(), args.prefix or "Relaxer-" + proof["displayVersion"], test_proof)
     print(json.dumps({"files": len(entries), "residue": False, "output": str(args.output)}))

@@ -89,6 +89,7 @@ def main():
         make_pe(plugins / "platforms/qwindows.dll", "qwindows.dll", ("qt6core.dll",))
         make_pe(plugins / "imageformats/qjpeg.dll", "qjpeg.dll", ("jpeg.dll",))
         make_pe(build / "Relaxer.exe", "Relaxer.exe", ("qt6core.dll",))
+        shutil.copyfile(build / "Relaxer.exe", build / "RelaxerStart.exe")
         make_pe(prefix / "bin/ffmpeg.exe", "ffmpeg.exe",
                 ("avcodec-fixture.dll", "helper-only.dll"))
         make_pe(prefix / "bin/ffprobe.exe", "ffprobe.exe", ("avcodec-fixture.dll",))
@@ -166,6 +167,14 @@ def main():
         assert hashlib.sha256((build / "Relaxer.exe").read_bytes()).digest() == retained_hash
         assert music.read_bytes() == b"user data remains untouched"
         passed("installed Qt plugins, retained build and existing music remain intact")
+
+        launcher = build / "RelaxerStart.exe"
+        launcher.rename(build / "RelaxerStart.saved")
+        result = deploy(current)
+        assert result.returncode != 0 and "RelaxerStart.exe is missing" in result.stderr, result.stderr
+        assert (project / "RelaxerStart.exe").is_file()
+        (build / "RelaxerStart.saved").rename(launcher)
+        passed("missing current launcher cannot fall back to source bootstrap")
 
         shutil.copyfile(plugins / "sqldrivers/qsqlmysql.dll", stage / "sqldrivers/qsqlmysql.dll")
         result = deploy(current)

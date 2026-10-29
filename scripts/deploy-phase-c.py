@@ -14,8 +14,24 @@ import re
 import shutil
 import subprocess
 import hashlib
+from datetime import datetime, timezone
 from ready_marker import marker
 from evidence_run import execute
+from source_identity import identity
+from build_inputs import binary_identity, qml_inputs
+
+
+def validate_current_build(source, build, git_executable):
+    """Reject a retained build configured for another checkout or source tree."""
+    frozen = identity(source, git_executable=git_executable)
+    cache = (build / 'CMakeCache.txt').read_text(encoding='utf-8')
+    home = re.search(r'^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$', cache, re.MULTILINE)
+    if not home or Path(home[1].strip()).resolve() != source.resolve():
+        raise ValueError('Build was configured for another source directory')
+    built = (build / 'relaxer-source-fingerprint.txt').read_text(encoding='utf-8').strip()
+    if built != frozen['sourceFingerprint']:
+        raise ValueError('Build fingerprint differs from current committed source')
+    return frozen
 
 
 def main():
@@ -27,6 +43,25 @@ def main():
     parser.add_argument("--verification-proof", type=Path,
                         help="Native QA proof from a separate candidate; binds the three built binaries")
     args = parser.parse_args()
+    # A hard interruption leaves RUNNING, never a successful deployment claim.
+    logs = args.destination.resolve().parent / (args.destination.name + '.deployment-evidence')
+    logs.mkdir(parents=True, exist_ok=False)
+    receipt = {'status': 'RUNNING', 'startedUTC': datetime.now(timezone.utc).isoformat(),
+               'destination': str(args.destination.resolve())}
+    attempt = logs / 'deployment-attempt.json'
+    attempt.write_text(json.dumps(receipt, indent=2)+'\n', encoding='utf-8')
+    try:
+        deploy(args, logs)
+        receipt['status'] = 'COLLECTED'
+    except BaseException as error:
+        receipt.update(status='ERROR', error=repr(error))
+        raise
+    finally:
+        receipt['finishedUTC'] = datetime.now(timezone.utc).isoformat()
+        attempt.write_text(json.dumps(receipt, indent=2)+'\n', encoding='utf-8')
+
+
+def deploy(args, logs):
     source, build, qt, quick, dest = [p.resolve() for p in
         (args.source, args.build, args.qt_prefix, args.quick_prefix, args.destination)]
     assert not dest.exists(), "Use a fresh destination; existing runtime is preserved"
@@ -39,8 +74,11 @@ def main():
     commit = subprocess.check_output([args.git, "rev-parse", "HEAD"], cwd=source, text=True).strip()
     tree = subprocess.check_output([args.git, "show", "-s", "--format=%T", "HEAD"], cwd=source, text=True).strip()
     assert not subprocess.check_output([args.git, "status", "--porcelain"], cwd=source, text=True).strip(), "Deploy from clean committed source"
+    frozen = validate_current_build(source, build, str(args.git))
+    assert (frozen['commit'], frozen['tree']) == (commit, tree), 'Source changed during input validation'
     binaries = ["Relaxer.exe", "RelaxerStart.exe", "RelaxerQmlUi.dll"]
-    binary_hashes = {name: hashlib.sha256((build / name).read_bytes()).hexdigest() for name in binaries}
+    core_hashes = binary_identity(build, fingerprint)
+    binary_hashes = {name: core_hashes[name] for name in binaries}
     verified = False
     native_proof = {}
     if args.verification_proof:
@@ -55,8 +93,6 @@ def main():
     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = 0
 
-    logs = dest.parent / (dest.name + '.deployment-evidence')
-    logs.mkdir(parents=True, exist_ok=False)
     run_index = 0
     def run(command, cwd=None):
         nonlocal run_index
@@ -68,13 +104,17 @@ def main():
 
     imports = json.loads(run([quick / "share/qt6/bin/qmlimportscanner.exe", "-rootPath", source / "src/qml",
                               "-importPath", quick / "share/qt6/qml", "-importPath", qt / "share/qt6/qml"]))
+    qml_inputs(imports, (quick, qt))
     dest.mkdir(parents=True)
     runtime = dest / "runtime"
     runtime.mkdir()
     shutil.copy2(build / "Relaxer.exe", runtime)
     shutil.copy2(build / "RelaxerQmlUi.dll", runtime)
     shutil.copy2(build / "RelaxerStart.exe", dest)
+    shutil.copy2(build / "RelaxerLockCheck.exe", dest)
     shutil.copy2(source / "THIRD_PARTY_NOTICES.md", dest)
+    for name in ('LICENSE', 'LICENSE-NOTICE.txt'):
+        shutil.copy2(source / name, dest)
     shutil.copytree(source / "licenses", dest / "licenses")
     (runtime / "resources").mkdir()
     shutil.copy2(source / "resources/icon.ico", runtime / "resources")
@@ -125,17 +165,20 @@ def main():
                     shutil.copy2(found, target); copied.add(str(target.relative_to(dest))); pending.append(target)
                 else:
                     assert (system / name).is_file(), f"Unresolved import {name} from {file}"
-    closure(runtime, [runtime / "Relaxer.exe", *runtime.rglob("*.dll")], [build, quick / "bin", qt / "bin"])
+    # The optional QML DLL is copied explicitly above. No retained build DLL may
+    # silently satisfy a third-party dependency.
+    closure(runtime, [runtime / "Relaxer.exe", *runtime.rglob("*.dll")], [quick / "bin", qt / "bin"])
+    closure(dest, [dest / "RelaxerStart.exe", dest / "RelaxerLockCheck.exe"], [quick / "bin", qt / "bin"])
     closure(runtime / "bin", list((runtime / "bin").glob("*.exe")), [ffmpeg, qt / "bin"])
     for prefix in (qt, quick):
         license_root = prefix / "share/licenses"
         if license_root.exists(): shutil.copytree(license_root, dest / "third-party-licenses", dirs_exist_ok=True)
     (dest / "RelaxerQml.cmd").write_text('@echo off\r\nsetlocal\r\n"%~dp0runtime\\Relaxer.exe" --ui=qml %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
+    (dest / "RelaxerWidgets.cmd").write_text('@echo off\r\nsetlocal\r\n"%~dp0runtime\\Relaxer.exe" --ui=widgets %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
     (dest / "READ-ME-FIRST.md").write_text(
         f"# Relaxer {display}\n\n"
-        "双击 RelaxerStart.exe 打开新版 QML 界面。\n"
-        "兼容界面：RelaxerStart.exe --widgets；显式新版：RelaxerStart.exe --qml。\n"
-        "RelaxerQml.cmd 保留为旧版兼容入口。\n"
+        "测试入口：双击 RelaxerQml.cmd；兼容界面：RelaxerWidgets.cmd。\n"
+        "RelaxerStart.exe 已包含，但首次启动器正向流程仍待完整验收。\n"
         "两种界面使用同一资料目录和锁，请先关闭另一入口。\n"
         "首次独立验证可使用 runtime/Relaxer.exe --ui=qml --data <测试目录>。\n"
         "歌曲、歌词和自定义资源保存在资料目录；发行包不包含个人资料或 AI 凭据。\n"
@@ -152,7 +195,7 @@ def main():
         (runtime / "relaxer-ready.json").write_text(json.dumps(marker(version, displayVersion=display, **fields)), encoding="utf-8")
     proof = {"version": version, "displayVersion": display, "sourceFingerprint": fingerprint, "sourceCommit": commit, "sourceTree": tree,
              "qmlImports": imports, "copiedDependencies": sorted(copied), "resolvedDependencyInputs": sorted(str(p) for p in seen_dependencies),
-             "binarySHA256": binary_hashes, "stagingPolicy": "fresh-build-inputs-only",
+             "binarySHA256": binary_hashes, "coreBinarySHA256": core_hashes, "stagingPolicy": "fresh-build-inputs-only",
              "verified": verified, "verificationScope": native_proof.get("verificationScope", "legacy-native" if verified else "candidate-collection"),
              "missingDependencies": [], "executionReceipts": str(logs),
              "note": "Native proof from separate candidate" if verified else "Candidate collection only; do not package before native QA"}
