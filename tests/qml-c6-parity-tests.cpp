@@ -1,5 +1,6 @@
 #include "c4c5-ui-fixture.h"
 #include "background-window-fixture.h"
+#include "foreground-observation.h"
 #include "shortcut-rules.h"
 #include "ui-bridge/ui-integration.h"
 #include <QAction>
@@ -80,36 +81,40 @@ Foreground classifyForeground(HWND foreground, HWND owned) {
     return foreground == nullptr ? Foreground::None :
         foreground == owned ? Foreground::Owned : Foreground::Unowned;
 }
-QJsonObject foregroundSnapshot(HWND owned) {
-    const auto foreground = GetForegroundWindow();
-    DWORD pid = 0;
-    if (foreground) GetWindowThreadProcessId(foreground, &pid);
-    const auto state = classifyForeground(foreground, owned);
-    return {{"state", state == Foreground::Owned ? "owned" : state == Foreground::None ? "none" : "unowned"},
-        {"foreground", QString::number(quintptr(foreground), 16)}, {"owned", QString::number(quintptr(owned), 16)},
-        {"ownerPID", double(pid)}, {"testPID", double(GetCurrentProcessId())},
-        {"externalProcess", foreground && pid != GetCurrentProcessId()}};
-}
 enum class Injection { Sent, Unavailable, Failed };
-Injection pressGlobal(HWND owned, QJsonArray &attempts) {
-    auto evidence = foregroundSnapshot(owned);
-    if (evidence["state"].toString() != "owned") {
+Injection pressGlobal(HWND owned,foreground_test::Witness &witness,QJsonArray &attempts,QJsonArray &observations,const QString &phase) {
+    const auto observation=witness.observe(owned,phase);observations.append(observation);record("foreground-observation",observation);
+    auto evidence=observation["localAfter"].toObject();
+    evidence["boundaryObservation"]=observation;evidence["sendInputCalls"]=0;
+    if(!observation["valid"].toBool()){
+        evidence["result"]="FAIL: independent foreground witness unavailable";evidence["sentEvents"]=0;
+        attempts.append(evidence);record("native-input-attempt",evidence);return Injection::Failed;
+    }
+    if(!observation["consistent"].toBool() || evidence["state"].toString()!="owned"){
+        const auto external=observation["independentProcess"].toObject();
+        evidence["reason"]=observation["consistent"].toBool()
+            ?QString("current boundary state=%1 HWND=%2 PID=%3 process=%4").arg(evidence["state"].toString(),evidence["foreground"].toString()).arg(evidence["ownerPID"].toDouble(),0,'f',0).arg(evidence["processName"].toString())
+            :QString("foreground changed or observer disagreement: local-before=%1 witness=%2 local-after=%3; witness PID=%4 process=%5")
+                .arg(observation["localBefore"].toObject()["foreground"].toString(),external["foreground"].toString(),evidence["foreground"].toString())
+                .arg(external["ownerPID"].toDouble(),0,'f',0).arg(external["processName"].toString());
         evidence["sentEvents"] = 0; evidence["result"] = "ENVIRONMENT NOT EXECUTED";
         attempts.append(evidence); record("native-input-attempt",evidence); return Injection::Unavailable;
     }
     // Recheck at the injection boundary, not Qt's activation notification.
     if (GetForegroundWindow() != owned) {
+        evidence["reason"]="foreground changed at immediate SendInput boundary";
         evidence["sentEvents"] = 0; evidence["result"] = "ENVIRONMENT NOT EXECUTED: foreground changed";
         attempts.append(evidence); record("native-input-attempt",evidence); return Injection::Unavailable;
     }
     INPUT events[8]{};const WORD keys[]{VK_CONTROL,VK_MENU,VK_SHIFT,VK_F24,VK_F24,VK_SHIFT,VK_MENU,VK_CONTROL};
     for(int i=0;i<8;++i){events[i].type=INPUT_KEYBOARD;events[i].ki.wVk=keys[i];events[i].ki.dwFlags=i>=4?KEYEVENTF_KEYUP:0;}
-    const auto sent=SendInput(8,events,sizeof(INPUT));
+    SetLastError(ERROR_SUCCESS);const auto sent=SendInput(8,events,sizeof(INPUT));const auto sendError=GetLastError();
+    evidence["sendInputCalls"]=1;evidence["sendInputReturn"]=int(sent);evidence["sendInputLastError"]=double(sendError);
     evidence["sentEvents"] = int(sent); evidence["result"] = sent == 8 ? "EXECUTED" : "FAIL: partial SendInput";
     evidence["foregroundAfter"] = QString::number(quintptr(GetForegroundWindow()), 16);
-    attempts.append(evidence);
-    record("native-input-attempt",evidence);
-    if(sent!=8 && GetForegroundWindow()==owned){INPUT releases[4]{};for(int i=0;i<4;++i){releases[i].type=INPUT_KEYBOARD;releases[i].ki.wVk=keys[3-i];releases[i].ki.dwFlags=KEYEVENTF_KEYUP;}SendInput(4,releases,sizeof(INPUT));}
+    if(sent!=8 && GetForegroundWindow()==owned){INPUT releases[4]{};for(int i=0;i<4;++i){releases[i].type=INPUT_KEYBOARD;releases[i].ki.wVk=keys[3-i];releases[i].ki.dwFlags=KEYEVENTF_KEYUP;}
+        evidence["cleanupSendInputReturn"]=int(SendInput(4,releases,sizeof(INPUT)));evidence["sendInputCalls"]=2;}
+    attempts.append(evidence);record("native-input-attempt",evidence);
     return sent == 8 ? Injection::Sent : Injection::Failed;
 }
 #endif
@@ -123,9 +128,34 @@ private slots:
         qInfo().noquote()<<"C6_PARITY_EVIDENCE"<<evidence;
     }
     void nativeAppAndGlobalShortcutRegistrationDispatchAndRelease(){
-        const BackgroundWindowFixture background;
+#ifdef Q_OS_WIN
+        const auto originalEnvironment=foreground_test::snapshot(nullptr,"method-entry-before-witness-policy-or-window");
+        record("original-environment-foreground",originalEnvironment);
+        foreground_test::Witness witness;QVERIFY2(witness.start(),"Could not start independent read-only foreground witness");
+        QJsonArray observations;
+        auto observe=[&](HWND owned,const QString &phase){
+            const auto value=witness.observe(owned,phase);observations.append(value);record("foreground-observation",value);
+            return value["valid"].toBool();
+        };
+        QVERIFY(observe(nullptr,"before-fixture-policy"));
+#endif
+        BackgroundWindowFixture background(BackgroundWindowFixture::Mode::MakeNewWindowsNonActivating);
         QVERIFY2(background.installed(),"Could not install the test-thread non-activation guard");
-        Fixture fixture(2);QVERIFY(prepare(fixture));auto *window=fixture.shell->window();
+#ifdef Q_OS_WIN
+        QVERIFY(observe(nullptr,"after-policy-before-fixture"));
+#endif
+        Fixture fixture(2);
+#ifdef Q_OS_WIN
+        QVERIFY(observe(nullptr,"after-fixture-construction"));
+#endif
+        QVERIFY(prepare(fixture));auto *window=fixture.shell->window();
+#ifdef Q_OS_WIN
+        QVERIFY(observe(nullptr,"after-fixture-shown-and-prepared"));
+#endif
+        background.release();QCOMPARE(background.activationVetoes(),0);QCOMPARE(background.markingFailures(),0);
+#ifdef Q_OS_WIN
+        QVERIFY(observe(nullptr,"after-policy-removed-before-input-window"));
+#endif
         auto *integration=fixture.shell->findChild<UiIntegration *>();QVERIFY(integration);
         fixture.shell->playbackBridge()->setVolume(40);window->contentItem()->forceActiveFocus();
         const bool localQtKeys=window->isActive()&&QGuiApplication::focusWindow()==window;
@@ -160,7 +190,8 @@ private slots:
         QCOMPARE(classifyForeground(owned, owned), Foreground::Owned);
         QCOMPARE(classifyForeground(nullptr, owned), Foreground::None);
         QCOMPARE(classifyForeground(reinterpret_cast<HWND>(quintptr(owned)+1), owned), Foreground::Unowned);
-        const auto initialForeground = foregroundSnapshot(owned);
+        QVERIFY(observe(owned,"after-owned-input-window-show"));
+        const auto initialForeground=originalEnvironment;
         QJsonArray injectionAttempts;
         UINT registeredId=0;bool handlerDispatch=false,threadDispatch=false;
         auto controlledHandler = [&] {
@@ -169,14 +200,14 @@ private slots:
                 if(integration->nativeEventFilter("windows_dispatcher_MSG",&message,&result)){registeredId=id;handlerDispatch=true;return true;}}
             return false;
         };
-        const auto first = pressGlobal(owned, injectionAttempts);
+        const auto first = pressGlobal(owned,witness,injectionAttempts,observations,"first-injection-boundary");
         QVERIFY2(first != Injection::Failed, "Owned-window SendInput failed; do not mask an attempted injection");
         if(first == Injection::Unavailable) QVERIFY(controlledHandler());
         QTRY_COMPARE(fixture.shell->playbackBridge()->volume(),50);
         integration->setShortcutRecording(true);
         {Reservation released(VK_F24);QVERIFY(released.registered);}
         integration->setShortcutRecording(false);
-        const auto second = pressGlobal(owned, injectionAttempts);
+        const auto second = pressGlobal(owned,witness,injectionAttempts,observations,"second-injection-boundary");
         QVERIFY2(second != Injection::Failed, "Owned-window SendInput failed; do not mask an attempted injection");
         if(second == Injection::Unavailable) {
             if(registeredId) {
@@ -188,17 +219,36 @@ private slots:
         fixture.shell.reset();
         {Reservation destroyed(VK_F24);QVERIFY(destroyed.registered);}
         const bool nativeComplete=first==Injection::Sent && second==Injection::Sent;
-        const int nativeCalls=int(first==Injection::Sent)+int(second==Injection::Sent);
+        int nativeCalls=0;for(const auto &attempt:injectionAttempts)nativeCalls+=attempt.toObject()["sendInputCalls"].toInt();
+        int disagreements=0;bool localOnlyDisagreement=false;
+        for(const auto &value:observations){const auto sample=value.toObject();
+            if(!sample["consistent"].toBool())++disagreements;
+            localOnlyDisagreement|=sample["localBefore"].toObject()["foreground"]==sample["localAfter"].toObject()["foreground"]&&
+                sample["localAfter"].toObject()["foreground"]!=sample["independentProcess"].toObject()["foreground"];
+        }
+        const auto beforeFixture=observations[0].toObject()["localAfter"].toObject();
+        const auto afterFixture=observations[2].toObject()["localAfter"].toObject();
         record("native-global-shortcuts",{{"osRegistration",true},{"conflictRollback",true},
             {"foregroundClassifierCases",QJsonArray{"owned","none","unowned"}},{"initialForeground",initialForeground},
+            {"originalEnvironment",originalEnvironment},{"foregroundObservations",observations},
+            {"fixtureObservation",QJsonObject{{"changedDuringFixtureInterval",beforeFixture["foreground"]!=afterFixture["foreground"]},
+                {"inconsistentSamples",disagreements},{"localOnlyDisagreement",localOnlyDisagreement},
+                {"interpretation","Original environment, fixture interval and live boundaries are separate observations; a time-interval change alone does not prove fixture causation"}}},
             {"injectionAttempts",injectionAttempts},{"osSendInputCalls",nativeCalls},{"osSendInputDispatch",nativeComplete},
             {"osKeyboardDispatchStatus",nativeComplete?"EXECUTED":"ENVIRONMENT NOT EXECUTED OR PARTIAL: input-test window is not OS foreground"},
             {"nativeHandlerDispatch",handlerDispatch},{"nativeThreadMessageDispatch",threadDispatch},
-            {"testThreadProgrammaticActivationBlocked",true},{"localQtKeyDispatch",localQtKeys},
+            {"fixturePolicy","Qt non-activating initial show; no CBT activation veto in this method"},
+            {"policyMarkedWindows",background.markedWindows()},{"policyActivationVetoes",background.activationVetoes()},
+            {"policyRemovedBeforeInputWindow",true},{"localQtKeyDispatch",localQtKeys},
             {"recordingReleasesAndRestores",true},{"destructionReleases",true},{"finalVolume",55},
             {"qtTestResult",nativeComplete&&localQtKeys?"PASS":"ENVIRONMENT SKIP (registration/controlled dispatch assertions passed)"}});
         QCOMPARE(fixture.http.requestCount(),0);
-        if(!nativeComplete||!localQtKeys) QSKIP("ENVIRONMENT: owned OS foreground / Qt-active local-key path unavailable; controlled dispatch/lifecycle verified separately; unexecuted input is not PASS");
+        if(!nativeComplete||!localQtKeys){
+            QStringList reasons;for(const auto &attempt:injectionAttempts)if(attempt.toObject().contains("reason"))reasons.append(attempt.toObject()["reason"].toString());
+            if(!localQtKeys)reasons.append("Qt-active local-key path unavailable");
+            const auto reason="ENVIRONMENT: "+reasons.join("; ")+"; original environment and contemporaneous independent witness are recorded separately; unexecuted OS input is NOT VERIFIED";
+            QSKIP(qPrintable(reason));
+        }
 #else
         record("native-global-shortcuts",{{"status","NOT EXECUTED: Windows-only registration"}});
 #endif
@@ -286,5 +336,10 @@ private slots:
         QVERIFY2(fixture.shell->warnings().isEmpty(),qPrintable(fixture.shell->warnings().join('\n')));
     }
 };
-int main(int argc,char **argv){QApplication app(argc,argv);app.setStyle("Fusion");app.setQuitOnLastWindowClosed(false);C6ParityTests tests;return QTest::qExec(&tests,argc,argv);}
+int main(int argc,char **argv){
+#ifdef Q_OS_WIN
+    if(argc==2&&QByteArray(argv[1])=="--rc5-foreground-witness")return foreground_test::witnessMain();
+#endif
+    QApplication app(argc,argv);app.setStyle("Fusion");app.setQuitOnLastWindowClosed(false);C6ParityTests tests;return QTest::qExec(&tests,argc,argv);
+}
 #include "qml-c6-parity-tests.moc"

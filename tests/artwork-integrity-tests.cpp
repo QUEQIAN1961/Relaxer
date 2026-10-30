@@ -1,5 +1,6 @@
 #include <QtTest>
 #include "artwork-recovery-fixture.h"
+#include "artwork-diagnostics.h"
 #include <QDirIterator>
 #include <QJsonDocument>
 #include <QSqlRecord>
@@ -55,10 +56,28 @@ private slots:
         QTest::newRow("P2-12-same-content-new-object")<<QString("new-object")<<false;
     }
     void checkedCommit(){
-        QFETCH(QString,change);QFETCH(bool,accept);QTemporaryDir d;QVERIFY(d.isValid());Library l(d.filePath("data"));QVERIFY(l.open());
+        QFETCH(QString,change);QFETCH(bool,accept);
+        QJsonObject diagnostic;QString temporaryRoot,connectionName;bool preserve=false;
+        const auto report=qScopeGuard([&]{
+            diagnostic["temporaryRoot"]=temporaryRoot;diagnostic["preservedOnFailure"]=preserve;
+            diagnostic["directoryExistsAfterTemporaryLifetime"]=QFileInfo::exists(temporaryRoot);
+            evidence(QString::fromLatin1(QTest::currentDataTag())+"-creation-diagnostic",diagnostic);
+        });
+        QTemporaryDir d;QVERIFY(d.isValid());temporaryRoot=d.path();
+        diagnostic["directoryCreatedUTCms"]=double(QDateTime::currentMSecsSinceEpoch());
+        const auto closed=qScopeGuard([&]{
+            diagnostic["libraryDestroyedUTCms"]=double(QDateTime::currentMSecsSinceEpoch());
+            diagnostic["connectionPresentAfterLibraryDestruction"]=QSqlDatabase::connectionNames().contains(connectionName);
+            diagnostic["databaseExistsAfterClose"]=QFileInfo::exists(QDir(temporaryRoot).filePath("data/relaxer.sqlite"));
+        });
+        Library l(d.filePath("data"));QVERIFY(l.open());connectionName=import_fixture::database(l).connectionName();
+        diagnostic["opened"]=artwork_diagnostics::databaseState(l,"opened");
         auto red=bytes(embedded(d.path(),"red",Qt::red)),green=bytes(embedded(d.path(),"green",Qt::green));QVERIFY(!red.isEmpty()&&!green.isEmpty());
         const auto size=qMax(red.size(),green.size());red.resize(size,'\0');green.resize(size,'\0');QVERIFY(red!=green);
-        const auto source=d.filePath("padded.mp3");QVERIFY(write(source,red));auto t=legacy(l,source);QVERIFY(t.id);
+        const auto source=d.filePath("padded.mp3");QVERIFY(write(source,red));QJsonObject creation;
+        auto t=artwork_diagnostics::legacy(l,source,creation);diagnostic["creation"]=creation;
+        if(!t.id){preserve=true;d.setAutoRemove(false);qWarning().noquote()<<"ARTWORK_CREATION_FAILURE"<<QJsonDocument(creation).toJson(QJsonDocument::Compact);}
+        QVERIFY(t.id);
         QVERIFY(l.saveLyricsPreservingText(t.id,"[00:01.00]Keep original lyric\n"));QVERIFY(l.favorite(t.id,true));
         const auto list=l.createPlaylist("Integrity");QVERIFY(l.addToPlaylist(list,{t.id}));t=l.track(t.id);
         const auto r=Importer::repairArtwork(l.root(),t);QCOMPARE(r.outcome,ArtworkOutcome::Recovered);QVERIFY(closeColor(decodeRecoveredArtwork(r.png),Qt::red));
@@ -86,6 +105,7 @@ private slots:
         if(change=="unreadable"){denied=CreateFileW(reinterpret_cast<LPCWSTR>(sourcePath.utf16()),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);QVERIFY(denied!=INVALID_HANDLE_VALUE);}
 #endif
         const bool matches=l.artworkSnapshotMatches(r);const bool applied=l.applyArtworkRepair(r);
+        diagnostic["after-artwork-commit"]=artwork_diagnostics::databaseState(l,"after-artwork-commit");
 #ifdef Q_OS_WIN
         if(denied!=INVALID_HANDLE_VALUE)CloseHandle(denied);
 #else
