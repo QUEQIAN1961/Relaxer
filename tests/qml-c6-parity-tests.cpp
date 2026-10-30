@@ -1,7 +1,9 @@
 #include "c4c5-ui-fixture.h"
+#include "background-window-fixture.h"
 #include "shortcut-rules.h"
 #include "ui-bridge/ui-integration.h"
 #include <QAction>
+#include <QJsonArray>
 #include <QApplication>
 #include <QFont>
 #include <QJsonDocument>
@@ -28,9 +30,25 @@ void record(const QString &name,QJsonObject data){
 }
 bool prepare(Fixture &fixture){
     if(!fixture.ok)return false;
-    auto *window=fixture.shell->window();window->showNormal();window->setGeometry(45,50,1240,790);window->requestActivate();
+    auto *window=fixture.shell->window();window->showNormal();window->setGeometry(45,50,1240,790);
     if(!QTest::qWaitForWindowExposed(window))return false;
-    fixture.shell->playbackBridge()->pause();QTest::qWait(100);return true;
+    auto *player=fixture.shell->facade();auto *media=player->backend()->media();
+    const bool earlyPauseWouldBeIgnored=!player->playing();const auto initialStatus=media->mediaStatus();
+    const auto ready=[&]{const auto status=media->mediaStatus();return player->playing()&&player->seekable()&&
+        (status==QMediaPlayer::LoadedMedia||status==QMediaPlayer::BufferingMedia||status==QMediaPlayer::BufferedMedia);};
+    record("fixture-readiness-before",{{"method",QString::fromLatin1(QTest::currentTestFunction())},{"playing",player->playing()},
+        {"seekable",player->seekable()},{"mediaStatus",int(media->mediaStatus())},{"position",double(player->position())},{"duration",double(player->duration())},{"error",media->errorString()}});
+    if(!QTest::qWaitFor(ready,5000)){
+        record("fixture-readiness-timeout",{{"method",QString::fromLatin1(QTest::currentTestFunction())},{"playing",player->playing()},
+            {"seekable",player->seekable()},{"mediaStatus",int(media->mediaStatus())},{"position",double(player->position())},{"duration",double(player->duration())},{"error",media->errorString()}});
+        return false;
+    }
+    fixture.shell->playbackBridge()->pause();
+    const bool paused=QTest::qWaitFor([&]{return !player->playing();},5000);
+    record("fixture-paused-ready",{{"method",QString::fromLatin1(QTest::currentTestFunction())},
+        {"earlyPauseWouldBeIgnored",earlyPauseWouldBeIgnored},{"initialMediaStatus",int(initialStatus)},
+        {"readyBeforePause",true},{"paused",paused},{"mediaStatus",int(media->mediaStatus())}});
+    return paused;
 }
 QQuickItem *textItem(QQuickItem *root,const QString &text){
     if(root->property("text").toString()==text)return root;
@@ -57,12 +75,42 @@ public:
     });ready.acquire();}
     ~Reservation(){finish.release();thread.join();}
 };
-bool pressGlobal(){
+enum class Foreground { Owned, None, Unowned };
+Foreground classifyForeground(HWND foreground, HWND owned) {
+    return foreground == nullptr ? Foreground::None :
+        foreground == owned ? Foreground::Owned : Foreground::Unowned;
+}
+QJsonObject foregroundSnapshot(HWND owned) {
+    const auto foreground = GetForegroundWindow();
+    DWORD pid = 0;
+    if (foreground) GetWindowThreadProcessId(foreground, &pid);
+    const auto state = classifyForeground(foreground, owned);
+    return {{"state", state == Foreground::Owned ? "owned" : state == Foreground::None ? "none" : "unowned"},
+        {"foreground", QString::number(quintptr(foreground), 16)}, {"owned", QString::number(quintptr(owned), 16)},
+        {"ownerPID", double(pid)}, {"testPID", double(GetCurrentProcessId())},
+        {"externalProcess", foreground && pid != GetCurrentProcessId()}};
+}
+enum class Injection { Sent, Unavailable, Failed };
+Injection pressGlobal(HWND owned, QJsonArray &attempts) {
+    auto evidence = foregroundSnapshot(owned);
+    if (evidence["state"].toString() != "owned") {
+        evidence["sentEvents"] = 0; evidence["result"] = "ENVIRONMENT NOT EXECUTED";
+        attempts.append(evidence); record("native-input-attempt",evidence); return Injection::Unavailable;
+    }
+    // Recheck at the injection boundary, not Qt's activation notification.
+    if (GetForegroundWindow() != owned) {
+        evidence["sentEvents"] = 0; evidence["result"] = "ENVIRONMENT NOT EXECUTED: foreground changed";
+        attempts.append(evidence); record("native-input-attempt",evidence); return Injection::Unavailable;
+    }
     INPUT events[8]{};const WORD keys[]{VK_CONTROL,VK_MENU,VK_SHIFT,VK_F24,VK_F24,VK_SHIFT,VK_MENU,VK_CONTROL};
     for(int i=0;i<8;++i){events[i].type=INPUT_KEYBOARD;events[i].ki.wVk=keys[i];events[i].ki.dwFlags=i>=4?KEYEVENTF_KEYUP:0;}
     const auto sent=SendInput(8,events,sizeof(INPUT));
-    if(sent!=8){INPUT releases[4]{};for(int i=0;i<4;++i){releases[i].type=INPUT_KEYBOARD;releases[i].ki.wVk=keys[3-i];releases[i].ki.dwFlags=KEYEVENTF_KEYUP;}SendInput(4,releases,sizeof(INPUT));}
-    return sent==8;
+    evidence["sentEvents"] = int(sent); evidence["result"] = sent == 8 ? "EXECUTED" : "FAIL: partial SendInput";
+    evidence["foregroundAfter"] = QString::number(quintptr(GetForegroundWindow()), 16);
+    attempts.append(evidence);
+    record("native-input-attempt",evidence);
+    if(sent!=8 && GetForegroundWindow()==owned){INPUT releases[4]{};for(int i=0;i<4;++i){releases[i].type=INPUT_KEYBOARD;releases[i].ki.wVk=keys[3-i];releases[i].ki.dwFlags=KEYEVENTF_KEYUP;}SendInput(4,releases,sizeof(INPUT));}
+    return sent == 8 ? Injection::Sent : Injection::Failed;
 }
 #endif
 }
@@ -75,12 +123,21 @@ private slots:
         qInfo().noquote()<<"C6_PARITY_EVIDENCE"<<evidence;
     }
     void nativeAppAndGlobalShortcutRegistrationDispatchAndRelease(){
+        const BackgroundWindowFixture background;
+        QVERIFY2(background.installed(),"Could not install the test-thread non-activation guard");
         Fixture fixture(2);QVERIFY(prepare(fixture));auto *window=fixture.shell->window();
         auto *integration=fixture.shell->findChild<UiIntegration *>();QVERIFY(integration);
         fixture.shell->playbackBridge()->setVolume(40);window->contentItem()->forceActiveFocus();
+        const bool localQtKeys=window->isActive()&&QGuiApplication::focusWindow()==window;
+        if(localQtKeys){
         QTest::keyClick(window,Qt::Key_Up,Qt::ControlModifier);QCOMPARE(fixture.shell->playbackBridge()->volume(),45);
         auto *search=visual(window->contentItem(),"librarySearch");QVERIFY(search);search->forceActiveFocus();
         QTest::keyClick(window,Qt::Key_Up,Qt::ControlModifier);QCOMPARE(fixture.shell->playbackBridge()->volume(),45);
+        }else{
+            // Initialize the independent global-dispatch contract; this does
+            // not stand in for the unavailable Qt-active local key path.
+            fixture.shell->playbackBridge()->setVolume(45);
+        }
         window->contentItem()->forceActiveFocus();
 #ifdef Q_OS_WIN
         auto config=ShortcutRules::defaults();auto global=config["global"].toObject();
@@ -96,51 +153,79 @@ private slots:
         }
         {Reservation rollback(VK_F24);QVERIFY(!rollback.registered);}
         QWidget ownedForeground;ownedForeground.setWindowTitle("Relaxer owned shortcut test");ownedForeground.resize(260,90);
-        ownedForeground.show();ownedForeground.raise();ownedForeground.activateWindow();
-        QVERIFY(QTest::qWaitForWindowActive(&ownedForeground));
-        const bool interactive=GetForegroundWindow()!=nullptr;
-        UINT registeredId=0;
-        if(interactive){
-            QCOMPARE(GetForegroundWindow(),reinterpret_cast<HWND>(ownedForeground.winId()));
-            QVERIFY(pressGlobal());
-        }else{
-            // A service/isolated desktop can expose Qt windows but have no OS
-            // foreground window. Do not inject input into an unknown desktop
-            // or claim physical-key dispatch. Verify the registered native
-            // handler, then the real OS thread-message queue below.
+        ownedForeground.setAttribute(Qt::WA_ShowWithoutActivating);
+        ownedForeground.show();
+        const auto owned = reinterpret_cast<HWND>(ownedForeground.winId());
+        // Pure decision coverage never feeds a synthetic HWND into SendInput.
+        QCOMPARE(classifyForeground(owned, owned), Foreground::Owned);
+        QCOMPARE(classifyForeground(nullptr, owned), Foreground::None);
+        QCOMPARE(classifyForeground(reinterpret_cast<HWND>(quintptr(owned)+1), owned), Foreground::Unowned);
+        const auto initialForeground = foregroundSnapshot(owned);
+        QJsonArray injectionAttempts;
+        UINT registeredId=0;bool handlerDispatch=false,threadDispatch=false;
+        auto controlledHandler = [&] {
             MSG message{};message.message=WM_HOTKEY;qintptr result=0;
             for(UINT id=1;id<0xbfff;++id){message.wParam=id;
-                if(integration->nativeEventFilter("windows_dispatcher_MSG",&message,&result)){registeredId=id;break;}}
-            QVERIFY(registeredId);
-        }
+                if(integration->nativeEventFilter("windows_dispatcher_MSG",&message,&result)){registeredId=id;handlerDispatch=true;return true;}}
+            return false;
+        };
+        const auto first = pressGlobal(owned, injectionAttempts);
+        QVERIFY2(first != Injection::Failed, "Owned-window SendInput failed; do not mask an attempted injection");
+        if(first == Injection::Unavailable) QVERIFY(controlledHandler());
         QTRY_COMPARE(fixture.shell->playbackBridge()->volume(),50);
         integration->setShortcutRecording(true);
         {Reservation released(VK_F24);QVERIFY(released.registered);}
         integration->setShortcutRecording(false);
-        if(interactive)QVERIFY(pressGlobal());
-        else QVERIFY(PostThreadMessageW(GetCurrentThreadId(),WM_HOTKEY,registeredId,MAKELPARAM(MOD_CONTROL|MOD_ALT|MOD_SHIFT,VK_F24)));
+        const auto second = pressGlobal(owned, injectionAttempts);
+        QVERIFY2(second != Injection::Failed, "Owned-window SendInput failed; do not mask an attempted injection");
+        if(second == Injection::Unavailable) {
+            if(registeredId) {
+                QVERIFY(PostThreadMessageW(GetCurrentThreadId(),WM_HOTKEY,registeredId,MAKELPARAM(MOD_CONTROL|MOD_ALT|MOD_SHIFT,VK_F24)));
+                threadDispatch=true;
+            } else QVERIFY(controlledHandler());
+        }
         QTRY_COMPARE(fixture.shell->playbackBridge()->volume(),55);
         fixture.shell.reset();
         {Reservation destroyed(VK_F24);QVERIFY(destroyed.registered);}
-        record("native-global-shortcuts",{{"osRegistration",true},{"conflictRollback",true},{"ownedOtherWindowForeground",interactive},
-            {"osSendInputDispatch",interactive},{"osKeyboardDispatchStatus",interactive?"EXECUTED":"NOT EXECUTED: OS foreground window unavailable"},
-            {"nativeThreadMessageDispatch",!interactive},{"recordingReleasesAndRestores",true},{"destructionReleases",true},{"finalVolume",55}});
+        const bool nativeComplete=first==Injection::Sent && second==Injection::Sent;
+        const int nativeCalls=int(first==Injection::Sent)+int(second==Injection::Sent);
+        record("native-global-shortcuts",{{"osRegistration",true},{"conflictRollback",true},
+            {"foregroundClassifierCases",QJsonArray{"owned","none","unowned"}},{"initialForeground",initialForeground},
+            {"injectionAttempts",injectionAttempts},{"osSendInputCalls",nativeCalls},{"osSendInputDispatch",nativeComplete},
+            {"osKeyboardDispatchStatus",nativeComplete?"EXECUTED":"ENVIRONMENT NOT EXECUTED OR PARTIAL: input-test window is not OS foreground"},
+            {"nativeHandlerDispatch",handlerDispatch},{"nativeThreadMessageDispatch",threadDispatch},
+            {"testThreadProgrammaticActivationBlocked",true},{"localQtKeyDispatch",localQtKeys},
+            {"recordingReleasesAndRestores",true},{"destructionReleases",true},{"finalVolume",55},
+            {"qtTestResult",nativeComplete&&localQtKeys?"PASS":"ENVIRONMENT SKIP (registration/controlled dispatch assertions passed)"}});
+        QCOMPARE(fixture.http.requestCount(),0);
+        if(!nativeComplete||!localQtKeys) QSKIP("ENVIRONMENT: owned OS foreground / Qt-active local-key path unavailable; controlled dispatch/lifecycle verified separately; unexecuted input is not PASS");
 #else
         record("native-global-shortcuts",{{"status","NOT EXECUTED: Windows-only registration"}});
 #endif
         QCOMPARE(fixture.http.requestCount(),0);
     }
     void trayActionsUseExistingFacadeRestoreAndQuit(){
+        const BackgroundWindowFixture background;
+        QVERIFY2(background.installed(),"Could not install the test-thread non-activation guard");
         Fixture fixture(2);QVERIFY(prepare(fixture));auto *window=fixture.shell->window();auto *facade=fixture.shell->facade();
         auto *menu=trayMenu();QVERIFY(menu);auto *open=action(menu,"打开 Relaxer");auto *toggle=action(menu,"播放 / 暂停");
         auto *next=action(menu,"下一首");auto *previous=action(menu,"上一首");auto *quit=action(menu,"退出播放器");
         QVERIFY(open&&toggle&&next&&previous&&quit);
         const bool hostTray=QSystemTrayIcon::isSystemTrayAvailable();
+        auto snapshot=[&](const QString &stage){record("tray-"+stage,{{"playing",facade->playing()},{"shutdown",facade->isShutdown()},
+            {"available",fixture.shell->playbackBridge()->available()},{"visible",window->isVisible()},
+            {"mediaState",int(facade->backend()->media()->playbackState())},{"mediaStatus",int(facade->backend()->media()->mediaStatus())},
+            {"seekable",facade->seekable()},{"hostTray",hostTray},{"track",double(facade->current().id)},
+            {"closeToTray",fixture.shell->settingsBridge()->values().value("closeToTray").toBool()}});};
+        snapshot("before-close");
         QVERIFY(fixture.shell->settingsBridge()->setPreference("closeToTray",true));
         if(hostTray){QVERIFY(!window->close());QTRY_VERIFY(!window->isVisible());}
         else window->hide();
+        snapshot("after-close");
         open->trigger();QTRY_VERIFY(window->isVisible());
-        toggle->trigger();QTRY_VERIFY(facade->playing());toggle->trigger();QTRY_VERIFY(!facade->playing());
+        snapshot("after-open");
+        QVERIFY2(!facade->playing(),"Tray toggle contract must begin in the confirmed paused fixture state");
+        toggle->trigger();snapshot("after-toggle");QTRY_VERIFY(facade->playing());toggle->trigger();QTRY_VERIFY(!facade->playing());
         next->trigger();QTRY_COMPARE(facade->current().id,fixture.b.id);previous->trigger();QTRY_COMPARE(facade->current().id,fixture.a.id);
         QCOMPARE(fixture.shell->findChildren<Playback *>().size(),1);QCOMPARE(QSqlDatabase::connectionNames().size(),1);
         quit->trigger();QTRY_VERIFY(!window->isVisible());QVERIFY(window->property("exitRequested").toBool());

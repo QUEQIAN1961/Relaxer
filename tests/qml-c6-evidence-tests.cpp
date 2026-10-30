@@ -1,4 +1,5 @@
 #include "c4c5-ui-fixture.h"
+#include "background-window-fixture.h"
 #include <QApplication>
 #include <QDateTime>
 #include <QElapsedTimer>
@@ -35,9 +36,14 @@ void shot(QQuickWindow *w,const QString &name){
 }
 bool prepare(Fixture &f){
     if(!f.ok)return false;
-    auto *w=f.shell->window();w->showNormal();w->setGeometry(45,50,1240,790);w->requestActivate();
+    auto *w=f.shell->window();w->showNormal();w->setGeometry(45,50,1240,790);
     if(!QTest::qWaitForWindowExposed(w))return false;
-    f.shell->playbackBridge()->pause();QTest::qWait(100);return true;
+    auto *player=f.shell->facade();auto *media=player->backend()->media();
+    const auto ready=[&]{const auto status=media->mediaStatus();return player->playing()&&player->seekable()&&
+        (status==QMediaPlayer::LoadedMedia||status==QMediaPlayer::BufferingMedia||status==QMediaPlayer::BufferedMedia);};
+    if(!QTest::qWaitFor(ready,5000))return false;
+    f.shell->playbackBridge()->pause();
+    return QTest::qWaitFor([&]{return !player->playing();},5000);
 }
 QJsonArray rows(QQuickItem *list){
     QJsonArray values;
@@ -53,6 +59,37 @@ QJsonArray requests(TranslationHttpMock &http){
         {"body",QJsonDocument::fromJson(http.requestBody(i)).object()}});
     return result; // Headers, including the fake credential, are deliberately excluded.
 }
+class AnimationSamples final : public QObject {
+    Q_OBJECT
+public:
+    QQuickWindow *window; QQuickItem *clip,*panel;
+    QElapsedTimer clock; QJsonArray values;
+    double minY=1e9,maxY=-1e9,minH=1e9,maxH=-1e9;
+    int notifications=0,intermediate=0;
+    bool reverse=false,reversed=false,reverseInvoked=false;
+    double reversalJump=0;
+    AnimationSamples(QQuickWindow *w,QQuickItem *c,QQuickItem *p,bool r)
+        :window(w),clip(c),panel(p),reverse(r){clock.start();}
+    void sample(const char *source){
+        const auto box=rect(panel);const auto progress=window->property("playerProgress").toDouble();
+        minY=qMin(minY,box.y());maxY=qMax(maxY,box.y());minH=qMin(minH,clip->height());maxH=qMax(maxH,clip->height());
+        if(progress>0 && progress<1)++intermediate;
+        values.append(QJsonObject{{"source",source},{"ms",double(clock.elapsed())},{"progress",progress},
+            {"x",box.x()},{"y",box.y()},{"width",box.width()},{"height",box.height()},
+            {"backdropHeight",clip->height()},{"atLeft",window->property("upcomingAtLeft").toBool()},
+            {"coverRunning",window->property("coverTravelling").toBool()}});
+    }
+public slots:
+    void progressChanged(){
+        ++notifications;sample("progress-notify");
+        const auto progress=window->property("playerProgress").toDouble();
+        if(reverse&&!reversed&&progress>.1&&progress<.9){
+            reversed=true;const auto before=clip->height();
+            reverseInvoked=QMetaObject::invokeMethod(window,"closeLyrics");
+            reversalJump=qAbs(clip->height()-before);
+        }
+    }
+};
 }
 class C6EvidenceTests final:public QObject{
     Q_OBJECT
@@ -127,31 +164,52 @@ private slots:
         QPointer<PlaybackFacade> guard=p;QVERIFY(f.shell->shutdown());f.shell.reset();QVERIFY(!guard);
     }
     void actualAnimationFrames(){
+        const BackgroundWindowFixture background;
+        QVERIFY2(background.installed(),"Could not install the test-thread non-activation guard");
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();auto *clip=visual(root,"playerBackdropClip");auto *panel=visual(root,"nextQueuePanel");QVERIFY(clip&&panel);
         for(int scenario=0;scenario<5;++scenario){
-            const bool opening=scenario!=1; if(scenario==3)w->resize(1000,660);
-            if(scenario==4){QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QTest::qWait(500);}
-            QVERIFY(QMetaObject::invokeMethod(w,opening?"showLyrics":"closeLyrics"));
-            QElapsedTimer timer;timer.start();bool reversed=false;int frames=0;double minY=1e9,maxY=-1e9;double minH=1e9,maxH=-1e9;
-            while(timer.elapsed()<600){
-                // Reverse an observed intermediate frame. A synchronous
-                // screenshot may consume the first 100 ms before Qt's
-                // animation clock has advanced at all on a loaded runner.
-                const auto progress=w->property("playerProgress").toDouble();
-                if(scenario==2&&progress>.1&&progress<.9&&!reversed){const auto before=clip->height();QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QVERIFY(qAbs(clip->height()-before)<2);reversed=true;}
-                const auto r=rect(panel);minY=qMin(minY,r.y());maxY=qMax(maxY,r.y());minH=qMin(minH,clip->height());maxH=qMax(maxH,clip->height());
-                record("animation-frame",{{"scenario",scenario},{"ms",double(timer.elapsed())},{"x",r.x()},{"y",r.y()},{"width",r.width()},{"height",r.height()},{"opacity",panel->opacity()},{"visible",panel->isVisible()},{"atLeft",w->property("upcomingAtLeft").toBool()},{"backdropHeight",clip->height()},{"progress",w->property("playerProgress").toDouble()},{"coverRunning",w->property("coverTravelling").toBool()}});
-                if(frames%12==0)shot(w,QString("animation-%1-frame-%2").arg(scenario).arg(frames));++frames;QTest::qWait(10);
+            const bool opening=scenario!=1;
+            if(scenario==3)w->resize(1000,660);
+            if(scenario==4){
+                QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));
+                QTRY_VERIFY(w->property("playerProgress").toDouble()<.001 && !w->property("upcomingAtLeft").toBool());
             }
-            record("animation-summary",{{"scenario",scenario},{"frames",frames},{"minY",minY},{"maxY",maxY},{"minBackdrop",minH},{"maxBackdrop",maxH},{"finalProgress",w->property("playerProgress").toDouble()}});
-            QVERIFY(frames>15);
-            if(scenario==2)QVERIFY2(reversed,"No intermediate frame was observed for reversal");
-            // Reversing early intentionally travels only a short distance;
-            // full transitions must leave the bottom edge, reversal must move
-            // and settle without jumping (checked above at the reversal).
-            if(scenario==2)QVERIFY(maxY-minY>1);else QVERIFY(maxY-minY>20);
-            QVERIFY(maxH-minH>20);
-            const bool finalOpen=opening&&scenario!=2;QTRY_VERIFY(qAbs(w->property("playerProgress").toDouble()-(finalOpen?1:0))<.001);
+            const bool finalOpen=opening&&scenario!=2;
+            AnimationSamples samples(w,clip,panel,scenario==2);
+            const auto connection=connect(w,SIGNAL(playerProgressChanged()),&samples,SLOT(progressChanged()));
+            QVERIFY(connection);samples.sample("initial");
+            const auto initialProgress=w->property("playerProgress").toDouble();
+            const auto initialAtLeft=w->property("upcomingAtLeft").toBool();
+            QVERIFY(QMetaObject::invokeMethod(w,opening?"showLyrics":"closeLyrics"));
+            auto settled=[&]{return (scenario!=2||samples.reversed) &&
+                qAbs(w->property("playerProgress").toDouble()-(finalOpen?1:0))<.001 &&
+                w->property("upcomingAtLeft").toBool()==finalOpen &&
+                qAbs(w->property("upcomingTravel").toDouble())<.001 &&
+                !w->property("coverTravelling").toBool();};
+            int polls=0;
+            while(samples.clock.elapsed()<5000 && !settled()){
+                samples.sample("event-loop");++polls;QTest::qWait(5);
+            }
+            samples.sample("terminal");
+            const bool converged=settled();
+            const bool stable=converged&&remainsTrueFor(settled,60);
+            disconnect(connection);
+            // All disk I/O and screenshots follow observation/convergence.
+            record("animation-samples",{{"scenario",scenario},{"values",samples.values}});
+            record("animation-summary",{{"scenario",scenario},{"frames",polls},{"frameCountDiagnosticOnly",true},
+                {"progressNotifications",samples.notifications},{"intermediateSamples",samples.intermediate},
+                {"minY",samples.minY},{"maxY",samples.maxY},{"minBackdrop",samples.minH},{"maxBackdrop",samples.maxH},
+                {"initialProgress",initialProgress},{"initialAtLeft",initialAtLeft},
+                {"reversed",samples.reversed},{"reversalJump",samples.reversalJump},
+                {"finalProgress",w->property("playerProgress").toDouble()},
+                {"finalAtLeft",w->property("upcomingAtLeft").toBool()},{"converged",converged},{"stable",stable}});
+            shot(w,QString("animation-%1-terminal").arg(scenario));
+            QVERIFY2(samples.notifications>0 && samples.intermediate>0,"No real intermediate animation progress was observed");
+            if(scenario==2){QVERIFY(samples.reversed&&samples.reverseInvoked);QVERIFY(samples.reversalJump<2);QVERIFY(samples.maxY-samples.minY>1);}
+            else{QVERIFY(samples.maxY-samples.minY>20);QVERIFY(initialAtLeft!=finalOpen);}
+            QVERIFY(samples.maxH-samples.minH>20);
+            QVERIFY2(converged&&stable,"Animation did not settle and remain at its requested terminal state");
+            QTRY_VERIFY(qAbs(w->property("playerProgress").toDouble()-(finalOpen?1:0))<.001);
             QCOMPARE(w->property("upcomingAtLeft").toBool(),finalOpen);
         }
     }
