@@ -1,4 +1,5 @@
 #include "settings-bridge.h"
+#include "changelog-summary.h"
 #include "appearance-image.h"
 #include "shortcut-rules.h"
 #include <QColor>
@@ -69,7 +70,7 @@ SettingsBridge::~SettingsBridge() {
     if (m_fontId >= 0) QFontDatabase::removeApplicationFont(m_fontId);
 }
 
-QVariantList SettingsBridge::changelog() const {QFile file(":/changelog.json");return file.open(QIODevice::ReadOnly)?QJsonDocument::fromJson(file.readAll()).toVariant().toList():QVariantList();}
+QVariantList SettingsBridge::changelog() const {QFile file(":/changelog.json");return file.open(QIODevice::ReadOnly)?summarizedChangelog(QJsonDocument::fromJson(file.readAll()).array()).toVariantList():QVariantList();}
 
 QVariantMap SettingsBridge::values() const {
     return {{"theme", m_store.get("theme", 0).toInt()}, {"threshold", m_store.get("threshold", 80).toInt()},

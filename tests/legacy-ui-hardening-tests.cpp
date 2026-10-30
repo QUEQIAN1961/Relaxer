@@ -68,8 +68,10 @@ private slots:
         auto *notice=c4c5_fixture::visual(root,"feedbackNotice");QVERIFY(notice);QTRY_VERIFY(notice->isVisible());QTRY_VERIFY2(notice->mapToScene(QPointF()).y()>w->height()/2, qPrintable(QString("notice y=%1 height=%2 parent=%3x%4 window=%5x%6").arg(notice->y()).arg(notice->height()).arg(notice->parentItem()->width()).arg(notice->parentItem()->height()).arg(w->width()).arg(w->height())));QVERIFY(!w->property("popupOpen").toBool());
         QMetaObject::invokeMethod(settings,"open");QTRY_VERIFY(!notice->isVisible());QMetaObject::invokeMethod(settings,"close");QTRY_VERIFY(notice->isVisible());
         QVERIFY(!c4c5_fixture::visual(root,"feedbackReason")->property("text").toString().contains("raw English"));
-        auto *fullscreen=c4c5_fixture::visual(root,"playerFullscreen");QVERIFY(fullscreen);QVERIFY(QMetaObject::invokeMethod(fullscreen,"clicked"));QTRY_COMPARE(w->visibility(),QWindow::FullScreen);
-        QVERIFY(QMetaObject::invokeMethod(fullscreen,"clicked"));QTRY_VERIFY(w->visibility()!=QWindow::FullScreen);
+        QVERIFY(!c4c5_fixture::visual(root,"playerFullscreen"));
+        QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("lyricsOpen").toBool());
+        auto *collapse=c4c5_fixture::visual(root,"playerCollapse");QVERIFY(collapse);
+        QVERIFY(QMetaObject::invokeMethod(collapse,"clicked"));QTRY_VERIFY(!w->property("lyricsOpen").toBool());
         QVERIFY(shell.warnings().isEmpty());QVERIFY(shell.shutdown());
     }
 };

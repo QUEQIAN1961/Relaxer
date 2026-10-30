@@ -1292,7 +1292,7 @@ void Window::showProfile() {
     refresh();
 }
 void Window::showSettings(){bool returning=m_pages->currentIndex()==5||(m_appearancePage&&m_pages->currentWidget()==m_appearancePage)||(m_aiPage&&m_pages->currentWidget()==m_aiPage);setPage(3);if(returning&&m_pages->currentIndex()==3){setFocus(Qt::OtherFocusReason);auto *scroll=findChild<QScrollArea *>("settingsScroll");scroll->verticalScrollBar()->setValue(m_settingsScrollPosition);QTimer::singleShot(0,this,[this,scroll]{if(m_pages->currentIndex()==3)scroll->verticalScrollBar()->setValue(m_settingsScrollPosition);});}}
-void Window::showVersionLog(){if(m_pages->currentIndex()==3)m_settingsScrollPosition=findChild<QScrollArea *>("settingsScroll")->verticalScrollBar()->value();setPage(5);}
+void Window::showVersionLog(){if(auto *log=findChild<ChangeLog *>())log->reset();if(m_pages->currentIndex()==3)m_settingsScrollPosition=findChild<QScrollArea *>("settingsScroll")->verticalScrollBar()->value();setPage(5);}
 void Window::showNowPlaying() {
     setPage(4);
 }

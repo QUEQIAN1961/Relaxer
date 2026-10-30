@@ -111,6 +111,7 @@ def deploy(args, logs):
     shutil.copy2(build / "Relaxer.exe", runtime)
     shutil.copy2(build / "RelaxerQmlUi.dll", runtime)
     shutil.copy2(build / "RelaxerStart.exe", dest)
+    shutil.copy2(build / "RelaxerPortable.exe", dest / "Relaxer.exe")
     shutil.copy2(build / "RelaxerLockCheck.exe", dest)
     shutil.copy2(source / "THIRD_PARTY_NOTICES.md", dest)
     for name in ('LICENSE', 'LICENSE-NOTICE.txt'):
@@ -168,7 +169,7 @@ def deploy(args, logs):
     # The optional QML DLL is copied explicitly above. No retained build DLL may
     # silently satisfy a third-party dependency.
     closure(runtime, [runtime / "Relaxer.exe", *runtime.rglob("*.dll")], [quick / "bin", qt / "bin"])
-    closure(dest, [dest / "RelaxerStart.exe", dest / "RelaxerLockCheck.exe"], [quick / "bin", qt / "bin"])
+    closure(dest, [dest / "RelaxerStart.exe", dest / "RelaxerLockCheck.exe", dest / "Relaxer.exe"], [quick / "bin", qt / "bin"])
     closure(runtime / "bin", list((runtime / "bin").glob("*.exe")), [ffmpeg, qt / "bin"])
     for prefix in (qt, quick):
         license_root = prefix / "share/licenses"
@@ -177,8 +178,8 @@ def deploy(args, logs):
     (dest / "RelaxerWidgets.cmd").write_text('@echo off\r\nsetlocal\r\n"%~dp0runtime\\Relaxer.exe" --ui=widgets %*\r\nexit /b %errorlevel%\r\n', encoding="ascii")
     (dest / "READ-ME-FIRST.md").write_text(
         f"# Relaxer {display}\n\n"
-        "测试入口：双击 RelaxerQml.cmd；兼容界面：RelaxerWidgets.cmd。\n"
-        "RelaxerStart.exe 已包含，但首次启动器正向流程仍待完整验收。\n"
+        "应用入口：双击根目录 Relaxer.exe（默认 QML）；兼容界面：Relaxer.exe --widgets 或 RelaxerWidgets.cmd。\n"
+        "RelaxerStart.exe 是源码准备启动器；私人测试包不提供准备标记，首次准备仍待完整验收。\n"
         "两种界面使用同一资料目录和锁，请先关闭另一入口。\n"
         "首次独立验证可使用 runtime/Relaxer.exe --ui=qml --data <测试目录>。\n"
         "歌曲、歌词和自定义资源保存在资料目录；发行包不包含个人资料或 AI 凭据。\n"
@@ -193,6 +194,10 @@ def deploy(args, logs):
         else:
             fields.update(audio_decode=True, audio_device_required=False, media_clock=False)
         (runtime / "relaxer-ready.json").write_text(json.dumps(marker(version, displayVersion=display, **fields)), encoding="utf-8")
+    # Separate portable integrity evidence, never a readiness or release claim.
+    checksums = ''.join(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.relative_to(dest).as_posix() + '\n'
+                        for p in sorted(runtime.rglob('*')) if p.is_file())
+    (dest / 'PORTABLE-SHA256SUMS.txt').write_text(checksums, encoding='utf-8', newline='\n')
     proof = {"version": version, "displayVersion": display, "sourceFingerprint": fingerprint, "sourceCommit": commit, "sourceTree": tree,
              "qmlImports": imports, "copiedDependencies": sorted(copied), "resolvedDependencyInputs": sorted(str(p) for p in seen_dependencies),
              "binarySHA256": binary_hashes, "coreBinarySHA256": core_hashes, "stagingPolicy": "fresh-build-inputs-only",

@@ -5,6 +5,7 @@
 #include <QEventLoop>
 #include <QCoreApplication>
 #include <QEvent>
+#include <QMouseEvent>
 #include <QTimer>
 
 static void initializeQmlResources() { Q_INIT_RESOURCE(qml); }
@@ -111,6 +112,10 @@ QQuickWindow *QmlShell::window() const {
 }
 bool QmlShell::shutdown() {m_feedback.setClosing(true);m_searchBridge.cancelInstrumentalBatch();m_search.shutdown();m_translation.shutdown();m_import.shutdown();return m_facade.shutdown(true);}
 bool QmlShell::eventFilter(QObject *object,QEvent *event){
+    if(event->type()==QEvent::MouseButtonPress && object==window()) {
+        const auto point=static_cast<QMouseEvent *>(event)->position();
+        QMetaObject::invokeMethod(window(),"feedbackPointerPressed",Q_ARG(QVariant,point.x()),Q_ARG(QVariant,point.y()));
+    }
     if(object==QCoreApplication::instance()&&event->type()==QEvent::Quit&&
        object->property("relaxerInteractiveExit").toBool()&&!m_facade.isShutdown()&&window()){
         QMetaObject::invokeMethod(window(),"requestQuit");event->ignore();return true;

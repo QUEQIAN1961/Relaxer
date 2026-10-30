@@ -44,7 +44,7 @@ def inventory(stage, test_proof=None):
         if forbidden: raise ValueError(f"Runtime residue or private input is forbidden: {relative}")
         entries[relative] = hashlib.sha256(file.read_bytes()).hexdigest()
     required = ["RelaxerStart.exe", "RelaxerQml.cmd", "runtime/Relaxer.exe", "runtime/RelaxerQmlUi.dll",
-                "runtime/Qt6Qml.dll", "runtime/Qt6Quick.dll", "runtime/Qt6QuickControls2.dll"]
+                "runtime/Qt6Qml.dll", "runtime/Qt6Quick.dll", "runtime/Qt6QuickControls2.dll", "Relaxer.exe", "PORTABLE-SHA256SUMS.txt"]
     required += (["TEST-ONLY-README.txt", "BUILD-IDENTITY.json", "RelaxerWidgets.cmd", "RelaxerLockCheck.exe", "runtime/qt.conf"]
                  if test_proof is not None else ["runtime/relaxer-ready.json"])
     for name in required:
@@ -55,6 +55,7 @@ def inventory(stage, test_proof=None):
         raise ValueError("Stage binaries differ from the native candidate QA proof")
     if test_proof is not None:
         actual['RelaxerLockCheck.exe']=entries['RelaxerLockCheck.exe']
+        actual['RelaxerPortable.exe']=entries['Relaxer.exe']
         if actual != test_proof['coreBinarySHA256']:
             raise ValueError('Private test core binaries differ from validated candidate')
     return entries

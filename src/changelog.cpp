@@ -1,4 +1,5 @@
 #include "changelog.h"
+#include "changelog-summary.h"
 #include <QFile>
 #include <QJsonDocument>
 #include <QLabel>
@@ -14,7 +15,7 @@ ChangeLog::ChangeLog(QWidget *parent, QJsonArray entries) : QWidget(parent), m_e
     if (m_entries.isEmpty()) {
         QFile file(":/changelog.json");
         if (file.open(QIODevice::ReadOnly))
-            m_entries = QJsonDocument::fromJson(file.readAll()).array();
+            m_entries = summarizedChangelog(QJsonDocument::fromJson(file.readAll()).array());
     }
     m_layout = new QVBoxLayout(this);
     m_layout->setContentsMargins(0, 16, 0, 0);

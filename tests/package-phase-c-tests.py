@@ -19,7 +19,7 @@ class PackagingPolicy(unittest.TestCase):
         self.stage = self.root / "fresh stage"
         self.stage.mkdir()
         for name in ["RelaxerStart.exe", "RelaxerQml.cmd", "runtime/Relaxer.exe", "runtime/RelaxerQmlUi.dll",
-                     "runtime/relaxer-ready.json", "runtime/Qt6Qml.dll", "runtime/Qt6Quick.dll", "runtime/Qt6QuickControls2.dll"]:
+                     "Relaxer.exe", "PORTABLE-SHA256SUMS.txt", "runtime/relaxer-ready.json", "runtime/Qt6Qml.dll", "runtime/Qt6Quick.dll", "runtime/Qt6QuickControls2.dll"]:
             file = self.stage / name
             file.parent.mkdir(exist_ok=True)
             file.write_bytes(b"policy fixture")
@@ -72,7 +72,7 @@ class PackagingPolicy(unittest.TestCase):
         proof.update(verified=False,sourceCommit='commit',sourceTree='tree',sourceFingerprint='fingerprint')
         for name in ('TEST-ONLY-README.txt','BUILD-IDENTITY.json','RelaxerWidgets.cmd','RelaxerLockCheck.exe','runtime/qt.conf'):
             (self.stage/name).write_bytes(b'policy fixture')
-        proof['coreBinarySHA256']={**proof['binarySHA256'],'RelaxerLockCheck.exe':hashlib.sha256(b'policy fixture').hexdigest()}
+        proof['coreBinarySHA256']={**proof['binarySHA256'],'RelaxerLockCheck.exe':hashlib.sha256(b'policy fixture').hexdigest(),'RelaxerPortable.exe':hashlib.sha256(b'policy fixture').hexdigest()}
         (self.stage/'deployment.json').write_text(json.dumps(proof))
         qa={key:proof[key] for key in ('sourceCommit','sourceTree','sourceFingerprint','coreBinarySHA256')}
         qa.update(purpose='private-test-unverified',publicDistributionApproved=False,

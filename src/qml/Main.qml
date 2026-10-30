@@ -120,6 +120,7 @@ ApplicationWindow {
     }
     onLyricsOpenChanged: relocateUpcoming(lyricsOpen)
     function showLyrics() { animatePlayer(true) }
+    function feedbackPointerPressed(x,y) { feedbackPanel.pointerPressed(x,y) }
     function closeLyrics() { if (fullScreenMode) toggleFullscreen(); animatePlayer(false) }
     function toggleFullscreen() {
         const revision = ++fullscreenRevision

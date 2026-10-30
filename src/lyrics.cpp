@@ -54,7 +54,20 @@ Lyrics Lyrics::parse(const QByteArray &bytes) {
         std::stable_sort(out.lines.begin(), out.lines.end(),
                          [](const auto &a, const auto &b) { return a.time < b.time; });
     }
-    if(out.lines.size()==1&&out.lines.first().text.trimmed()==QString("纯音乐，请欣赏")){out.instrumental=true;out.timed=false;out.lines.first().time=-1;}
+    const QRegularExpression placeholder(QStringLiteral(
+        "^(?:纯音乐[，,]请欣赏|此歌曲为没有填词的(?:纯音乐|DJ舞曲)[，,]请您欣赏)[。.!！]?$"),
+        QRegularExpression::CaseInsensitiveOption);
+    bool marker = false, words = false;
+    for (const auto &line : out.lines) {
+        const auto value = line.text.trimmed();
+        if (value.isEmpty()) continue;
+        if (placeholder.match(value).hasMatch()) marker = true;
+        else words = true;
+    }
+    if (marker && !words) {
+        out.instrumental = true; out.timed = false; out.bilingual = false;
+        out.lines = {{-1, QStringLiteral("纯音乐，请欣赏")}};
+    }
     return out;
 }
 int Lyrics::indexAt(qint64 ms) const {

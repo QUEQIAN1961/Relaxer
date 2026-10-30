@@ -2,7 +2,7 @@
 import hashlib
 from pathlib import Path
 
-CORE_BINARIES = ('Relaxer.exe', 'RelaxerStart.exe', 'RelaxerQmlUi.dll', 'RelaxerLockCheck.exe')
+CORE_BINARIES = ('Relaxer.exe', 'RelaxerStart.exe', 'RelaxerQmlUi.dll', 'RelaxerLockCheck.exe', 'RelaxerPortable.exe')
 
 
 def binary_identity(build, fingerprint):

@@ -61,7 +61,7 @@ std::wstring systemError(DWORD code) {
     return result + L"\n错误码：" + std::to_wstring(code);
 }
 void fail(const std::wstring &message) {
-    MessageBoxW(nullptr, message.c_str(), L"Relaxer 启动提示", MB_OK | MB_ICONERROR);
+    MessageBoxW(nullptr, message.c_str(), L"Relaxer 源码准备启动器", MB_OK | MB_ICONERROR);
 }
 std::wstring logExcerpt(const std::string &bytes) {
     std::wstring result = relaxer::launch::decodeLog(bytes);
@@ -537,6 +537,13 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             for (const auto name : {"Relaxer.exe", "relaxer-ready.json"})
                 if (!fs::is_regular_file(runtime / name))
                     missing += L"\n" + (runtime / name).wstring();
+            if (fs::is_regular_file(root / "PORTABLE-SHA256SUMS.txt") && fs::is_regular_file(root / "Relaxer.exe")) {
+                fail(L"这是私人便携测试包，请双击同目录的 Relaxer.exe 启动应用。\n"
+                     L"RelaxerStart.exe 是源码准备启动器，需要真实部署验证标记；本测试包没有完成该准备流程。\n"
+                     L"运行 CMD 或应用不会生成准备标记，请勿手工创建。\n退出码：1");
+                if (SUCCEEDED(com)) CoUninitialize();
+                return 1;
+            }
             fail(L"没有找到完整的 Relaxer 文件。\n\n请先把 ZIP 全部解压到一个新文件夹，"
                  L"再运行其中的 RelaxerStart.exe。不要直接在压缩包内运行，也不要只取出 EXE。"
                  L"\n\n缺少启动所需文件：" + missing +

@@ -33,7 +33,6 @@ Item {
         x:34;y:28;width:parent.width-68;height:34;opacity:page.detailsOpacity
         ShellButton{objectName:"playerCollapse";text:"收起";flat:true;symbol:"collapse";onClicked:page.collapseRequested()}
         Item{Layout.fillWidth:true}
-        ShellButton { objectName: "playerFullscreen"; text: page.fullScreen ? "退出全屏" : "全屏"; flat: true; onClicked: page.fullscreenRequested() }
     }
     RowLayout{
         anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;anchors.bottom:parent.bottom

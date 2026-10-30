@@ -11,16 +11,25 @@ Item {
     onSuspendedChanged: updateFeedback()
     property var selected: ({})
     property string lastEventId: ""
+    property bool historyAvailable: false
+    property bool hadNotice: false
+    function hideHistory() { historyAvailable=false; historyExpiry.stop() }
     function openDetails(entry) { selected = entry || service.current; details.open() }
     function updateFeedback() {
         if (service.visible) {
             if (lastEventId !== String(service.current.eventId)) {
                 if (suspended) { expiry.stop(); return }
                 lastEventId = String(service.current.eventId)
+                historyAvailable = true
+                historyExpiry.stop()
                 expiry.restart()
             }
+            hadNotice = true
             if (!suspended) service.presented(String(service.current.eventId))
-        } else expiry.stop()
+        } else {
+            expiry.stop()
+            if (hadNotice) { hadNotice=false; if(historyAvailable) historyExpiry.restart() }
+        }
     }
     Component.onCompleted: updateFeedback()
     Connections { target: panel.service; function onChanged() { panel.updateFeedback() } }
@@ -56,13 +65,30 @@ Item {
             }
         }
     }
-    ShellButton {
-        objectName: "feedbackHistoryButton"
+    Timer { id: historyExpiry; objectName: "feedbackHistoryExpiry"; interval: 10000; onTriggered: panel.hideHistory() }
+    // The shell observes window presses without consuming them. A full-window
+    // overlay pointer handler would prevent buttons underneath from receiving input.
+    function pointerPressed(x,y) {
+            const content=panel.Window.window.contentItem
+            if(details.visible) {
+                const popup=details.contentItem.parent
+                const d=popup.mapFromItem(content,x,y)
+                if(d.x<0 || d.y<0 || d.x>popup.width || d.y>popup.height) details.close()
+            }
+            const p=historyControls.mapFromItem(content,x,y)
+            if(p.x<0 || p.y<0 || p.x>historyControls.width || p.y>historyControls.height) panel.hideHistory()
+    }
+    RowLayout {
+        id: historyControls
+        objectName: "feedbackHistoryControls"
         anchors.right: parent.right; anchors.rightMargin: 16
         anchors.bottom: parent.bottom; anchors.bottomMargin: 84
-        visible: panel.service.history.length > 0 && !panel.service.visible && !panel.suspended
-        text: "操作记录"; flat: true
-        onClicked: panel.openDetails(panel.service.history[0])
+        visible: panel.historyAvailable && panel.service.history.length > 0 && !panel.service.visible && !panel.suspended
+        ShellButton {
+            objectName: "feedbackHistoryButton"; text: "操作记录"; flat: true
+            onClicked: { historyExpiry.stop(); panel.openDetails(panel.service.history[0]) }
+        }
+        ShellButton { objectName: "feedbackHistoryDismiss"; text: "关闭"; flat: true; onClicked: panel.hideHistory() }
     }
     ConfirmDialog {
         id: details
@@ -70,6 +96,8 @@ Item {
         parent: panel.parent; anchors.centerIn: parent
         width: Math.min(680, parent.width - 40); height: Math.min(520, parent.height - 70)
         modal: false; title: "操作详情"; standardButtons: Dialog.Close
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: panel.hideHistory()
         contentItem: ColumnLayout {
             spacing: 10
             UiText { Layout.fillWidth: true; text: "本次会话最近 20 条；详情仅保留在本机内存中。"; color: Theme.secondary; wrapMode: Text.Wrap }

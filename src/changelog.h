@@ -8,6 +8,7 @@ class ChangeLog : public QWidget {
   public:
     explicit ChangeLog(QWidget *parent = nullptr, QJsonArray entries = {});
     int visibleCount() const { return m_count; }
+    void reset() { m_count = 3; rebuild(); }
 
   private:
     QJsonArray m_entries;
