@@ -1,9 +1,10 @@
-# RC5 test investigation snapshot
+# RC5 historical diagnostic context
 
-Direct baseline: ce32ba1308a41c7297927d28384958d45e1caa2a (RC4).
-Only tests, test helpers and this note change. Product source, QML, storage,
-playback, existing RC3 stop fixes, RC4 animation test and version resources remain
-unchanged.
+Original diagnostic snapshot direct baseline: ce32ba1308a41c7297927d28384958d45e1caa2a (RC4).
+The original snapshot changed tests, test helpers and this note. Product business
+source, QML, storage, playback, existing RC3 stop fixes and the RC4 animation test
+remain unchanged. The current private candidate additionally updates version
+metadata and test-runner initialization, as described in this release README.
 
 Foreground observation records the raw method-entry state before any fixture,
 then brackets each stage with a separate read-only witness process. The witness
@@ -30,6 +31,7 @@ distinguished; neither establishes the cause of the historical RC4 failure.
 RC4-ART-01 is not yet diagnosed. Repeated passes must not be used to classify it
 as harmless, prove it is a fixture defect, or rule out a product fault. No busy
 timeout, retry, arbitrary delay, database logic or import logic was changed.
-This snapshot deliberately retains RC4 version metadata. Promotion to RC5 and
-creation of a private RC5 runtime ZIP require an evidenced fix and verification.
+The original diagnostic snapshot retained RC4 metadata. The user subsequently
+authorized a private RC5 test candidate after fresh validation, with ART-01 kept
+as UNRESOLVED — NOT REPRODUCED. Promotion does not establish its cause or a fix.
 The seven GA gates remain open; there is no release-ready claim.
