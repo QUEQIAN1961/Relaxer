@@ -29,3 +29,9 @@ python scripts/ga01-update-manifest.py --package "绝对包目录" --acknowledge
 工具保留原清单备份，拒绝 reparse point；不在正常启动时运行，不认证修改后的来源。此后官方包的哈希证明不再适用。它提供用户修改的可行路径，不削弱普通启动仍执行全量校验的行为。
 
 修改应用代码时，用同一源码重建 runtime/Relaxer.exe、RelaxerQmlUi.dll 和根 Relaxer.exe（构建目标 RelaxerPortable），随后重建清单。没有必须向发行者索取的签名密钥或激活信息。需另做实际重建 Qt 的替换测试，以及适用 LGPL/GPL 安装信息检查。
+
+## 封存补充：shaderc 静态构建来源
+
+shaderc 2026.4-1 的原始 `.BUILDINFO` 绑定 glslang 16.3.0-1、spirv-headers 2~1.4.363.0-1、spirv-tools 3~1.4.363.0-1；配方明确移除 vendored third_party 并使用已安装组件。不能以本机当前 glslang 16.6.0 替代。已追加收集这 3 个精确版本的官方源码归档，签名全部通过，合计 8,300,239 字节，位于来源侧包 `third-party/static-source-supplement/`。它们是原 98 个 PE 归属来源包之外的静态/构建材料，不增加实际分发的 DLL 个数。
+
+这 3 个补充包本轮完成的是精确版本归档获取与签名验证；没有将它们冒充为原 101 个包已经执行的二进制 `.MTREE` / `.BUILDINFO→PKGBUILD` 绑定。原始链接对象、编译范围和通知范围仍 OPEN；详情在源控 `STATIC-LINK-AUDIT.json`、审计 `evidence/static-link-findings.json`。原 98 归档、101 二进制包的来源结果保持不变。

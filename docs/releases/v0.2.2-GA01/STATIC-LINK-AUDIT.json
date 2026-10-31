@@ -1,0 +1,40 @@
+{
+  "component": "mingw-w64-ucrt-x86_64-shaderc",
+  "version": "2026.4-1",
+  "evidence": "third-party/package-evidence/mingw-w64-ucrt-x86_64-shaderc/.BUILDINFO",
+  "buildInputs": [
+    "mingw-w64-ucrt-x86_64-glslang-16.3.0-1-any",
+    "mingw-w64-ucrt-x86_64-spirv-headers-2~1.4.363.0-1-any",
+    "mingw-w64-ucrt-x86_64-spirv-tools-3~1.4.363.0-1-any"
+  ],
+  "recipeEvidence": "PKGBUILD removes vendored third_party and binds installed glslang/spirv-tools",
+  "scope": "Static/build dependency material supplement; not additional shipped PE owners",
+  "sourceArchives": [
+    {
+      "archive": "mingw-w64-glslang-16.3.0-1.src.tar.zst",
+      "url": "https://repo.msys2.org/mingw/sources/mingw-w64-glslang-16.3.0-1.src.tar.zst",
+      "status": "PASS",
+      "sha256": "948faf9909ad6ff3772077cd97546323415c4bd1164c7775e208bc8645780187",
+      "bytes": 4159334,
+      "signature": "PASS"
+    },
+    {
+      "archive": "mingw-w64-spirv-headers-2~1.4.363.0-1.src.tar.zst",
+      "url": "https://repo.msys2.org/mingw/sources/mingw-w64-spirv-headers-2~1.4.363.0-1.src.tar.zst",
+      "status": "PASS",
+      "sha256": "261200e7faf30b0cdfd8a6987543c3ab62710e8eb29d727313518d3e7c363f07",
+      "bytes": 592468,
+      "signature": "PASS"
+    },
+    {
+      "archive": "mingw-w64-spirv-tools-3~1.4.363.0-1.src.tar.zst",
+      "url": "https://repo.msys2.org/mingw/sources/mingw-w64-spirv-tools-3~1.4.363.0-1.src.tar.zst",
+      "status": "PASS",
+      "sha256": "6110f9257bd8d63da9b8d981c1093fd28f99a7d51c34f067c3a1c5db5e46454a",
+      "bytes": 3548437,
+      "signature": "PASS"
+    }
+  ],
+  "actualLinkedObjectAndNoticeScope": "OPEN — no original link map or controlled third-party rebuild",
+  "hostCurrentGlslangIsNotSubstitute": "16.6.0-1 differs from recorded 16.3.0-1"
+}

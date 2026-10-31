@@ -138,3 +138,9 @@
 取得原始构建的有效 lockfile、静态依赖/feature 和对应通知证据，或在独立工程中进行可追溯的同版本受控重建；核对逐模块许可及 OpenCC 改编来源；选择并落实同址完整源码下载路线。任意二进制替换均需新包身份、完整性与相关回归复验。
 
 公开参考： [Qt LGPL 义务](https://www.qt.io/licensing/open-source-lgpl-obligations)、[FFmpeg 许可](https://ffmpeg.org/legal.html)、[GCC runtime exception](https://www.gnu.org/licenses/gcc-exception-3.1.html)、[MSYS2 源码归档](https://repo.msys2.org/mingw/sources/)。网页和原始许可证副本/摘要随审计材料保存；GNU 文本网页两次 TLS 超时不影响已取得的精确 Qt 源码 LICENSES 中的 GPL/LGPL 文本。
+
+## 封存补充：shaderc 静态构建来源
+
+shaderc 2026.4-1 的原始 `.BUILDINFO` 绑定 glslang 16.3.0-1、spirv-headers 2~1.4.363.0-1、spirv-tools 3~1.4.363.0-1；配方明确移除 vendored third_party 并使用已安装组件。不能以本机当前 glslang 16.6.0 替代。已追加收集这 3 个精确版本的官方源码归档，签名全部通过，合计 8,300,239 字节，位于来源侧包 `third-party/static-source-supplement/`。它们是原 98 个 PE 归属来源包之外的静态/构建材料，不增加实际分发的 DLL 个数。
+
+这 3 个补充包本轮完成的是精确版本归档获取与签名验证；没有将它们冒充为原 101 个包已经执行的二进制 `.MTREE` / `.BUILDINFO→PKGBUILD` 绑定。原始链接对象、编译范围和通知范围仍 OPEN；详情在源控 `STATIC-LINK-AUDIT.json`、审计 `evidence/static-link-findings.json`。原 98 归档、101 二进制包的来源结果保持不变。
