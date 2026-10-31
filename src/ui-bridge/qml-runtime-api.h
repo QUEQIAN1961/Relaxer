@@ -14,6 +14,8 @@ struct QmlRuntimeApi {
     unsigned version;
     int (*run)(QCoreApplication *, const QmlLaunchOptions *, UiRunDiagnostics *);
 };
-inline constexpr unsigned QmlRuntimeAbi = 1;
+// Startup diagnostics now carries an interaction callback; reject old modules
+// before passing this private C++ object across the DLL boundary.
+inline constexpr unsigned QmlRuntimeAbi = 2;
 using QmlRuntimeFactory = const QmlRuntimeApi *(*)();
 }

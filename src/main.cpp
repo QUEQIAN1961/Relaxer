@@ -22,6 +22,8 @@
 #include <QTextStream>
 #include <QTimer>
 #include <memory>
+#include <QListWidget>
+#include <QStackedWidget>
 using namespace relaxer;
 static void initializeAppResources() { Q_INIT_RESOURCE(resources); }
 static QString dataRoot() {
@@ -59,6 +61,7 @@ static bool selfTest(Library &lib) {
 int main(int argc, char **argv) {
     UiRunDiagnostics diagnostics;
     QApplication app(argc, argv);
+    diagnostics.mark("qtInitializedMs");
     app.setApplicationName("Relaxer");
     app.setApplicationVersion(QString::fromLatin1(phaseC::Version));
     app.setProperty("relaxerDevelopmentTitle", QString::fromLatin1(phaseC::WindowTitle));
@@ -121,6 +124,7 @@ int main(int argc, char **argv) {
 #ifdef RELAXER_ENABLE_QML
     std::unique_ptr<OptionalQmlRuntime> qmlRuntime;
     if (ui == "qml") {
+        diagnostics.mark("qmlModuleLoadStartMs");
         qmlRuntime = std::make_unique<OptionalQmlRuntime>(QDir(app.applicationDirPath()).filePath(
             QString::fromUtf8(RELAXER_QML_MODULE_FILENAME)));
         if (!qmlRuntime->load()) {
@@ -129,6 +133,7 @@ int main(int argc, char **argv) {
         }
     }
 #endif
+    diagnostics.mark("moduleReadyMs");
     QString root = parser.isSet("data") ? parser.value("data") : dataRoot();
     QDir().mkpath(root);
     QLockFile lock(QDir(root).filePath("relaxer.lock"));
@@ -150,6 +155,7 @@ int main(int argc, char **argv) {
         return qmlRuntime->run(&app, options, diagnostics);
     }
 #endif
+    diagnostics.mark("databaseOpenStartMs");
     Library lib(root);
     QString error;
     if (!lib.open(&error)) {
@@ -205,7 +211,22 @@ int main(int argc, char **argv) {
         if (parser.isSet("diagnostics") && !diagnostics.write(parser.value("diagnostics"))) return 9;
         return saved ? code : 8;
     };
+    diagnostics.mark("uiConstructStartMs");
     Window window(&lib);
+    if (parser.isSet("diagnostics")) diagnostics.interactionProbe = [&] {
+        auto *nav = window.findChild<QListWidget *>("navigation");
+        if (!nav || nav->count() < 2 || !window.isVisible()) return false;
+        const auto click = [&](int row) {
+            auto *pages = window.findChild<QStackedWidget *>("pages");
+            if (!pages) return false;
+            nav->setCurrentRow(row);
+            nav->itemActivated(nav->item(row));
+            return nav->currentRow() == row && pages->currentIndex() == row;
+        };
+        const int original = nav->currentRow();
+        const bool ok = click(original == 1 ? 0 : 1);
+        return click(original) && ok;
+    };
     app.setProperty("relaxerInteractiveExit",!parser.isSet("quit-after")&&!parser.isSet("screenshot"));
     window.installEventFilter(&diagnostics);
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &window, [&] { window.playbackFacade()->shutdown(true); });

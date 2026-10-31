@@ -737,6 +737,15 @@ if(WIN32)
   elseif(MSVC)
     target_compile_options(RelaxerPortable PRIVATE /utf-8)
   endif()
+  if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME relaxer_portable_integrity COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/portable-integrity-tests.py"
+      --launcher "$<TARGET_FILE:RelaxerPortable>" --probe "$<TARGET_FILE:RelaxerLockCheck>"
+      --fingerprint "${CMAKE_CURRENT_BINARY_DIR}/relaxer-source-fingerprint.txt"
+      --work "${CMAKE_CURRENT_BINARY_DIR}/Testing/PortableIntegrity")
+    set_tests_properties(relaxer_portable_integrity PROPERTIES TIMEOUT 90)
+  endif()
   add_executable(RelaxerLockCheck src/pacman-lock-windows.cpp src/build-identity.cpp)
   set_target_properties(RelaxerLockCheck PROPERTIES AUTOMOC OFF AUTORCC OFF)
   if(MINGW)
