@@ -1,0 +1,28 @@
+{
+  "frozenRiskRecord": {
+    "ART01": {
+      "status": "UNRESOLVED — NOT REPRODUCED",
+      "fixed": false,
+      "rootCauseEstablished": false
+    },
+    "releaseReady": false,
+    "publicDistributionApproved": false,
+    "GA": false
+  },
+  "ART01Unchanged": true,
+  "Escape": {
+    "status": "OPEN — ROOT CAUSE NOT ESTABLISHED",
+    "classification": "P2 test stability; no confirmed reproducible product defect",
+    "priorCompletedRounds": [
+      "92/93",
+      "93/93"
+    ],
+    "independentControlledCycles": "30/30 PASS",
+    "focusHypothesis": "disproved in prior controlled Qt-event experiment",
+    "currentCompletedRound": "93/93",
+    "fixed": false,
+    "rootCauseEstablished": false
+  },
+  "GA": false,
+  "publicDistributionApproved": false
+}
