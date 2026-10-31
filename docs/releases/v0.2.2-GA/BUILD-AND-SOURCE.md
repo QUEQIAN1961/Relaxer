@@ -11,3 +11,12 @@ Windows Release 构建使用 CMake/Ninja 与 MSYS2 UCRT64。Qt Base/Multimedia/�
 允许按各自许可证修改/调试/替换库。对 ABI 兼容 DLL，拥有者可用 `scripts/ga01-update-manifest.py --package <目录> --acknowledge-modified-package` 主动更新完整性清单；不需要厂商密钥/联网批准。修改应用时从同源重建应用、QML DLL、根入口并重生清单。适用 LGPL 条件按相应库版本/组合保留，不把所有库都机械要求同一组目标文件。
 
 本次完整重建的实际命令、工具版本、源提交、文件摘要与验证边界随最终发行报告提供。历史风险保留于独立内部记录；不以本说明宣称已取得法律保证或已公开发布。
+
+## 源码附件布局与身份
+
+- 应用二进制实际由提交 `7b6eea155b303e90d2a1d13e6c8ca94e40068c3d` 构建，源指纹 `15b5d75dbc39885a4ee053c85854e8ab0dbcce2d4223b56b5de8195af94f73ff`。后续发行文档提交不改变此编译身份。
+- `Relaxer-V0.2.2-GA-Source.zip` 是最终发行提交的完整 Git tree，另附 BUILD-INFORMATION.json，分别注明二进制构建提交与发行文档提交。Git bundle 包含完整父链，可恢复本地分支。
+- 第三方附件 `components/` 保留 98 个精确原源包及配方/补丁；`static-build-source-supplement/` 保留 shaderc 的三个精确静态构建源；`provenance/binary-packages/` 包含 101 份原 BUILDINFO。`rust/` 保留 647 个精确 crate 与锁材料，`mapping/` 保留原 CI/目标图等来源记录，`opencc/` 保留数据和生成材料。`supplements/qt-psl/` 补全原始输入，`notices/` 与 `supplements/distribution-notices/` 保留通知。
+- `SOURCE-INDEX.json` 绑定当前 Windows ZIP 与 320 个第三方 PE；`MATERIALS-SHA256.json` 逐文件校验第三方侧包。软件包原许可汇总不能替代其中单文件声明。
+- GPLv3 网络分发按 §6(d) 提供完整对应源：将 Windows ZIP、应用源码 ZIP、完整第三方源码 ZIP 与 SHA256SUMS 同时公开在一个 Release，保持同等获取便利，不额外收费或附加使用限制。上传中间过程使用草稿状态，材料验证齐全后再公开。
+- 具体许可路线、独立通知与修改说明见根目录 THIRD_PARTY_NOTICES.md。不要求接收者联系维护者才能获取源代码或更新自己修改包的完整性清单。
