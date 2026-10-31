@@ -1,0 +1,10 @@
+{
+  "ART01": {
+    "status": "UNRESOLVED — NOT REPRODUCED",
+    "fixed": false,
+    "rootCauseEstablished": false
+  },
+  "releaseReady": false,
+  "publicDistributionApproved": false,
+  "GA": false
+}

@@ -6,6 +6,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QScrollArea>
+#include <QDate>
 using namespace c4c5_fixture;
 namespace {
 bool click(QQuickWindow *w,QQuickItem *item) {
@@ -62,6 +63,57 @@ private slots:
             }
         }
         Fixture f(2);QVERIFY(f.ok);QCOMPARE(f.shell->settingsBridge()->changelog(),summary.toVariantList());
+    }
+    void userFacingChangelogCopyAndDates(){
+        QFile resource(":/changelog.json");QVERIFY(resource.open(QIODevice::ReadOnly));
+        const auto history=QJsonDocument::fromJson(resource.readAll()).array();
+        const auto summary=summarizedChangelog(history);
+        const QRegularExpression internal(QStringLiteral("私人测试|非\\s*GA|不是\\s*GA|不得公开分发|等待[^。\\n]*验收|尚未正式发布|ART[- ]?[0-9]+|UNRESOLVED|NOT REPRODUCED"),QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpression rcInternal(QStringLiteral("Harness|CTest|SKIP|PASS|内部测试|测试候选|发布候选|本版为候选"),QRegularExpression::CaseInsensitiveOption);
+        const QRegularExpression date(QStringLiteral("^[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}$"));
+        QVERIFY(rcInternal.match(QStringLiteral("私人测试候选")).hasMatch());
+        QVERIFY(!rcInternal.match(QStringLiteral("停止歌词搜索时的候选结果")).hasMatch());
+        QString rc022,rc020;int groups022=0,groups020=0;
+        for(const auto &value:summary){
+            const auto row=value.toArray();QCOMPARE(row.size(),3);
+            const auto title=row[0].toString(),text=row[2].toString(),stamp=row[1].toString();
+            QVERIFY(date.match(stamp).hasMatch());QVERIFY(QDate::fromString(stamp,"yyyy.MM.dd").isValid());
+            QVERIFY2(!internal.match(text).hasMatch(),qPrintable(title+": "+text));
+            if(title=="V0.2.2-RC"){rc022=text;++groups022;}
+            if(title=="V0.2.0-RC"){rc020=text;++groups020;}
+            // Published GA history is intentionally preserved, including its
+            // historical acceptance sentence; RC notes contain no such wording.
+            if(title.endsWith("-RC"))QVERIFY2(!rcInternal.match(text).hasMatch(),qPrintable(title+": "+text));
+        }
+        QCOMPARE(groups022,1);QCOMPARE(groups020,1);
+        for(const auto &term:{"便携 EXE","操作记录","纯音乐，请欣赏","默认折叠","停止歌词搜索","每次完整文件校验","来源核对"})QVERIFY2(rc022.contains(QString::fromUtf8(term)),term);
+        for(const auto &term:{"MIDI","无需翻译","未保存译文","付费确认"})QVERIFY2(rc020.contains(QString::fromUtf8(term)),term);
+        for(const auto &value:history){const auto title=value.toArray()[0].toString();if(title=="Relaxer V0.2.0-GA"||title=="Relaxer V0.2.1-GA")QVERIFY(summary.contains(value));}
+        Fixture f(2);QVERIFY(f.ok);auto *w=f.shell->window();
+        f.shell->appBridge()->navigate(3);w->setProperty("settingsSection","log");
+        auto *page=visual(w->contentItem(),"versionLogPage");QVERIFY(page);QTRY_VERIFY(page->isVisible());
+        QCOMPARE(page->property("shown").toInt(),3);page->setProperty("shown",int(summary.size()));
+        std::function<QStringList(QQuickItem *)> texts=[&](QQuickItem *item){
+            QStringList result;if(item->isVisible()&&item->property("text").isValid())result.append(item->property("text").toString());
+            for(auto *child:item->childItems())result.append(texts(child));return result;
+        };
+        QTRY_VERIFY(texts(page).contains(rc022));QTRY_VERIFY(texts(page).contains(rc020));
+        QCOMPARE(f.shell->settingsBridge()->changelog(),summary.toVariantList());
+        const QString output=qEnvironmentVariable("RELAXER_TEXT_FIX_EVIDENCE");
+        if(!output.isEmpty()){
+            QVERIFY(QDir().mkpath(output));QFile file(QDir(output).filePath("user-visible-changelog.json"));QVERIFY(file.open(QIODevice::WriteOnly));
+            const auto bytes=QJsonDocument(summary).toJson(QJsonDocument::Indented);QCOMPARE(file.write(bytes),bytes.size());file.close();
+            QTest::qWait(100);const auto image=w->grabWindow();QVERIFY(!image.isNull());QVERIFY(image.save(QDir(output).filePath("qml-version-log.png")));
+            QFile actual(QDir(output).filePath("qml-rendered-text.json"));QVERIFY(actual.open(QIODevice::WriteOnly));
+            actual.write(QJsonDocument(QJsonArray::fromStringList(texts(page))).toJson());
+        }
+        QTemporaryDir d;Library lib(d.filePath("data"));QVERIFY(lib.open());Window window(&lib);window.show();window.showVersionLog();
+        auto *log=window.findChild<ChangeLog *>();QVERIFY(log);QCOMPARE(log->visibleCount(),3);
+        while(log->visibleCount()<summary.size()){auto *expand=window.findChild<QPushButton *>("versionLogExpand");QVERIFY(expand);expand->click();}
+        QStringList widgetText;for(auto *label:log->findChildren<QLabel *>())widgetText.append(label->text());
+        QVERIFY(widgetText.contains(rc022));QVERIFY(widgetText.contains(rc020));
+        if(!output.isEmpty()){QTRY_VERIFY(log->isVisible());QTest::qWait(600);QVERIFY(window.grab().save(QDir(output).filePath("widgets-version-log.png")));}
+        QVERIFY(f.shell->warnings().isEmpty());
     }
     void versionLogReentryAndPlayerReturn(){
         Fixture f(2);QVERIFY(f.ok);auto *w=f.shell->window();auto *root=w->contentItem();
