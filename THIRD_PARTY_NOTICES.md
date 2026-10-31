@@ -13,6 +13,10 @@ Relaxer 自有代码采用 GPL-3.0-only。第三方代码、数据、字体（�
 
 Qt 自有库文件的开源选项与其内置第三方文件分别处理。qgrayraster.c 可依 FTL 分支，相关 FreeType 工作和作者致谢保留；qimagescale.cpp 的 BSD 与 Imlib2 条件分别保留，Unicode 数据和 XSVG 等独立声明不被 Qt 总许可覆盖。FreeType 相关软件基于 FreeType 项目及其贡献者的工作，原版权、修改记录和许可见附带材料。
 
+This software is based in part on the work of the Independent JPEG Group.
+
+本软件的部分组件基于 Independent JPEG Group 的工作。相关 IJG、libjpeg-turbo 版权与原始条款随许可证目录保留。
+
 QtQml 的 JavaScriptCore/masm、Yoga、Material 资源等按各自适用声明；上游源码中的测试、开发工具和其他平台内容不因此全部成为 Windows 运行库。若完整对应源码侧包提供这些内容，其源码分发条件仍保留。
 
 shaderc 静态构建相关精确来源为 glslang 16.3.0-1、SPIRV Tools/Headers 1.4.363.0 的相应 MSYS2 修订。保留 Apache/BSD/MIT 等实际文件声明，以及 glslang 生成解析器中的 Bison 特别例外；不能删除例外后推定冲突，也不能仅用 shaderc 包级 Apache 声明覆盖所有文件。
