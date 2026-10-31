@@ -1,3 +1,12 @@
+// OpenCC STCharacters-derived data, licensed under Apache-2.0.
+// Upstream project, authors and full license: docs/third-party/OpenCC/.
+// Relaxer adaptation: select the first target, omit identity mappings, emit C++.
+// Correspondence verified 2026.10.31 against OpenCC dictionary snapshot
+// fae2a0a911c30764e669a7d8b0591cd8e852934a (dictionary blob
+// 677e8fbc70dcdc1da477b9f6c9f42a6b33609ae0).
+// The original import revision was not recorded; this reference is a verified
+// content-equivalent source, not a claim about that historical import.
+// The 3,881 mapping pairs below are unchanged from the frozen product.
 static const char16_t *const kTradMap[] = {
     u"㐷", u"傌",
     u"㐹", u"㑶",
