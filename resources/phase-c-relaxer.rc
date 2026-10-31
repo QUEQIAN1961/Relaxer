@@ -2,10 +2,10 @@
 IDI_ICON1 ICON "icon.ico"
 1 24 "start.manifest"
 1 VERSIONINFO
-FILEVERSION 0,2,2,7
-PRODUCTVERSION 0,2,2,7
+FILEVERSION 0,2,2,0
+PRODUCTVERSION 0,2,2,0
 FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
-FILEFLAGS VS_FF_PRERELEASE
+FILEFLAGS 0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -16,8 +16,8 @@ BEGIN
    VALUE "FileDescription", "Relaxer Music Player\0"
    VALUE "OriginalFilename", "Relaxer.exe\0"
    VALUE "ProductName", "Relaxer\0"
-   VALUE "FileVersion", "0.2.2-RC7\0"
-   VALUE "ProductVersion", "0.2.2-RC7\0"
+   VALUE "FileVersion", "0.2.2-GA\0"
+   VALUE "ProductVersion", "0.2.2-GA\0"
   END
  END
  BLOCK "VarFileInfo"
