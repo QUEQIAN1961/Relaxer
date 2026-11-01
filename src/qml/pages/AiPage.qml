@@ -236,7 +236,7 @@ ColumnLayout {
                 anchors { left: parent.left; right: parent.right; top: parent.top; margins: 18 }
                 spacing: 12
                 UiText { text: "歌词翻译配置"; color: Theme.text; font.pixelSize: 17; font.weight: Font.DemiBold }
-                CheckBox {
+                ToggleButton {
                     objectName: "aiTranslationUseGlobal"
                     text: "使用全局默认配置"
                     checked: aiBridge.draft.translationUsesDefaults

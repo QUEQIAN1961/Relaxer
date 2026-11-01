@@ -5,6 +5,7 @@ import "../theme"
 Button {
     id: control
     property bool primary: false
+    property bool animatedColors: false
     flat: false
     property string symbol: ""
     implicitHeight: Theme.controlHeight
@@ -38,6 +39,7 @@ Button {
             text: control.text; textFormat: Text.PlainText; font: control.font
             color: !control.enabled ? Theme.disabled : control.primary ? Theme.accentText : Theme.text
             horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+            Behavior on color { enabled: control.animatedColors; ColorAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 220; easing.type: Easing.OutCubic } }
         }
     }
     background: Rectangle {
@@ -47,5 +49,6 @@ Button {
              : control.down ? Theme.pressed : control.hovered ? Theme.hover : control.flat ? "transparent" : Theme.card
         border.color: control.activeFocus ? Theme.accent : control.primary ? Theme.accent : Theme.border
         border.width: 1
+        Behavior on color { enabled: control.animatedColors; ColorAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 220; easing.type: Easing.OutCubic } }
     }
 }

@@ -14,7 +14,7 @@ Page {
     property bool opened: false
     property real reveal: 0
     readonly property real transitionOffset: -7 * (1 - reveal)
-    Behavior on reveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : workspace.opened ? 260 : 90; easing.type: workspace.opened ? Easing.OutCubic : Easing.InCubic } }
+    Behavior on reveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 260; easing.type: workspace.opened ? Easing.OutCubic : Easing.InCubic } }
     readonly property real middleColumnLift: contentItem && header ? Math.max(0, contentItem.y - header.y - headerActions.y - workspaceBack.y) : 0
     readonly property real rightColumnLift: contentItem ? Math.max(0, contentItem.y - 32 - (height - contentItem.y - contentItem.height)) : 0
     readonly property real localActionWidth: Math.max(pasteButton.implicitWidth, localImportButton.implicitWidth)
@@ -219,24 +219,25 @@ Page {
             background: null; ShellButton { objectName: "lyricsSearchSettingsClose"; text: "关闭"; onClicked: searchSettings.close() } }
         contentItem: ColumnLayout {
             spacing: 8
-            Label { Layout.fillWidth: true; text: "请求仅发送到勾选的来源。专辑和精确时长由 LRCLIB 消费；其他来源使用歌名、歌手或查询词。"; wrapMode: Text.Wrap; color: Theme.secondary }
+            UiText { Layout.fillWidth: true; text: "请求仅发送到勾选的来源。专辑和精确时长由 LRCLIB 消费；其他来源使用歌名、歌手或查询词。"; wrapMode: Text.Wrap; color: Theme.secondary }
             Repeater {
-                model: lyricsSearchBridge.availableSources
-                delegate: CheckBox {
-                    required property var modelData
-                    objectName: "lyricsSource-" + modelData.id
-                    Layout.fillWidth: true; text: modelData.label + " · " + modelData.hint
-                    checked: modelData.enabled; enabled: !lyricsSearchBridge.busy
-                    onToggled: lyricsSearchBridge.setSourceEnabled(modelData.id, checked)
+                model: lyricsSearchBridge.availableSources.length
+                delegate: ToggleButton {
+                    required property int index
+                    readonly property var source: lyricsSearchBridge.availableSources[index]
+                    objectName: "lyricsSource-" + source.id
+                    Layout.fillWidth: true; text: source.label + " · " + source.hint
+                    checked: source.enabled; enabled: !lyricsSearchBridge.busy
+                    onToggled: lyricsSearchBridge.setSourceEnabled(source.id, checked)
                 }
             }
             Label { text: "本曲查询时长（毫秒；0 = 未知）"; color: Theme.text }
             EntryField { id: searchDuration; objectName: "lyricsSearchDuration"; Layout.fillWidth: true; readOnly: lyricsSearchBridge.busy; onTextEdited: lyricsSearchBridge.parametersEdited(); selectByMouse: true }
-            Label { Layout.fillWidth: true; text: "批量开始时冻结来源、滚动与重新匹配选项；每首使用自己的元数据。临时标题、歌手、专辑和片段只用于手动搜索。已有歌词覆盖仍需确认。缓存预览会标明原来源。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12 }
+            UiText { Layout.fillWidth: true; text: "批量开始时冻结来源、滚动与重新匹配选项；每首使用自己的元数据。临时标题、歌手、专辑和片段只用于手动搜索。已有歌词覆盖仍需确认。缓存预览会标明原来源。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12 }
             ShellButton { objectName: "lyricsRestoreSearchDefaults"; text: "恢复默认参数与全部来源"; enabled: !lyricsSearchBridge.busy; onClicked: workspace.restoreSearchDefaults() }
         }
     }
-    background: Rectangle { color: Theme.background }
+    background: Rectangle { color: Theme.background; opacity: workspace.reveal }
     header: Item {
         implicitHeight: 70
         opacity: workspace.reveal
@@ -280,12 +281,22 @@ Page {
                         onClicked:workspace.selectedTracks=checked?workspace.visibleKeys():[]
                     }
                 }
-                ShellButton {
-                    objectName: "lyricsBatchInstrumental"; Layout.fillWidth: true; visible: multiSelect.checked
-                    implicitHeight: workspace.compact ? 24 : 26; topPadding:4; bottomPadding:4; font.pixelSize:workspace.compact?12:13
-                    text: lyricsSearchBridge.batchRunning ? "取消纯音乐处理" : "批量标记纯音乐…"
-                    enabled: lyricsSearchBridge.batchRunning || workspace.searchKeys().length > 0
-                    onClicked: if (lyricsSearchBridge.batchRunning) lyricsSearchBridge.cancelInstrumentalBatch(); else workspace.batchInstrumentalRequested(workspace.searchKeys())
+                Item {
+                    id: batchReveal; objectName: "lyricsBatchReveal"
+                    Layout.fillWidth: true; implicitHeight: batchInstrumental.implicitHeight * progress
+                    Layout.topMargin: -8 * (1 - progress)
+                    visible: progress > 0; clip: true
+                    property real progress: multiSelect.checked ? 1 : 0
+                    Behavior on progress { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 240; easing.type: multiSelect.checked ? Easing.OutCubic : Easing.InCubic } }
+                    ShellButton {
+                        id: batchInstrumental; objectName: "lyricsBatchInstrumental"
+                        width: parent.width; y: -height * (1 - batchReveal.progress); opacity: batchReveal.progress
+                        implicitHeight: workspace.compact ? 24 : 26; topPadding:4; bottomPadding:4; font.pixelSize:workspace.compact?12:13
+                        animatedColors: true
+                        text: lyricsSearchBridge.batchRunning ? "取消纯音乐处理" : "批量标记纯音乐…"
+                        enabled: lyricsSearchBridge.batchRunning || workspace.searchKeys().length > 0
+                        onClicked: if (lyricsSearchBridge.batchRunning) lyricsSearchBridge.cancelInstrumentalBatch(); else workspace.batchInstrumentalRequested(workspace.searchKeys())
+                    }
                 }
                 ListView {
                     id: tracks; objectName: "lyricsTargetTracks"
@@ -336,12 +347,13 @@ Page {
                 }
                 ShellButton {
                     objectName: "batchLyricsSearchButton"
+                    animatedColors: true
                     Layout.fillWidth: true; implicitHeight: 34
                     text: lyricsSearchBridge.busy ? "停止查找" : "开始查找"
                     enabled: lyricsSearchBridge.busy || (workspace.hasTarget && !workspace.taskNeedsAction && workspace.searchKeys().length > 0)
                     onClicked: workspace.startTargetSearch()
                 }
-                Label { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: 4; elide: Text.ElideRight }
+                UiText { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: 4; elide: Text.ElideRight }
             }
         }
         ColumnLayout {
@@ -375,7 +387,7 @@ Page {
                     onActivated: lyricsSearchBridge.candidateSource = currentIndex === 0 ? "" : currentText
                 }
             }
-            Label { Layout.fillWidth: true; text: lyricsSearchBridge.searchContext; visible: text.length > 0; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight }
+            UiText { Layout.fillWidth: true; text: lyricsSearchBridge.searchContext; visible: text.length > 0; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight }
             Label { text: "候选版本"; color: Theme.text; font.weight: Font.DemiBold }
             Rectangle {
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 90
@@ -415,7 +427,7 @@ Page {
                         }
                         onClicked: { lyricsSearchBridge.selectKey(candidateKey); previewTabs.currentIndex = 0 }
                     }
-                    Label { anchors.centerIn: parent; width: parent.width - 24; visible: candidates.count === 0; text: lyricsSearchBridge.busy ? "正在查找候选版本…" : "暂无候选版本\n可修改歌名或歌手后搜索，也可以导入或粘贴本地歌词。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
+                    UiText { anchors.centerIn: parent; width: parent.width - 24; visible: candidates.count === 0; text: lyricsSearchBridge.busy ? "正在查找候选版本…" : "暂无候选版本\n可修改歌名或歌手后搜索，也可以导入或粘贴本地歌词。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
                 }
             }
             RowLayout {
@@ -461,21 +473,21 @@ Page {
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
                 ShellButton { objectName: "translateAiButton"; Layout.fillWidth: true; implicitHeight: 34; text: "AI 翻译整首"; primary: true; enabled: workspace.hasTarget && translationBridge.classification === 1 && !workspace.taskNeedsAction; onClicked: workspace.prepareTranslation("") }
-                ShellButton { implicitHeight:34;text: "浏览器 ⌄"; enabled: workspace.hasTarget && !workspace.taskNeedsAction; onClicked: browserMenu.popup() }
+                ShellButton { id: browserButton; objectName:"lyricsBrowserButton"; implicitHeight:34;text: "浏览器 ⌄"; enabled: workspace.hasTarget && !workspace.taskNeedsAction; onClicked: browserMenu.popup(browserButton, browserButton.width - browserMenu.width, browserButton.height + 4) }
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
-                Label { text: "原文语言"; color: Theme.secondary; font.pixelSize: 13 }
+                UiText { text: "原文语言"; color: Theme.secondary; font.pixelSize: 13 }
                 ChoiceBox { id: sourceLanguage; objectName: "lyricsSourceLanguage"; Layout.fillWidth: true; implicitHeight: 30; model: ["自动识别", "英语", "日语"]; font.pixelSize: 13 }
                 ShellButton { implicitHeight:30;text: "取消任务"; visible: translationBridge.pending; onClicked: translationBridge.cancel() }
             }
             RowLayout {
                 Layout.fillWidth: true; visible: translationBridge.pending
                 ProgressBar { Layout.fillWidth: true; from: 0; to: Math.max(1, translationBridge.totalLines); value: translationBridge.completedLines; indeterminate: translationBridge.completedLines === 0 }
-                Label { text: translationBridge.completedLines + " / " + translationBridge.totalLines; color: Theme.secondary; font.pixelSize: 13 }
+                UiText { text: translationBridge.completedLines + " / " + translationBridge.totalLines; color: Theme.secondary; font.pixelSize: 13 }
             }
             ShellButton { Layout.fillWidth: true; implicitHeight: 32; text: "继续人工验证"; visible: translationBridge.state === "NeedsAttention"; onClicked: translationBridge.resume() }
-            Label { Layout.fillWidth: true; text: translationBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: workspace.compact ? 2 : 3; elide: Text.ElideRight }
+            UiText { Layout.fillWidth: true; text: translationBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: workspace.compact ? 2 : 3; elide: Text.ElideRight }
             TabBar {
                 id: previewTabs; objectName: "lyricsPreviewTabs"; Layout.fillWidth: true; implicitHeight: 34
                 SettingsTabButton { text: "歌词原文"; implicitHeight: 34 }
@@ -504,12 +516,12 @@ Page {
         implicitHeight: 28
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 18
-            Label { Layout.fillWidth: true; text: lyricsSearchBridge.batchRunning ? "纯音乐处理：剩余 " + lyricsSearchBridge.batchResult.pending + " 首，可点击取消停止后续写入。" : workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 13; wrapMode: Text.Wrap }
+            UiText { Layout.fillWidth: true; text: lyricsSearchBridge.batchRunning ? "纯音乐处理：剩余 " + lyricsSearchBridge.batchResult.pending + " 首，可点击取消停止后续写入。" : workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 13; wrapMode: Text.Wrap }
 
         }
     }
     RoundMenu {
-        id: browserMenu
+        id: browserMenu; objectName:"lyricsBrowserMenu"
         RoundMenuItem { text: "必应翻译"; onTriggered: workspace.prepareTranslation("bing") }
         RoundMenuItem { text: "百度翻译"; onTriggered: workspace.prepareTranslation("baidu") }
     }
@@ -564,7 +576,7 @@ Page {
         id: pasteDialog; objectName:"lyricsPasteDialog"; parent: workspace.parent; property string exactTarget: "0"; property string editToken: ""
         anchors.centerIn: parent; width: Math.min(580, parent.width - 40); modal: true; title: "粘贴歌词"; standardButtons: Dialog.Save | Dialog.Cancel
         contentItem: ColumnLayout {
-            Label { text: "保存会替换这首歌已有的本地歌词。"; color: Theme.secondary; wrapMode: Text.Wrap }
+            UiText { text: "保存会替换这首歌已有的本地歌词。"; color: Theme.secondary; wrapMode: Text.Wrap }
             ScrollView { Layout.fillWidth: true; Layout.preferredHeight: 250; TextArea { id: pasted; objectName: "lyricsPasteText"; placeholderText: "粘贴 LRC 或普通歌词"; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; selectByMouse: true } }
         }
         onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey) lyricsSearchBridge.saveText(pasted.text, true, editToken)

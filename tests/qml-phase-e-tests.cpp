@@ -1,6 +1,7 @@
 #include "c4c5-ui-fixture.h"
 #include <QApplication>
 #include <QDir>
+#include <QLineF>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QWheelEvent>
@@ -47,7 +48,13 @@ private slots:
         auto *back=visual(root,"lyricsWorkspaceClose"); QVERIFY(back); QVERIFY(bounds(back).top()>=24);
         auto *multi=visual(root,"lyricsMultiSelect"); QVERIFY(multi); shot(w,"toggle-circle");
         const auto beforeWidth=visual(root,"lyricsMissingOnly")->width();
+        auto *batch=visual(root,"lyricsBatchReveal"), *start=visual(root,"batchLyricsSearchButton"); QVERIFY(batch); QVERIFY(start);
+        auto *startBackground=qvariant_cast<QQuickItem *>(start->property("background")); QVERIFY(startBackground);
+        const auto enabledColor=startBackground->property("color").value<QColor>();
         QVERIFY(click(w,multi)); QVERIFY(multi->property("checked").toBool()); QTest::qWait(60);
+        QVERIFY(batch->property("progress").toReal()>0 && batch->property("progress").toReal()<1);
+        QVERIFY(startBackground->property("color").value<QColor>()!=enabledColor);
+        QVERIFY(startBackground->property("color").value<QColor>()!=tokens->property("background").value<QColor>());
         QVERIFY(multi->property("markProgress").toReal()>0 && multi->property("markProgress").toReal()<1); shot(w,"toggle-morph");
         QTRY_COMPARE(multi->property("markProgress").toReal(),1.); shot(w,"toggle-check");
         auto *filters=visual(root,"lyricsFilterRow"); QVERIFY(filters);
@@ -80,7 +87,11 @@ private slots:
         QTest::qWait(100); const auto angle=ring->rotation(); QTest::qWait(100); QVERIFY(qAbs(ring->rotation()-angle)>10);
         QVERIFY(target->setProperty("searchState","complete"));
         shot(w,"lyrics-workspace");
-        QVERIFY(QMetaObject::invokeMethod(workspace,"close")); QTest::qWait(160); QVERIFY(!workspace->isVisible());
+        const auto settledTop=bounds(body).top();
+        QVERIFY(QMetaObject::invokeMethod(workspace,"close")); QTest::qWait(100);
+        QVERIFY(workspace->isVisible()); QVERIFY(body->opacity()>0 && body->opacity()<1); QVERIFY(bounds(body).top()<settledTop);
+        QVERIFY(visual(root,"contentHost")->isVisible()); shot(w,"lyrics-exit-middle");
+        QTRY_VERIFY(!workspace->isVisible());
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(260);
         QVERIFY(click(w,visual(root,"uiFontSetting")));
         auto *dialog=w->findChild<QObject *>("uiFontDialog"); QVERIFY(dialog);
@@ -94,6 +105,57 @@ private slots:
         QVERIFY(click(w,mark)); QTest::qWait(280); shot(w,"instrumental-confirmation");
         QTest::keyClick(w,Qt::Key_Escape); QTest::qWait(150);
         QVERIFY(QMetaObject::invokeMethod(workspace,"close")); QTRY_VERIFY(!workspace->isVisible());
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void dropdownsAnimateAndBrowserMenuUsesButtonAnchor() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
+        auto exercisePopup=[&](QQuickItem *control, const QString &name) -> bool {
+            if(!control || !click(w,control)) return false;
+            auto *popup=qvariant_cast<QObject *>(control->property("popup")); if(!popup) return false;
+            QTest::qWait(60);
+            const bool animating=popup->property("opacity").toReal()>0 && popup->property("opacity").toReal()<1
+                && popup->property("scale").toReal()>.92 && popup->property("scale").toReal()<1;
+            shot(w,name+"-opening"); QTest::qWait(240); shot(w,name);
+            if(!popup->property("opened").toBool()) return false;
+            if(!QMetaObject::invokeMethod(popup,"close")) return false;
+            QTest::qWait(60); const bool closing=popup->property("visible").toBool() && popup->property("opacity").toReal()<1;
+            QTest::qWait(180); return animating && closing && !popup->property("visible").toBool();
+        };
+        QVERIFY(click(w,visual(root,"findMissingLyrics"))); QTest::qWait(300);
+        QVERIFY(exercisePopup(visual(root,"lyricsCandidateSourceFilter"),"sources-dropdown"));
+        QVERIFY(exercisePopup(visual(root,"lyricsSourceLanguage"),"language-dropdown"));
+        QVERIFY(click(w,visual(root,"lyricsSearchSettingsButton"))); QTest::qWait(280);
+        auto *source=visual(root,"lyricsSource-lrclib"); QVERIFY(source); QVERIFY(source->property("markProgress").isValid());
+        QVERIFY(click(w,source)); QTest::qWait(60); QCOMPARE(visual(root,"lyricsSource-lrclib"),source);
+        QVERIFY(source->property("markProgress").toReal()>0 && source->property("markProgress").toReal()<1);
+        QTest::qWait(240); source=visual(root,"lyricsSource-lrclib"); QVERIFY(source); QVERIFY(!source->property("checked").toBool());
+        QVERIFY(click(w,source)); QTest::qWait(300); source=visual(root,"lyricsSource-lrclib"); QVERIFY(source); QVERIFY(source->property("checked").toBool()); shot(w,"source-toggle-buttons");
+        QVERIFY(click(w,visual(root,"lyricsSearchSettingsClose"))); QTest::qWait(150);
+        auto *browser=visual(root,"lyricsBrowserButton"); QVERIFY(browser);
+        auto *menu=w->findChild<QObject *>("lyricsBrowserMenu"); QVERIFY(menu); QPointF menuOrigin;
+        for(int point:{0,1}) {
+            const auto button=bounds(browser);
+            QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,QPointF(button.left()+button.width()*(point?.8:.2),button.center().y()).toPoint());
+            QTest::qWait(60); QVERIFY(menu->property("scale").toReal()<1); QTest::qWait(240);
+            auto *content=qvariant_cast<QQuickItem *>(menu->property("contentItem")); QVERIFY(content);
+            const auto origin=bounds(content).topLeft();
+            if(point) QVERIFY(QLineF(origin,menuOrigin).length()<1); else menuOrigin=origin;
+            QVERIFY(qAbs(bounds(content).right()+menu->property("rightPadding").toReal()-button.right())<1);
+            QVERIFY(qAbs(origin.y()-menu->property("topPadding").toReal()-button.bottom()-4)<1);
+            shot(w,"anchored-browser-menu"); QVERIFY(QMetaObject::invokeMethod(menu,"close")); QTest::qWait(180);
+        }
+        QVERIFY(QMetaObject::invokeMethod(visual(root,"lyricsWorkspace"),"close")); QTest::qWait(300);
+        QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
+        QVERIFY(exercisePopup(visual(root,"qmlThemeSetting"),"theme-dropdown"));
+        QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTest::qWait(300);
+        QVERIFY(exercisePopup(visual(root,"aiProviderSelection"),"api-provider-dropdown"));
+        auto *scroll=visual(root,"aiSettingsScroll"); auto *flick=qvariant_cast<QQuickItem *>(scroll->property("contentItem")); QVERIFY(flick);
+        flick->setProperty("contentY",qMax(0.,bounds(visual(root,"aiLyricsTranslationSettings")).bottom()-bounds(scroll).bottom()+20)); QTest::qWait(60);
+        QVERIFY(click(w,visual(root,"aiLyricsTranslationSettings"))); QTest::qWait(300);
+        auto *global=visual(root,"aiTranslationUseGlobal"); QVERIFY(global); QVERIFY(global->property("markProgress").isValid());
+        const auto wasGlobal=global->property("checked").toBool(); QVERIFY(click(w,global)); QTest::qWait(300);
+        QCOMPARE(f.shell->aiBridge()->draft().value("translationUsesDefaults").toBool(),!wasGlobal);
+        shot(w,"translation-toggle-button");
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void feedbackStaysAbovePlayerAndHandsOffToAnimatedDetails() {
@@ -204,6 +266,12 @@ private slots:
             QVERIFY(qAbs(appearance->width()-cellWidth)<1); QVERIFY(qAbs(appearance->width()-threshold->width())<1); QVERIFY(qAbs(close->width()-cellWidth)<1);
         }
         auto *scroll=visual(root,"settingsScroll"); QVERIFY(scroll);
+        auto *bold=visual(root,"mutedBoldSetting"), *reduce=visual(root,"reduceMotionSetting"); QVERIFY(bold); QVERIFY(reduce);
+        QVERIFY(qAbs(bounds(bold).top()-bounds(reduce).top())<1); QVERIFY(bounds(bold).left()>bounds(reduce).right());
+        QVERIFY(click(w,bold)); QVERIFY(f.shell->settingsBridge()->values().value("mutedBold").toBool());
+        auto *caption=visual(root,"librarySummary"); QVERIFY(caption); QCOMPARE(caption->property("font").value<QFont>().weight(),QFont::DemiBold);
+        QVERIFY(click(w,bold)); QCOMPARE(caption->property("font").value<QFont>().weight(),QFont::Medium);
+        shot(w,"settings-global-bold-toggle");
         auto *flick=qvariant_cast<QQuickItem *>(scroll->property("contentItem")); QVERIFY(flick);
         const auto end=qMax(0.,flick->property("contentHeight").toReal()-flick->height());
         flick->setProperty("contentY",end);
@@ -216,6 +284,7 @@ private slots:
         QVERIFY(click(w,visual(root,"editAppearance"))); QTest::qWait(280);
         QVERIFY(click(w,visual(root,"appearanceMode4"))); QTest::qWait(120);
         auto *options=visual(root,"appearanceImageOptions"); QVERIFY(options);
+        QVERIFY(!visual(root,"appearanceMutedBold"));
         for (auto *child:options->childItems()) if(child->isVisible()) QVERIFY(bounds(child).right()<=w->width()-20);
         shot(w,"compact-appearance-options");
         QVERIFY(click(w,visual(root,"appearanceBack"))); QTest::qWait(280); shot(w,"appearance-unsaved");

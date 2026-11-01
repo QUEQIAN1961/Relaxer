@@ -165,11 +165,6 @@ Item {
                         checked: !!settingsBridge.appearanceDraft.shareFooter
                         onClicked: settingsBridge.editAppearance("shareFooter", checked)
                     }
-                    ToggleButton {
-                        objectName: "appearanceMutedBold"
-                        text: "右侧小字加粗"; checked: !!settingsBridge.appearanceDraft.mutedBold
-                        onClicked: settingsBridge.editAppearance("mutedBold", checked)
-                    }
                 }
                 ColumnLayout {
                     Layout.fillWidth: true

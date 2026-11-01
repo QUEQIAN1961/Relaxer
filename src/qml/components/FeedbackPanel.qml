@@ -150,7 +150,7 @@ Item {
         contentItem: ColumnLayout {
             spacing: 10
             UiText { Layout.fillWidth: true; text: "本次会话最近 20 条；详情仅保留在本机内存中。"; color: Theme.secondary; wrapMode: Text.Wrap }
-            ComboBox {
+            ChoiceBox {
                 objectName: "feedbackHistoryChoice"; Layout.fillWidth: true
                 displayText: panel.selected.message || ""
                 model: panel.service.history; textRole: "message"

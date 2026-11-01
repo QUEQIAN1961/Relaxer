@@ -23,7 +23,7 @@
 namespace relaxer {
 namespace {
 QStringList preferenceKeys() {
-    return {"theme", "threshold", "closeToTray", "showLyricTranslation", "playerCoverBackground", "lyricColor", "reduceMotion", "songColumnWidths"};
+    return {"theme", "threshold", "closeToTray", "showLyricTranslation", "playerCoverBackground", "lyricColor", "reduceMotion", "mutedBold", "songColumnWidths"};
 }
 QColor mixed(const QColor &first, const QColor &second, double amount) {
     return QColor(qRound(first.red() * amount + second.red() * (1 - amount)),
@@ -79,6 +79,7 @@ QVariantMap SettingsBridge::values() const {
             {"playerCoverBackground", m_store.get("playerCoverBackground", true).toBool()},
             {"lyricColor", m_store.get("lyricColor", QString()).toString()},
             {"reduceMotion", m_store.get("qml.reduceMotion", false).toBool()},
+            {"mutedBold", m_store.get("mutedBold", m_appearance.active().value("mutedBold")).toBool()},
             {"songColumnWidths", m_store.get("songColumnWidths", QJsonObject()).toObject().toVariantMap()},
             {"shortcuts", m_store.get("shortcuts", ShortcutRules::defaults()).toObject().toVariantMap()},
             {"uiFont", m_store.get("uiFont", QJsonObject()).toObject().toVariantMap()},
@@ -129,7 +130,7 @@ QVariantMap SettingsBridge::palette() const {
     return {{"dark", dark}, {"custom", custom}, {"background", background.name()}, {"panel", side.name()},
             {"card", card.name()}, {"footer", footer.name()}, {"accent", accent.name()},
             {"text", ink.name()}, {"sideText", sideInk.name()}, {"secondary", muted.name()}, {"border", border.name()},
-            {"accentText", autoInk(accent).name()}, {"mutedBold", custom && appearance["mutedBold"].toBool()},
+            {"accentText", autoInk(accent).name()}, {"mutedBold", values().value("mutedBold").toBool()},
             {"progressFill", progressFill}, {"progressTrack", progressTrack},
             {"imageMode", imageMode}, {"shareLR", shareLR}, {"shareFooter", shareFooter},
             {"leftImage", leftImage.isEmpty() ? QUrl() : QUrl::fromLocalFile(leftImage)},

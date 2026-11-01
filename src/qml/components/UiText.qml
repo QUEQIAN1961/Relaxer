@@ -7,5 +7,5 @@ Text {
         return settingsBridge.fontFamilyFor(fontRegion) || "Microsoft YaHei UI"
     }
     font.pixelSize: Theme.fontSize
-    font.weight: Font.Medium
+    font.weight: settingsBridge.values.mutedBold && color === Theme.secondary && (fontRegion === "rest" || fontRegion === "songs") ? Font.DemiBold : Font.Medium
 }

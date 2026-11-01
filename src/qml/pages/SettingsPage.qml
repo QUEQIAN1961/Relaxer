@@ -115,12 +115,21 @@ ColumnLayout {
                             checked: settingsBridge.values.playerCoverBackground
                             onClicked: settingsBridge.setPreference("playerCoverBackground", checked)
                         }
-                    ToggleButton {
-                        objectName: "reduceMotionSetting"
-                        text: "减少动画"
-                        checked: settingsBridge.values.reduceMotion
-                        onClicked: settingsBridge.setPreference("reduceMotion", checked)
-                    }
+                        Row {
+                            spacing: 8
+                            ToggleButton {
+                                objectName: "reduceMotionSetting"
+                                text: "减少动画"
+                                checked: settingsBridge.values.reduceMotion
+                                onClicked: settingsBridge.setPreference("reduceMotion", checked)
+                            }
+                            ToggleButton {
+                                objectName: "mutedBoldSetting"
+                                text: "右侧小字加粗"
+                                checked: settingsBridge.values.mutedBold
+                                onClicked: settingsBridge.setPreference("mutedBold", checked)
+                            }
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true

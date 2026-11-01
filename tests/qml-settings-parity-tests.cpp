@@ -79,6 +79,19 @@ private slots:
         QCOMPARE(f.library.setting("windowWidth").toInt(), 1280);
         QVERIFY(f.library.setting("windowMaximized").toBool());
     }
+    void secondaryTextWeightIsIndependentOfAppearancePresets() {
+        Fixture f; QVERIFY(f.ok);
+        f.bridge->beginAppearance(); QVERIFY(f.bridge->setAppearanceMode(3));
+        QVERIFY(f.bridge->editAppearance("mutedBold",true)); QVERIFY(f.bridge->saveAppearance());
+        QVERIFY(f.bridge->values().value("mutedBold").toBool()); // Retain the old preset preference until explicitly changed.
+        QVERIFY(f.bridge->setPreference("mutedBold",false));
+        f.bridge->beginAppearance(); QVERIFY(f.bridge->editAppearance("mutedBold",true)); QVERIFY(f.bridge->saveAppearance(true));
+        QVERIFY(!f.bridge->palette().value("mutedBold").toBool());
+        QVERIFY(f.bridge->setPreference("mutedBold",true)); QVERIFY(f.bridge->setTheme(0));
+        QVERIFY(f.bridge->palette().value("mutedBold").toBool());
+        SettingsBridge reopened(&f.library); QVERIFY(reopened.values().value("mutedBold").toBool());
+        QVERIFY(!reopened.setPreference("mutedBold",1));
+    }
     void builtinAndCustomPaletteUseOriginalLeftRightAndFooterRoles_data() {
         QTest::addColumn<bool>("systemDark");
         QTest::newRow("light-system") << false;
