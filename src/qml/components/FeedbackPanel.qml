@@ -10,6 +10,7 @@ Item {
     property bool suspended: false
     property real bottomInset: 20
     readonly property real edgeMargin: 20
+    readonly property real pressedScale: .96
     property real noticeProgress: 0
     property var noticeEntry: ({})
     property bool dismissing: false
@@ -20,7 +21,7 @@ Item {
     property bool historyAvailable: false
     property bool hadNotice: false
     function hideHistory() { historyAvailable=false; historyExpiry.stop() }
-    function pressNotice() { if (!dismissing && !detailMotion.running) notice.scale = .9 }
+    function pressNotice() { if (!dismissing && !detailMotion.running) notice.scale = panel.pressedScale }
     function releaseNotice() { if (!detailMotion.running) notice.scale = 1 }
     function openDetails(entry) {
         selected = entry || service.current
@@ -68,7 +69,7 @@ Item {
         }
     }
     NumberAnimation {
-        id: detailMotion; target: notice; property: "scale"; to: .9
+        id: detailMotion; target: notice; property: "scale"; to: panel.pressedScale
         duration: settingsBridge.values.reduceMotion ? 0 : 140; easing.type: Easing.OutCubic
         onFinished: {
             panel.detailHandoff = true; panel.noticeProgress = 0

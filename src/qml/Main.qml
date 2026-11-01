@@ -253,7 +253,7 @@ ApplicationWindow {
     Timer { id: windowSave; interval: 350; onTriggered: if(root.visibility!==Window.FullScreen && root.visibility!==Window.Minimized)settingsBridge.saveWindowState(root.width,root.height,root.visibility===Window.Maximized) }
     Item {
         id: contentHost
-        visible: lyricsWorkspace.reveal < 1
+        visible: !lyricsWorkspace.visible
         objectName: "contentHost"
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
         anchors.bottom: importPanel.visible ? importPanel.top : playerBar.top
@@ -359,7 +359,7 @@ ApplicationWindow {
     }
     PlayerBar {
         id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98
-        visible:!root.bulkActive&&lyricsWorkspace.reveal<1;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
+        visible:!root.bulkActive&&!lyricsWorkspace.visible;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
         backgroundCanvasHeight: root.height; backgroundOffsetY: playerBar.y
         onExpandRequested:root.animatePlayer(!root.lyricsOpen)
     }

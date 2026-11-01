@@ -9,11 +9,11 @@ Page {
     objectName: "lyricsWorkspace"
     visible: opened || reveal > 0
     anchors.fill: parent
+    clip: true
     focus: visible
     property bool opened: false
     property real reveal: 0
-    opacity: reveal
-    transform: Translate { y: 20 * (1 - workspace.reveal) }
+    readonly property real transitionOffset: -7 * (1 - reveal)
     Behavior on reveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 260; easing.type: Easing.OutCubic } }
     signal aboutToShow()
     signal closed()
@@ -209,6 +209,8 @@ Page {
     background: Rectangle { color: Theme.background }
     header: Item {
         implicitHeight: 70
+        opacity: workspace.reveal
+        transform: Translate { y: workspace.transitionOffset }
         RowLayout {
             anchors.fill: parent; anchors.topMargin: 20; anchors.bottomMargin: 4; anchors.leftMargin: 20; anchors.rightMargin: 12
             ShellButton { objectName: "lyricsWorkspaceClose"; text: "‹ 返回"; flat: true; implicitHeight: 30; Accessible.name: "返回上一页"; onClicked: workspace.requestClose() }
@@ -217,6 +219,8 @@ Page {
         }
     }
     contentItem: RowLayout {
+        opacity: workspace.reveal
+        transform: Translate { y: workspace.transitionOffset }
         spacing: 14
         Rectangle {
             Layout.preferredWidth: Math.max(220, workspace.availableWidth * .25)
@@ -225,13 +229,12 @@ Page {
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 10; spacing: 8
                 Label { text: "歌曲 · " + workspace.visibleKeys().length + (multiSelect.checked ? " · 已选 " + workspace.searchKeys().length : ""); color: Theme.text; font.weight: Font.DemiBold }
-                RowLayout {
-                  objectName: "lyricsFilterRow"; Layout.fillWidth: true; spacing: 3
+                Flow {
+                  objectName: "lyricsFilterRow"; Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 6
                 FilterToggle { id: missingLyrics; objectName: "lyricsMissingOnly"; text: "无歌词"; onToggled: if (checked) missingTranslation.checked = false }
                 FilterToggle { id: missingTranslation; objectName: "lyricsMissingTranslationOnly"; text: "无翻译"; onToggled: if (checked) missingLyrics.checked = false }
                 FilterToggle { id: multiSelect; objectName: "lyricsMultiSelect"; text: "多选"; onToggled: if (!checked) workspace.selectedTracks = [] }
                 ShellButton { objectName: "lyricsSelectAll"; text: "全选"; flat: true; font.pixelSize: 13; leftPadding: 4; rightPadding: 4; implicitWidth: 38; implicitHeight: 28; visible: multiSelect.checked; onClicked: workspace.selectedTracks = workspace.visibleKeys() }
-                Item { Layout.fillWidth: true }
                 }
                 ShellButton {
                     objectName: "lyricsBatchInstrumental"; Layout.fillWidth: true; visible: multiSelect.checked
@@ -448,6 +451,8 @@ Page {
         }
     }
     footer: Item {
+        opacity: workspace.reveal
+        transform: Translate { y: workspace.transitionOffset }
         implicitHeight: 28
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 18
