@@ -51,6 +51,17 @@ QJsonArray toArray(const QStringList &values) {
 }
 } // namespace
 
+bool isSupportedProvider(const QString &id) {
+    return id == DeepSeekProviderId || id == KimiProviderId || id == QwenProviderId;
+}
+
+QString defaultModelId(const QString &id) {
+    if (id == DeepSeekProviderId) return QStringLiteral("deepseek-flash");
+    if (id == KimiProviderId) return QStringLiteral("kimi-k2.5");
+    if (id == QwenProviderId) return QStringLiteral("qwen-plus");
+    return {};
+}
+
 qint64 nonNegativeJsonInteger(const QJsonValue &value, bool *valid) {
     const double number = value.toDouble(-1);
     const bool ok = value.isDouble() && std::isfinite(number) && number >= 0 &&
@@ -112,6 +123,40 @@ ModelCatalogResult parseDeepSeekModelCatalog(const QByteArray &body) {
         result.models.append(model);
     }
     result.ok = true;
+    return result;
+}
+
+ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QString &providerId) {
+    auto result = parseDeepSeekModelCatalog(body);
+    for (auto &model : result.models) {
+        model.providerId = providerId;
+        model.protocol = {};
+        bool supported = false;
+        qint64 context = 32768, output = 8192;
+        if (providerId == KimiProviderId) {
+            supported = model.id == "kimi-k2.5" || model.id == "kimi-k2-0905-preview" || model.id == "kimi-k2-0711-preview"
+                     || model.id == "moonshot-v1-8k" || model.id == "moonshot-v1-32k" || model.id == "moonshot-v1-128k";
+            if (model.id == "kimi-k2.5") { context = 262144; output = 32768; }
+            else if (model.id == "kimi-k2-0905-preview") context = 262144;
+            else if (model.id == "kimi-k2-0711-preview") context = 131072;
+            else if (model.id == "moonshot-v1-8k") { context = 8192; output = 4096; }
+            else if (model.id == "moonshot-v1-128k") context = 131072;
+        } else if (providerId == QwenProviderId) {
+            supported = model.id == "qwen-plus" || model.id == "qwen-turbo" || model.id == "qwen-max";
+        }
+        if (supported) {
+            model.protocol = {true, true, true, true};
+            model.capabilities.inputModalities = {"text"};
+            model.capabilities.outputModalities = {"text"};
+            // Conservative request budgets when /models omits token limits.
+            if (!model.capabilities.contextWindow) model.capabilities.contextWindow = context;
+            if (!model.capabilities.maxOutputTokens) model.capabilities.maxOutputTokens = output;
+            // Structured translation uses non-thinking mode on these APIs.
+            model.capabilities.reasoningMetadataKnown = true;
+            model.capabilities.reasoningEfforts.clear();
+            model.capabilities.defaultReasoningEffort.clear();
+        }
+    }
     return result;
 }
 

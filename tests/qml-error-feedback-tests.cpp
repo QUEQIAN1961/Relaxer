@@ -134,13 +134,14 @@ private slots:
         w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));auto *root=w->contentItem();
         auto *expand=visual(root,"playbackExpandButton");QVERIFY(click(w,expand));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
         f->post("Library","Error","Escape details","Preserve the detail and background state");
+        QTRY_COMPARE(visual(root,"feedbackPanel")->property("noticeProgress").toDouble(),1.0);
         QVERIFY(click(w,visual(root,"feedbackDetailsButton")));
         auto *details=w->findChild<QObject *>("feedbackDetailsDialog");QVERIFY(details);QTRY_VERIFY(details->property("opened").toBool());
         QTRY_VERIFY(w->property("popupOpen").toBool());QVERIFY(!details->property("modal").toBool());
         const auto event=f->current()["eventId"];QVERIFY(escapeEvidence(w,f,"details-open"));
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!details->property("visible").toBool());
         QVERIFY(w->property("lyricsOpen").toBool());QCOMPARE(w->property("playerProgress").toDouble(),1.0);
-        QTRY_VERIFY(!w->property("popupOpen").toBool());QVERIFY(f->visible());QCOMPARE(f->current()["eventId"],event);
+        QTRY_VERIFY(!w->property("popupOpen").toBool());QVERIFY(!f->visible());QCOMPARE(f->current()["eventId"],event);
         auto *confirm=w->findChild<QObject *>("closeTasksConfirmation");QVERIFY(confirm);QVERIFY(confirm->property("modal").toBool());
         QSignalSpy rejected(confirm,SIGNAL(rejected()));QVERIFY(QMetaObject::invokeMethod(confirm,"open"));
         QTRY_VERIFY(confirm->property("opened").toBool());QTRY_VERIFY(w->property("popupOpen").toBool());
@@ -226,7 +227,7 @@ private slots:
         auto *root=shell.window()->contentItem();auto *notice=visual(root,"feedbackNotice");QVERIFY(notice);QTRY_VERIFY(notice->isVisible());
         QVERIFY(f->current()["presented"].toBool());QVERIFY(!f->current()["details"].toString().isEmpty());
         auto *button=visual(root,"feedbackDetailsButton");QVERIFY(button);QVERIFY(QMetaObject::invokeMethod(button,"click"));
-        auto *detail=visual(root,"feedbackDetailText");QVERIFY(detail);QTRY_VERIFY(detail->isVisible());
+        QQuickItem *detail=nullptr;QTRY_VERIFY((detail=visual(root,"feedbackDetailText")));QTRY_VERIFY(detail->isVisible());
         QCOMPARE(detail->property("text").toString(),f->current()["details"].toString());
         if(qEnvironmentVariableIsSet("RELAXER_D2_EVIDENCE")){
             QTest::qWait(200);QVERIFY(shell.window()->grabWindow().save(qEnvironmentVariable("RELAXER_D2_EVIDENCE")+"/fullscreen-failure.png"));
@@ -266,7 +267,7 @@ private slots:
         QCOMPARE(b->result()["duplicates"].toInt(),1);QCOMPARE(b->result()["failed"].toInt(),1);QCOMPARE(b->result()["processed"].toInt(),2);
         QCOMPARE(f->current()["category"].toString(),QString("Warning"));QVERIFY(f->current()["details"].toString().contains("bad.mp3"));
         auto *button=visual(shell.window()->contentItem(),"feedbackDetailsButton");QVERIFY(button);QVERIFY(QMetaObject::invokeMethod(button,"click"));
-        auto *detail=visual(shell.window()->contentItem(),"feedbackDetailText");QVERIFY(detail);QTRY_VERIFY(detail->isVisible());
+        QQuickItem *detail=nullptr;QTRY_VERIFY((detail=visual(shell.window()->contentItem(),"feedbackDetailText")));QTRY_VERIFY(detail->isVisible());
         QVERIFY(detail->property("text").toString().contains("bad.mp3"));
         QVERIFY(b->start({QUrl::fromLocalFile(bad)}));QTRY_VERIFY_WITH_TIMEOUT(!b->busy(),20000);
         QCOMPARE(f->current()["category"].toString(),QString("Error"));QCOMPARE(b->result()["failed"].toInt(),1);
@@ -371,18 +372,25 @@ private slots:
         QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());
         auto *f=shell.feedbackBridge();f->post("Playback","Error","original song","original reason","attempt","42");
         const auto id=f->current()["eventId"].toString();
-        auto *root=shell.window()->contentItem();auto *button=visual(root,"feedbackDetailsButton");QVERIFY(button);
-        QVERIFY(QMetaObject::invokeMethod(button,"click"));auto *detail=visual(root,"feedbackDetailText");QVERIFY(detail);
-        QTRY_VERIFY(detail->isVisible());QCOMPARE(detail->property("text").toString(),QString("original reason"));
+        auto *root=shell.window()->contentItem();
         auto *expiry=shell.window()->findChild<QObject *>("feedbackExpiry");QVERIFY(expiry);
         QVERIFY(expiry->setProperty("interval",200));QVERIFY(QMetaObject::invokeMethod(expiry,"restart"));QTest::qWait(120);
         f->post("Import","Cancellation","cancelled");
         QCOMPARE(f->current()["eventId"].toString(),id);QVERIFY(f->visible());
-        QCOMPARE(detail->property("text").toString(),QString("original reason"));
+        // Expiry now includes the slide-out, without restarting on silent history.
+        QTRY_VERIFY_WITH_TIMEOUT(!f->visible(),450);
+        auto *history=visual(root,"feedbackHistoryButton");QVERIFY(history);QVERIFY(click(shell.window(),history));
+        QQuickItem *detail=nullptr;QTRY_VERIFY((detail=visual(root,"feedbackDetailText")));QTRY_VERIFY(detail->isVisible());
         auto *choice=visual(root,"feedbackHistoryChoice");QVERIFY(choice);
+        choice->setProperty("currentIndex",1);QVERIFY(QMetaObject::invokeMethod(choice,"activated",Q_ARG(int,1)));
+        QCOMPARE(detail->property("text").toString(),QString("original reason"));
         QCOMPARE(choice->property("displayText").toString(),QString("original song"));
-        QTRY_VERIFY_WITH_TIMEOUT(!f->visible(),150);
-        QVERIFY(f->history()[1].toMap()["presented"].toBool());QVERIFY(!f->history()[0].toMap()["presented"].toBool());
+        QVERIFY(!f->visible());
+        f->post("Import","Cancellation","another silent event");
+        QCOMPARE(detail->property("text").toString(),QString("original reason"));
+        QCOMPARE(choice->property("displayText").toString(),QString("original song"));
+        QVERIFY(!f->visible());
+        QVERIFY(f->history().last().toMap()["presented"].toBool());QVERIFY(!f->history()[0].toMap()["presented"].toBool());
         FeedbackBridge unpresented;unpresented.post("Playback","Error","failed");const auto old=unpresented.current()["eventId"].toString();
         unpresented.post("Import","Cancellation","cancelled");unpresented.presented(old);
         QVERIFY(unpresented.history()[1].toMap()["presented"].toBool());QVERIFY(!unpresented.history()[0].toMap()["presented"].toBool());

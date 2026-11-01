@@ -33,7 +33,7 @@ ConfirmDialog {
         ShellButton { text: "选择字体文件"; onClicked: fontPicker.open() }
         Repeater {
             model: [{key:"songs",name:"歌曲列表"},{key:"lyrics",name:"歌词"},{key:"footer",name:"底栏"},{key:"next",name:"下一首"},{key:"rest",name:"其余界面文字"}]
-            delegate: CheckBox {
+            delegate: ToggleButton {
                 required property var modelData
                 text: modelData.name
                 checked: !!dialog.regions[modelData.key]
@@ -42,12 +42,17 @@ ConfirmDialog {
         }
         Label { Layout.fillWidth: true; text: settingsBridge.status; wrapMode: Text.Wrap; color: Theme.accent }
     }
-    footer: RowLayout {
-        spacing: 8
-        ShellButton { text: "恢复默认"; onClicked: { if (settingsBridge.resetFont()) dialog.close() } }
-        Item { Layout.fillWidth: true }
-        ShellButton { text: "取消"; onClicked: dialog.close() }
-        ShellButton { text: "保存"; primary: true; onClicked: { if (settingsBridge.saveFont(dialog.chosenFile, dialog.regions)) dialog.close() } }
+    footer: Item {
+        implicitHeight: actions.implicitHeight + 28
+        RowLayout {
+            id: actions
+            anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18; anchors.topMargin: 10; anchors.bottomMargin: 18
+            spacing: 8
+            ShellButton { text: "恢复默认"; onClicked: { if (settingsBridge.resetFont()) dialog.close() } }
+            Item { Layout.fillWidth: true }
+            ShellButton { text: "取消"; onClicked: dialog.close() }
+            ShellButton { text: "保存"; primary: true; onClicked: { if (settingsBridge.saveFont(dialog.chosenFile, dialog.regions)) dialog.close() } }
+        }
     }
     FileDialog {
         id: fontPicker

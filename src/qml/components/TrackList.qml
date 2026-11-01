@@ -110,7 +110,7 @@ Item {
                         UiText { fontRegion: "songs";visible:!table.bulkMode&&!hover.containsMouse&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
                         IconButton{visible:!table.bulkMode&&(hover.containsMouse||table.currentKey===row.trackKey);anchors.centerIn:parent;width:28;height:28;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"volumeMedium":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:table.playRequested(row.trackKey)}
                     }
-                    Item{width:table.columnWidths[1];height:parent.height;IconButton{anchors.centerIn:parent;width:28;height:28;symbol:row.favorite?"liked":"heart";tint:row.favorite?Theme.accent:Theme.secondary;onClicked:if(!table.bulkMode)table.favoriteRequested(row.trackKey)}}
+                    Item{width:table.columnWidths[1];height:parent.height;IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;width:30;height:30;padding:3;symbol:row.favorite?"liked":"heart";tint:row.favorite?Theme.accent:Theme.secondary;onClicked:if(!table.bulkMode)table.favoriteRequested(row.trackKey)}}
                     Item{
                         width:table.columnWidths[2];height:parent.height
                         Artwork{x:6;anchors.verticalCenter:parent.verticalCenter;width:40;height:40;file:row.rowCover;seed:row.title;resolution:128;radius:6}

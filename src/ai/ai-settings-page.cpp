@@ -204,6 +204,8 @@ void AiSettingsPage::buildHome() {
     m_provider->setObjectName("aiProviderSelection");
     m_provider->addItem("请选择供应商", QString());
     m_provider->addItem("DeepSeek 官方 API", QString::fromLatin1(DeepSeekProviderId));
+    m_provider->addItem("KIMI 官方 API", QString::fromLatin1(KimiProviderId));
+    m_provider->addItem("Qwen 官方 API（百炼）", QString::fromLatin1(QwenProviderId));
     m_provider->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_provider->setMinimumContentsLength(18);
     providerForm->addRow("供应商", m_provider);
@@ -274,10 +276,12 @@ void AiSettingsPage::buildHome() {
         if (m_populating || !m_runtime)
             return;
         cancelRefresh();
+        m_keyInput->clear();
         auto configuration = m_runtime->configuration();
         configuration.defaults.providerId = m_provider->currentData().toString();
-        if (configuration.defaults.providerId == DeepSeekProviderId && configuration.defaults.modelId.isEmpty())
-            configuration.defaults.modelId = "deepseek-flash";
+        configuration.defaults.modelId = defaultModelId(configuration.defaults.providerId);
+        configuration.defaults.thinkingEnabled = false;
+        configuration.defaults.reasoningEffort.clear();
         if (configuration.translationUsesDefaults && configuration.translationOverride.providerId.isEmpty())
             configuration.translationOverride = configuration.defaults;
         saveConfiguration(configuration, m_providerStatus);
@@ -368,6 +372,8 @@ void AiSettingsPage::buildTranslation() {
     m_translationProvider->setObjectName("aiTranslationProvider");
     m_translationProvider->addItem("请选择供应商", QString());
     m_translationProvider->addItem("DeepSeek 官方 API", QString::fromLatin1(DeepSeekProviderId));
+    m_translationProvider->addItem("KIMI 官方 API", QString::fromLatin1(KimiProviderId));
+    m_translationProvider->addItem("Qwen 官方 API（百炼）", QString::fromLatin1(QwenProviderId));
     form->addRow("供应商覆盖", m_translationProvider);
     m_translationModel = new QComboBox(configCard);
     m_translationModel->setObjectName("aiTranslationModel");
@@ -423,8 +429,9 @@ void AiSettingsPage::buildTranslation() {
             return;
         auto configuration = m_runtime->configuration();
         configuration.translationOverride.providerId = m_translationProvider->currentData().toString();
-        if (configuration.translationOverride.providerId == DeepSeekProviderId && configuration.translationOverride.modelId.isEmpty())
-            configuration.translationOverride.modelId = "deepseek-flash";
+        configuration.translationOverride.modelId = defaultModelId(configuration.translationOverride.providerId);
+        configuration.translationOverride.thinkingEnabled = false;
+        configuration.translationOverride.reasoningEffort.clear();
         saveConfiguration(configuration, m_translationStatus);
     });
     connect(m_translationModel, &QComboBox::currentIndexChanged, this, [this](int) {

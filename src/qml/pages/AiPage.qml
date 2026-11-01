@@ -8,6 +8,8 @@ ColumnLayout {
     id: page
     objectName: "aiPage"
     property string subpage: "home"
+    readonly property var providerIds: ["", "deepseek", "kimi", "qwen"]
+    readonly property var providerLabels: ["请选择供应商", "DeepSeek 官方 API", "KIMI 官方 API", "Qwen 官方 API（百炼）"]
     signal backRequested()
     Layout.fillWidth: true
     spacing: 18
@@ -74,9 +76,9 @@ ColumnLayout {
                     ChoiceBox {
                         objectName: "aiProviderSelection"
                         Layout.fillWidth: true
-                        model: ["请选择供应商", "DeepSeek 官方 API"]
-                        currentIndex: aiBridge.draft.providerId === "deepseek" ? 1 : 0
-                        onActivated: page.saveField("providerId", currentIndex === 1 ? "deepseek" : "")
+                        model: page.providerLabels
+                        currentIndex: Math.max(0, page.providerIds.indexOf(aiBridge.draft.providerId))
+                        onActivated: { key.clear(); page.saveField("providerId", page.providerIds[currentIndex]) }
                     }
                 }
                 RowLayout {
@@ -89,7 +91,7 @@ ColumnLayout {
                         echoMode: TextInput.Password
                         placeholderText: "在 Relaxer 中输入 API Key"
                         selectByMouse: true
-                        enabled: aiBridge.draft.providerId === "deepseek"
+                        enabled: aiBridge.draft.providerId.length > 0
                     }
                 }
                 Flow {
@@ -98,16 +100,16 @@ ColumnLayout {
                     ShellButton {
                         objectName: "aiCredentialSave"
                         text: "保存 Key"
-                        enabled: aiBridge.draft.providerId === "deepseek" && key.text.length > 0
+                        enabled: aiBridge.draft.providerId.length > 0 && key.text.length > 0
                         onClicked: { aiBridge.storeKey(key.text); key.clear() }
                     }
                     ShellButton {
                         objectName: "aiCredentialDelete"
                         text: "删除 Key"
-                        enabled: aiBridge.draft.providerId === "deepseek"
+                        enabled: aiBridge.draft.providerId.length > 0
                         onClicked: removeConsent.open()
                     }
-                    ShellButton { text: "检查本地凭据"; enabled: aiBridge.draft.providerId === "deepseek"; onClicked: aiBridge.checkCredential() }
+                    ShellButton { text: "检查本地凭据"; enabled: aiBridge.draft.providerId.length > 0; onClicked: aiBridge.checkCredential() }
                 }
                 UiText {
                     objectName: "aiCredentialStatus"
@@ -123,13 +125,13 @@ ColumnLayout {
                     ShellButton {
                         objectName: "aiProviderVerify"
                         text: aiBridge.busy ? "正在连接…" : "验证连接"
-                        enabled: !aiBridge.busy && aiBridge.draft.providerId === "deepseek"
+                        enabled: !aiBridge.busy && aiBridge.draft.providerId.length > 0
                         onClicked: aiBridge.refreshModels(true)
                     }
                     ShellButton {
                         objectName: "modelRefreshButton"
                         text: aiBridge.busy ? "正在刷新…" : "刷新模型"
-                        enabled: !aiBridge.busy && aiBridge.draft.providerId === "deepseek"
+                        enabled: !aiBridge.busy && aiBridge.draft.providerId.length > 0
                         onClicked: aiBridge.refreshModels(true)
                     }
                 }
@@ -245,10 +247,10 @@ ColumnLayout {
                     ChoiceBox {
                         objectName: "aiTranslationProvider"
                         Layout.fillWidth: true
-                        model: ["请选择供应商", "DeepSeek 官方 API"]
-                        currentIndex: aiBridge.draft.translationProviderId === "deepseek" ? 1 : 0
+                        model: page.providerLabels
+                        currentIndex: Math.max(0, page.providerIds.indexOf(aiBridge.draft.translationProviderId))
                         enabled: !aiBridge.draft.translationUsesDefaults
-                        onActivated: page.saveField("translationProviderId", currentIndex === 1 ? "deepseek" : "")
+                        onActivated: page.saveField("translationProviderId", page.providerIds[currentIndex])
                     }
                 }
                 RowLayout {
@@ -367,7 +369,7 @@ ColumnLayout {
         modal: true
         title: "删除已保存的 API Key？"
         standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: "将从本地凭据管理器中删除 DeepSeek 的 Key。"; wrapMode: Text.Wrap }
+        contentItem: Label { text: "将从本地凭据管理器中删除当前供应商的 Key。"; wrapMode: Text.Wrap }
         onAccepted: aiBridge.removeKey()
     }
 }

@@ -114,6 +114,8 @@ void AiRuntime::initialize(std::unique_ptr<CredentialStore> credentials, QUrl de
     m_deepSeek = mockEndpoint ? new DeepSeekProvider(DeepSeekProvider::MockEndpoint{std::move(deepSeekBaseUrl)}, this)
                              : new DeepSeekProvider(std::move(deepSeekBaseUrl), this);
     m_providers.add(m_deepSeek);
+    m_providers.add(new DeepSeekProvider(QString::fromLatin1(KimiProviderId), this));
+    m_providers.add(new DeepSeekProvider(QString::fromLatin1(QwenProviderId), this));
     m_requests = new AiRequestCoordinator(&m_providers, m_credentials, &m_models, this);
     connect(m_requests, &AiRequestCoordinator::modelsFinished, this,
             [this](quint64 taskId, const QString &providerId, const QList<ModelInfo> &models, const ProviderError &error) {

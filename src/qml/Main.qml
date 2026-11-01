@@ -75,7 +75,7 @@ ApplicationWindow {
     function imageRect(item) { const p = item.mapToItem(root.contentItem,0,0); return {x:p.x,y:p.y,width:item.width,height:item.height} }
     function textRect(item) {
         const bounds = imageRect(item)
-        const width = Math.min(bounds.width, item.contentWidth)
+        const width = Math.min(bounds.width, item.contentWidth + 2)
         if (item.horizontalAlignment === Text.AlignHCenter) bounds.x += (bounds.width - width) / 2
         bounds.width = Math.max(1, width)
         bounds.pixelSize = item.font.pixelSize
@@ -242,6 +242,7 @@ ApplicationWindow {
         width:Math.min(520,root.width-40);modal:true;closePolicy:Popup.NoAutoClose;title:"退出前保存失败"
         contentItem:Label{text:"播放状态未能保存。请选择后续操作。\n"+playbackBridge.exitError;wrapMode:Text.Wrap}
         footer:DialogButtonBox {
+            background: null
             ShellButton {objectName:"exitSaveRetry";text:"重试";onClicked:{exitSaveFailure.close();root.close()}}
             ShellButton {objectName:"exitSaveAnyway";text:"仍然退出";onClicked:{playbackBridge.requestExit(1);exitSaveFailure.close();root.close()}}
             ShellButton {objectName:"exitSaveCancel";text:"取消退出";onClicked:{playbackBridge.requestExit(2);root.allowClose=false;root.exitRequested=false;root.awaitingImportClose=false;exitSaveFailure.close()}}
@@ -252,7 +253,7 @@ ApplicationWindow {
     Timer { id: windowSave; interval: 350; onTriggered: if(root.visibility!==Window.FullScreen && root.visibility!==Window.Minimized)settingsBridge.saveWindowState(root.width,root.height,root.visibility===Window.Maximized) }
     Item {
         id: contentHost
-        visible: !lyricsWorkspace.visible
+        visible: lyricsWorkspace.reveal < 1
         objectName: "contentHost"
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
         anchors.bottom: importPanel.visible ? importPanel.top : playerBar.top
@@ -358,7 +359,7 @@ ApplicationWindow {
     }
     PlayerBar {
         id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98
-        visible:!root.bulkActive&&!lyricsWorkspace.visible;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
+        visible:!root.bulkActive&&lyricsWorkspace.reveal<1;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
         backgroundCanvasHeight: root.height; backgroundOffsetY: playerBar.y
         onExpandRequested:root.animatePlayer(!root.lyricsOpen)
     }
@@ -421,6 +422,7 @@ ApplicationWindow {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;spacing:16
             UiText {id:importStatus;objectName:"importStatusText";Layout.fillWidth:true;text:importPanel.shownStatus;color:Theme.secondary;font.pixelSize:14;textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:5;elide:Text.ElideRight}
             ProgressBar{objectName:"importProgress";visible:importBridge.busy;Layout.preferredWidth:Math.min(230,root.width*.22);from:0;to:Math.max(1,importBridge.total);value:importBridge.current;indeterminate:importBridge.total===0}
+            UiText { objectName:"importProgressCount"; visible:importBridge.busy&&importBridge.total>0; text:importBridge.current+"/"+importBridge.total; color:Theme.text; font.pixelSize:14 }
             ShellButton{objectName:"importResultDetails";visible:!importBridge.busy;text:"详情";implicitHeight:28;onClicked:feedbackPanel.openDetails({message:importPanel.completionText,details:importBridge.result.details})}
             ShellButton{visible:importBridge.busy;text:"取消导入";implicitHeight:28;onClicked:importBridge.cancel()}
         }
@@ -456,23 +458,40 @@ ApplicationWindow {
 
     UiText {
         id:titleFlight;objectName:"sharedTitleFlight";z:4;visible:root.metadataTravelling&&!lyricsWorkspace.visible
-        text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideRight;color:Theme.text
+        text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideNone;color:Theme.text
         x:root.titleFrom.x+(root.titleTo.x-root.titleFrom.x)*root.coverProgress
         y:root.titleFrom.y+(root.titleTo.y-root.titleFrom.y)*root.coverProgress
-        width:root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress
+        width:Math.max(root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress,titleExpandedMetrics.advanceWidth<=(root.lyricsOpen?root.titleTo.width:root.titleFrom.width)?titleFlightMetrics.advanceWidth+2:0)
+        clip:true
         height:root.titleFrom.height+(root.titleTo.height-root.titleFrom.height)*root.coverProgress
         font.pixelSize:root.titleFrom.pixelSize+(root.titleTo.pixelSize-root.titleFrom.pixelSize)*root.coverProgress
         font.family:root.titleTo.family;font.weight:root.titleTo.weight
     }
     UiText {
         id:artistFlight;objectName:"sharedArtistFlight";z:4;visible:root.metadataTravelling&&!lyricsWorkspace.visible
-        text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideRight;color:Theme.secondary
+        text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideNone;color:Theme.secondary
         x:root.artistFrom.x+(root.artistTo.x-root.artistFrom.x)*root.coverProgress
         y:root.artistFrom.y+(root.artistTo.y-root.artistFrom.y)*root.coverProgress
-        width:root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress
+        width:Math.max(root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress,artistExpandedMetrics.advanceWidth<=(root.lyricsOpen?root.artistTo.width:root.artistFrom.width)?artistFlightMetrics.advanceWidth+2:0)
+        clip:true
         height:root.artistFrom.height+(root.artistTo.height-root.artistFrom.height)*root.coverProgress
         font.pixelSize:root.artistFrom.pixelSize+(root.artistTo.pixelSize-root.artistFrom.pixelSize)*root.coverProgress
         font.family:root.artistTo.family
+    }
+    // Measure the animated font independently of the clipped Text item's width.
+    TextMetrics { id:titleFlightMetrics; text:titleFlight.text; font:titleFlight.font }
+    TextMetrics { id:artistFlightMetrics; text:artistFlight.text; font:artistFlight.font }
+    TextMetrics {
+        id:titleExpandedMetrics; text:titleFlight.text
+        font.family:root.lyricsOpen?root.titleTo.family:root.titleFrom.family
+        font.pixelSize:root.lyricsOpen?root.titleTo.pixelSize:root.titleFrom.pixelSize
+        font.weight:root.lyricsOpen?root.titleTo.weight:root.titleFrom.weight
+    }
+    TextMetrics {
+        id:artistExpandedMetrics; text:artistFlight.text
+        font.family:root.lyricsOpen?root.artistTo.family:root.artistFrom.family
+        font.pixelSize:root.lyricsOpen?root.artistTo.pixelSize:root.artistFrom.pixelSize
+        font.weight:root.lyricsOpen?root.artistTo.weight:root.artistFrom.weight
     }
     DropArea{anchors.fill:parent;onDropped:drop=>{if(drop.hasUrls&&!importBridge.busy){importBridge.start(drop.urls,Number(libraryBridge.playlistId)>0?libraryBridge.playlistId:"0");drop.acceptProposedAction()}}}
     MouseArea{z:5;x:205;y:0;width:Math.max(0,root.width-331);height:26;onPressed:root.startSystemMove();onDoubleClicked:root.visibility===Window.Maximized?root.showNormal():root.showMaximized()}
@@ -554,7 +573,7 @@ ApplicationWindow {
     PlaylistEditor{id:playlistEditor;parent:root.popupLayer;onCreated:key=>root.openPlaylist(key)}
     LyricsWorkspace{id:lyricsWorkspace;parent:root.contentItem;z:6;onBatchInstrumentalRequested:keys=>batchInstrumental.review(keys)}
     BatchInstrumentalDialog{id:batchInstrumental;parent:root.popupLayer}
-    FeedbackPanel{id:feedbackPanel;parent:root.popupLayer;z:100;suspended:root.popupOpen}
+    FeedbackPanel{id:feedbackPanel;parent:root.popupLayer;z:100;suspended:root.popupOpen;bottomInset:playerBar.visible?playerBar.height+edgeMargin:edgeMargin}
     Toast{id:toast;anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:playerBar.top;anchors.bottomMargin:16;z:20}
     ConfirmDialog {
         id:closeConfirm;parent:root.popupLayer;objectName:"closeTasksConfirmation";anchors.centerIn:parent;width:Math.min(480,root.width-40);modal:true

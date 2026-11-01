@@ -100,6 +100,14 @@ DeepSeekProvider::DeepSeekProvider(QUrl baseUrl, QObject *parent)
 DeepSeekProvider::DeepSeekProvider(MockEndpoint endpoint, QObject *parent)
     : DeepSeekProvider(std::move(endpoint.url), parent) {
     m_mockEndpoint = true;
+    m_providerId = endpoint.providerId;
+}
+
+DeepSeekProvider::DeepSeekProvider(const QString &providerId, QObject *parent)
+    : DeepSeekProvider(providerId == KimiProviderId ? QUrl("https://api.moonshot.cn/v1")
+                     : providerId == QwenProviderId ? QUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
+                     : QUrl("https://api.deepseek.com"), parent) {
+    m_providerId = providerId;
 }
 
 DeepSeekProvider::~DeepSeekProvider() {
@@ -126,14 +134,18 @@ QString DeepSeekProvider::endpointError() const {
             return {};
         return QStringLiteral("测试端点必须是显式回环 HTTP 地址");
     }
-    if (m_baseUrl.scheme() != "https" || m_baseUrl.host() != "api.deepseek.com" ||
+    const bool official = (m_providerId == DeepSeekProviderId && m_baseUrl.host() == "api.deepseek.com" &&
+                          (m_baseUrl.path().isEmpty() || m_baseUrl.path() == "/v1")) ||
+                         (m_providerId == KimiProviderId && m_baseUrl.host() == "api.moonshot.cn" && m_baseUrl.path() == "/v1") ||
+                         (m_providerId == QwenProviderId && m_baseUrl.host() == "dashscope.aliyuncs.com" && m_baseUrl.path() == "/compatible-mode/v1");
+    if (m_baseUrl.scheme() != "https" || !official ||
         (m_baseUrl.port() != -1 && m_baseUrl.port() != 443) ||
-        (!m_baseUrl.path().isEmpty() && m_baseUrl.path() != "/v1"))
-        return QStringLiteral("DeepSeek 凭据只能发送到官方 HTTPS 端点");
+        !isSupportedProvider(m_providerId))
+        return QStringLiteral("供应商凭据只能发送到对应的官方 HTTPS 端点");
     return {};
 }
 
-QString DeepSeekProvider::providerId() const { return QString::fromLatin1(DeepSeekProviderId); }
+QString DeepSeekProvider::providerId() const { return m_providerId; }
 
 QUrl DeepSeekProvider::endpoint(const QString &path) const {
     auto url = m_baseUrl;
@@ -164,7 +176,21 @@ quint64 DeepSeekProvider::listModels(const QString &apiKey) {
 
 quint64 DeepSeekProvider::complete(const QString &apiKey, const ChatCompletionRequest &chat) {
     QString payloadError;
-    const auto payload = deepSeekChatPayload(chat, &payloadError);
+    auto payload = deepSeekChatPayload(chat, &payloadError);
+    if (m_providerId != DeepSeekProviderId && !payload.isEmpty()) {
+        if (chat.thinkingEnabled) {
+            payloadError = QStringLiteral("此供应商的结构化歌词翻译使用非思考模式");
+            payload = {};
+        } else {
+            payload.remove("thinking");
+            payload.remove("reasoning_effort");
+            if (m_providerId == KimiProviderId && chat.modelId == "kimi-k2.5") {
+                payload["thinking"] = QJsonObject{{"type", "disabled"}};
+                payload["temperature"] = 0.6;
+            }
+            if (m_providerId == QwenProviderId && chat.modelId != "qwen-max") payload["enable_thinking"] = false;
+        }
+    }
     if (payload.isEmpty()) {
         const quint64 id = ++m_nextRequestId;
         ProviderError error;
@@ -254,6 +280,7 @@ void DeepSeekProvider::finish(quint64 requestId) {
     if (timedOut) diagnostics.timeoutSource = QStringLiteral("provider");
     auto complete = [this, requestId, diagnostics](ChatCompletionResult result) {
         result.diagnostics = diagnostics;
+        if (m_providerId != DeepSeekProviderId) result.error.message.replace("DeepSeek", m_providerId == KimiProviderId ? "KIMI" : "Qwen");
         if (!result.ok()) result.content.clear();
         emit completionFinished(requestId, result);
     };
@@ -273,6 +300,7 @@ void DeepSeekProvider::finish(quint64 requestId) {
     if (networkError || status < 200 || status >= 300) {
         auto error = timedOut ? ProviderError{"timeout", QStringLiteral("AI 请求超时，请手动重试"), status}
                               : httpError(status, networkError);
+        if (m_providerId != DeepSeekProviderId) error.message.replace("DeepSeek", m_providerId == KimiProviderId ? "KIMI" : "Qwen");
         if (pending.kind == Kind::Models)
             emit modelsFinished(requestId, {}, error);
         else
@@ -281,7 +309,7 @@ void DeepSeekProvider::finish(quint64 requestId) {
     }
 
     if (pending.kind == Kind::Models) {
-        const auto parsed = parseDeepSeekModelCatalog(body);
+        const auto parsed = m_providerId == DeepSeekProviderId ? parseDeepSeekModelCatalog(body) : parseCompatibleModelCatalog(body, m_providerId);
         if (parsed.ok)
             emit modelsFinished(requestId, parsed.models, {});
         else

@@ -67,6 +67,7 @@ ConfirmDialog {
         }
     }
     footer: DialogButtonBox {
+        background: null
         ShellButton { objectName: "batchInstrumentalCancel"; text: "取消"; onClicked: dialog.reject() }
         ShellButton {
             objectName: "batchInstrumentalCommit"

@@ -8,6 +8,10 @@
 namespace relaxer::ai {
 
 inline constexpr const char *DeepSeekProviderId = "deepseek";
+inline constexpr const char *KimiProviderId = "kimi";
+inline constexpr const char *QwenProviderId = "qwen";
+bool isSupportedProvider(const QString &providerId);
+QString defaultModelId(const QString &providerId);
 
 enum class ModelAvailability { Unverified, Available, Unavailable };
 
@@ -64,6 +68,7 @@ QString validateModelSelection(const ModelInfo *model, const QString &providerId
 qint64 nonNegativeJsonInteger(const QJsonValue &value, bool *valid = nullptr);
 
 ModelCatalogResult parseDeepSeekModelCatalog(const QByteArray &body);
+ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QString &providerId);
 QJsonObject modelToJson(const ModelInfo &model);
 ModelInfo modelFromJson(const QJsonObject &object);
 QString modelAvailabilityText(ModelAvailability availability);

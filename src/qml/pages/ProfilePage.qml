@@ -129,6 +129,7 @@ Item {
             Label { id: editError; Layout.fillWidth: true; visible: text.length > 0; color: Theme.accent; wrapMode: Text.Wrap }
         }
         footer: DialogButtonBox {
+            background: null
             standardButtons: Dialog.Cancel
             ShellButton { text: "保存"; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: { if (libraryBridge.saveProfile(nickname.text, description.text)) profileEditor.accept(); else editError.text = libraryBridge.error } }
             onRejected: profileEditor.reject()

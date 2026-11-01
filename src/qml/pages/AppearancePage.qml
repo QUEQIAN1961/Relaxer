@@ -90,9 +90,9 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    CheckBox {
+                    ToggleButton {
                         objectName: "appearanceCustomText"
-                        Layout.preferredWidth: 174
+                        Layout.preferredWidth: 206
                         text: "自定义文字颜色"; checked: !!settingsBridge.appearanceDraft.customText
                         onClicked: settingsBridge.editAppearance("customText", checked)
                     }
@@ -111,9 +111,9 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    CheckBox {
+                    ToggleButton {
                         objectName: "appearanceCustomProgressColors"
-                        Layout.preferredWidth: 174
+                        Layout.preferredWidth: 206
                         text: "自定义进度条颜色"
                         checked: !!settingsBridge.appearanceDraft.customProgressColors
                         onClicked: settingsBridge.editAppearance("customProgressColors", checked)
@@ -133,9 +133,9 @@ Item {
                 UiText { Layout.fillWidth: true; text: "同时用于歌曲进度条和音量条；未勾选时使用推荐颜色。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
                 RowLayout {
                     Layout.fillWidth: true; spacing: 8
-                    CheckBox {
+                    ToggleButton {
                         objectName: "appearanceCustomFooter"
-                        Layout.preferredWidth: 174
+                        Layout.preferredWidth: 206
                         text: "自定义底栏颜色"
                         checked: !!settingsBridge.appearanceDraft.customFooter
                         onClicked: settingsBridge.editAppearance("customFooter", checked)
@@ -148,29 +148,28 @@ Item {
                         onClicked: page.chooseColor("footer")
                     }
                 }
-                RowLayout {
+                Flow {
                     objectName: "appearanceImageOptions"
                     Layout.fillWidth: true; spacing: 12
-                    CheckBox {
+                    ToggleButton {
                         visible: settingsBridge.appearanceMode === 4
                         objectName: "appearanceShareLR"
                         text: "左右同一张（连续铺图）"
                         checked: !!settingsBridge.appearanceDraft.shareLR
                         onClicked: settingsBridge.editAppearance("shareLR", checked)
                     }
-                    CheckBox {
+                    ToggleButton {
                         visible: settingsBridge.appearanceMode === 4
                         objectName: "appearanceShareFooter"
                         text: "底栏与页面共用图片（连续铺图）"
                         checked: !!settingsBridge.appearanceDraft.shareFooter
                         onClicked: settingsBridge.editAppearance("shareFooter", checked)
                     }
-                    CheckBox {
+                    ToggleButton {
                         objectName: "appearanceMutedBold"
                         text: "右侧小字加粗"; checked: !!settingsBridge.appearanceDraft.mutedBold
                         onClicked: settingsBridge.editAppearance("mutedBold", checked)
                     }
-                    Item { Layout.fillWidth: true }
                 }
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -308,6 +307,7 @@ Item {
             Label { Layout.fillWidth: true; visible: unsaved.saveError.length > 0; text: unsaved.saveError; wrapMode: Text.Wrap; color: Theme.accent }
         }
         footer: DialogButtonBox {
+            background: null
             objectName: "appearanceUnsavedActions"
             alignment: Qt.AlignRight; spacing: 8; leftPadding: 18; rightPadding: 18; topPadding: 10; bottomPadding: 16
             ShellButton { objectName: "appearanceLeaveCancel"; text: "取消"; DialogButtonBox.buttonRole: DialogButtonBox.ActionRole; onClicked: unsaved.reject() }

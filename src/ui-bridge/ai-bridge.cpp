@@ -182,9 +182,17 @@ bool AiBridge::edit(const QString &key, const QVariant &value) {
     if (!m_runtime || !m_draft.contains(key)) return false;
     if ((key == "providerId" || key == "translationProviderId") && m_draft.value(key) != value)
         cancelModels();
+    const bool providerChanged = (key == "providerId" || key == "translationProviderId") && m_draft.value(key) != value;
     m_draft[key] = value;
-    if (key == "providerId" && value.toString() == ai::DeepSeekProviderId) {
-        if (m_draft.value("modelId").toString().isEmpty()) m_draft["modelId"] = "deepseek-flash";
+    if (providerChanged) {
+        const bool translation = key == "translationProviderId";
+        m_draft[translation ? "translationModelId" : "modelId"] = ai::defaultModelId(value.toString());
+        m_draft[translation ? "translationThinkingEnabled" : "thinkingEnabled"] = false;
+        m_draft[translation ? "translationReasoningEffort" : "reasoningEffort"] = QString();
+        if (!translation) m_credentialStatus = "凭据尚未检查 · 保存在 Windows 凭据管理器";
+    }
+    if (key == "providerId" && ai::isSupportedProvider(value.toString())) {
+        if (m_draft.value("modelId").toString().isEmpty()) m_draft["modelId"] = ai::defaultModelId(value.toString());
         if (m_draft.value("translationUsesDefaults").toBool() &&
             m_draft.value("translationProviderId").toString().isEmpty()) {
             m_draft["translationProviderId"] = m_draft.value("providerId");
@@ -193,9 +201,9 @@ bool AiBridge::edit(const QString &key, const QVariant &value) {
             m_draft["translationReasoningEffort"] = m_draft.value("reasoningEffort");
         }
     }
-    if (key == "translationProviderId" && value.toString() == ai::DeepSeekProviderId &&
+    if (key == "translationProviderId" && ai::isSupportedProvider(value.toString()) &&
         m_draft.value("translationModelId").toString().isEmpty())
-        m_draft["translationModelId"] = "deepseek-flash";
+        m_draft["translationModelId"] = ai::defaultModelId(value.toString());
     if (key == "translationUsesDefaults" && !value.toBool() &&
         m_draft.value("translationProviderId").toString().isEmpty()) {
         m_draft["translationProviderId"] = m_draft.value("providerId");
@@ -215,7 +223,7 @@ bool AiBridge::save() {
     }
     for (const auto &key : {"providerId", "translationProviderId"}) {
         const auto id = m_draft.value(key).toString();
-        if (!id.isEmpty() && id != ai::DeepSeekProviderId) {
+        if (!id.isEmpty() && !ai::isSupportedProvider(id)) {
             status("供应商无效");
             return false;
         }
@@ -262,7 +270,7 @@ bool AiBridge::storeKey(QString secret) {
     }
     cancelModels();
     const bool ok = m_runtime && m_runtime->credentials() &&
-        m_runtime->credentials()->store(ai::DeepSeekProviderId, normalized, &error);
+        m_runtime->credentials()->store(m_draft.value("providerId").toString(), normalized, &error);
     normalized.fill(QChar());
     if (ok) m_credentialStatus = "已配置（完整 Key 已隐藏）";
     status(ok ? "凭据已保存" : "凭据保存失败，请检查 Windows 凭据管理器");
@@ -273,7 +281,7 @@ bool AiBridge::removeKey() {
     cancelModels();
     QString error;
     const bool ok = m_runtime && m_runtime->credentials() &&
-        m_runtime->credentials()->remove(ai::DeepSeekProviderId, &error);
+        m_runtime->credentials()->remove(m_draft.value("providerId").toString(), &error);
     if (ok) m_credentialStatus = "未配置";
     status(ok ? "凭据已移除" : "凭据移除失败，请检查 Windows 凭据管理器");
     return ok;
@@ -281,7 +289,7 @@ bool AiBridge::removeKey() {
 
 bool AiBridge::checkCredential() {
     QString error;
-    const bool found = m_runtime && m_runtime->hasCredential(ai::DeepSeekProviderId, &error);
+    const bool found = m_runtime && m_runtime->hasCredential(m_draft.value("providerId").toString(), &error);
     m_credentialStatus = found ? "已配置（完整 Key 已隐藏）"
                               : error.isEmpty() ? "未配置" : "无法访问凭据存储";
     emit changed();
@@ -290,11 +298,11 @@ bool AiBridge::checkCredential() {
 
 bool AiBridge::refreshModels(bool confirmed) {
     if (!confirmed) {
-        status("请先确认连接 DeepSeek 并读取模型目录");
+        status("请先确认连接所选供应商并读取模型目录");
         return false;
     }
     if (!m_runtime || busy()) return false;
-    if (m_draft.value("providerId").toString() != ai::DeepSeekProviderId) {
+    if (!ai::isSupportedProvider(m_draft.value("providerId").toString())) {
         status("请先明确选择供应商");
         return false;
     }
@@ -302,7 +310,7 @@ bool AiBridge::refreshModels(bool confirmed) {
         status("请先安全保存有效的供应商 API Key");
         return false;
     }
-    m_request = m_runtime->requests()->fetchModels(ai::DeepSeekProviderId);
+    m_request = m_runtime->requests()->fetchModels(m_draft.value("providerId").toString());
     status("正在读取模型目录…");
     return m_request != 0;
 }

@@ -58,6 +58,7 @@ ScrollView {
         anchors.centerIn: parent; width: Math.max(300, Math.min(480, page.width - 20)); modal: true
         title: browser ? "使用既有浏览器翻译流程" : "发送整首歌词至 DeepSeek"
         footer: DialogButtonBox {
+            background: null
             ShellButton { objectName: "consentDeclineButton"; text: "不发送"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
             ShellButton { objectName: "consentAcceptButton"; text: consent.browser ? "开始浏览器翻译" : "发送一次整首歌词"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
             onAccepted: consent.accept()

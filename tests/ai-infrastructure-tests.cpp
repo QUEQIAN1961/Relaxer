@@ -39,6 +39,7 @@ class AiInfrastructureTests final : public QObject {
     void completionFinishReasonsPreserveUsage();
     void operationBudgetsAllowSlowTranslationWithoutExtendingModelLookup();
     void completionTimeoutsAreSingleTerminalAndIdentifyTheirLayer();
+    void compatibleProvidersKeepCredentialsAndPayloadsSeparate();
 
 };
 
@@ -817,6 +818,51 @@ void AiInfrastructureTests::completionTimeoutsAreSingleTerminalAndIdentifyTheirL
         QCOMPARE(result.diagnostics.timeoutSource,watchdog?QString("coordinator"):QString("provider"));
         QVERIFY(!result.usage.available); QVERIFY(!coordinator.isPending(task));
         QTest::qWait(80); QCOMPARE(finished.size(),1); QCOMPARE(server.requestCount(),1);
+    }
+}
+
+void AiInfrastructureTests::compatibleProvidersKeepCredentialsAndPayloadsSeparate() {
+    FakeCredentials credentials;
+    QVERIFY(credentials.store("kimi", "fake-kimi-test-key", nullptr));
+    QVERIFY(credentials.store("qwen", "fake-qwen-test-key", nullptr));
+    for (const auto &id : {QString("kimi"), QString("qwen")}) {
+        DeepSeekProvider official(id);
+        QCOMPARE(official.endpoint("models").toString(), id == "kimi"
+                 ? QString("https://api.moonshot.cn/v1/models")
+                 : QString("https://dashscope.aliyuncs.com/compatible-mode/v1/models"));
+        HttpMock server; QVERIFY(server.listen());
+        DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl(), id});
+        ProviderRegistry providers; QVERIFY(providers.add(&provider));
+        ModelRegistry models;
+        AiRequestCoordinator coordinator(&providers, &credentials, &models);
+        QSignalSpy catalogs(&coordinator, &AiRequestCoordinator::modelsFinished);
+        const auto catalog = QByteArray("{\"object\":\"list\",\"data\":[{\"id\":\"") + defaultModelId(id).toUtf8() + "\"}]}";
+        server.enqueue(200, catalog);
+        QVERIFY(coordinator.fetchModels(id));
+        QTRY_COMPARE(catalogs.size(), 1);
+        QVERIFY(qvariant_cast<ProviderError>(catalogs[0][3]).isEmpty());
+        const auto live = qvariant_cast<QList<ModelInfo>>(catalogs[0][2]);
+        QCOMPARE(live.size(), 1); QCOMPARE(live[0].providerId, id);
+        models.applyLiveCatalog(id, live);
+        QVERIFY(validateModelSelection(models.find(id, defaultModelId(id)), id, defaultModelId(id), false, {}).isEmpty());
+        QSignalSpy completions(&coordinator, &AiRequestCoordinator::completionFinished);
+        server.enqueue(200, R"({"choices":[{"finish_reason":"stop","message":{"content":"{}"}}],"usage":{"prompt_tokens":20,"completion_tokens":2,"total_tokens":22}})");
+        QVERIFY(coordinator.complete(id, {defaultModelId(id), QJsonArray{QJsonObject{{"role","user"},{"content","Return json"}}}, false, {}, 1024}));
+        QTRY_COMPARE(completions.size(), 1);
+        const auto result = qvariant_cast<ChatCompletionResult>(completions[0][2]);
+        QVERIFY(result.ok()); QCOMPARE(result.content, QString("{}")); QCOMPARE(result.usage.totalTokens, 22);
+        const auto wire = server.request(1);
+        QVERIFY(wire.contains(id == "kimi" ? "Bearer fake-kimi-test-key" : "Bearer fake-qwen-test-key"));
+        QVERIFY(!wire.contains(id == "kimi" ? "fake-qwen-test-key" : "fake-kimi-test-key"));
+        const auto payload = QJsonDocument::fromJson(wire.mid(wire.indexOf("\r\n\r\n") + 4)).object();
+        QVERIFY(!payload.contains("reasoning_effort"));
+        if (id == "kimi") {
+            QCOMPARE(payload["thinking"].toObject()["type"].toString(), QString("disabled"));
+            QVERIFY(!payload.contains("enable_thinking"));
+        } else {
+            QCOMPARE(payload["enable_thinking"].toBool(true), false);
+            QVERIFY(!payload.contains("thinking"));
+        }
     }
 }
 

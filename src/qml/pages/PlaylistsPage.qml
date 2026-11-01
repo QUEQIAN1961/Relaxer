@@ -27,7 +27,7 @@ Item {
         GridView {
             id: grid; objectName: "playlistCards"
             Layout.fillWidth: true; Layout.fillHeight: true
-            cellWidth: 204; cellHeight: 230
+            cellWidth: 204; cellHeight: 246
             clip: true; model: playlistModel; boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
             delegate: Item {
@@ -40,10 +40,10 @@ Item {
                 required property string description
                 required property real plays
                 width: grid.cellWidth; height: grid.cellHeight
-                Rectangle { x: 0; y: 0; width: 190; height: 222; radius: 12; color: cardMouse.containsMouse ? Theme.hover : "transparent" }
+                Rectangle { objectName: "playlistCardBackground"; x: 0; y: 0; width: 190; height: Math.max(234, cardCount.y + cardCount.implicitHeight + 12); radius: 12; color: cardMouse.containsMouse ? Theme.hover : "transparent" }
                 Artwork { x: 7; y: 7; width: 170; height: 170; radius: 12; file: card.cover; seed: card.name; resolution: 350; animated: false }
-                UiText { x: 7; y: 187; width: 177; text: card.name; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 15; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                UiText { x: 7; y: 208; width: 177; text: card.trackCount + " 首歌曲"; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                UiText { id: cardTitle; x: 7; y: 187; width: 177; text: card.name; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 15; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                UiText { id: cardCount; x: 7; y: cardTitle.y + cardTitle.implicitHeight + 4; width: 177; text: card.trackCount + " 首歌曲"; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
                 MouseArea {
                     id: cardMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton | Qt.RightButton; cursorShape: Qt.PointingHandCursor
                     onClicked: mouse => {

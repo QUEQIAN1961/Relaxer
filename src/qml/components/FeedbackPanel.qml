@@ -8,14 +8,33 @@ Item {
     anchors.fill: parent
     property var service: feedbackBridge
     property bool suspended: false
+    property real bottomInset: 20
+    readonly property real edgeMargin: 20
+    property real noticeProgress: 0
+    property var noticeEntry: ({})
+    property bool dismissing: false
+    property bool detailHandoff: false
     onSuspendedChanged: updateFeedback()
     property var selected: ({})
     property string lastEventId: ""
     property bool historyAvailable: false
     property bool hadNotice: false
     function hideHistory() { historyAvailable=false; historyExpiry.stop() }
-    function openDetails(entry) { selected = entry || service.current; details.open() }
+    function pressNotice() { if (!dismissing && !detailMotion.running) notice.scale = .9 }
+    function releaseNotice() { if (!detailMotion.running) notice.scale = 1 }
+    function openDetails(entry) {
+        selected = entry || service.current
+        expiry.stop()
+        if (service.visible && selected.eventId && String(selected.eventId) === String(noticeEntry.eventId) && !detailHandoff) detailMotion.restart()
+        else details.open()
+    }
+    function dismissNotice() {
+        if (dismissing) return
+        expiry.stop(); dismissing = true; noticeProgress = 0
+        dismissDelay.restart()
+    }
     function updateFeedback() {
+        if (suspended) { expiry.stop(); noticeProgress = 0; return }
         if (service.visible) {
             if (lastEventId !== String(service.current.eventId)) {
                 if (suspended) { expiry.stop(); return }
@@ -24,25 +43,54 @@ Item {
                 historyExpiry.stop()
                 expiry.restart()
             }
+            if (!dismissing && !details.visible && !detailMotion.running) {
+                noticeEntry = service.current
+                detailHandoff = false; notice.scale = 1; noticeProgress = 1
+                if (!expiry.running) expiry.restart()
+            }
             hadNotice = true
             if (!suspended) service.presented(String(service.current.eventId))
         } else {
+            noticeProgress = 0
             expiry.stop()
             if (hadNotice) { hadNotice=false; if(historyAvailable) historyExpiry.restart() }
         }
     }
     Component.onCompleted: updateFeedback()
     Connections { target: panel.service; function onChanged() { panel.updateFeedback() } }
-    Timer { id: expiry; objectName: "feedbackExpiry"; interval: 10000; onTriggered: panel.service.dismiss() }
+    Behavior on noticeProgress { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 320; easing.type: Easing.OutCubic } }
+    Timer { id: expiry; objectName: "feedbackExpiry"; interval: 10000; onTriggered: panel.dismissNotice() }
+    Timer {
+        id: dismissDelay; interval: settingsBridge.values.reduceMotion ? 0 : 320
+        onTriggered: {
+            if (String(panel.service.current.eventId) === String(panel.noticeEntry.eventId)) panel.service.dismiss()
+            panel.dismissing = false; panel.updateFeedback()
+        }
+    }
+    NumberAnimation {
+        id: detailMotion; target: notice; property: "scale"; to: .9
+        duration: settingsBridge.values.reduceMotion ? 0 : 140; easing.type: Easing.OutCubic
+        onFinished: {
+            panel.detailHandoff = true; panel.noticeProgress = 0
+            if (String(panel.service.current.eventId) === String(panel.noticeEntry.eventId)) panel.service.dismiss()
+            details.open()
+        }
+    }
     Rectangle {
         id: notice
         objectName: "feedbackNotice"
-        visible: panel.service.visible && !panel.suspended
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 84
-        anchors.right: parent.right; anchors.rightMargin: 20
+        visible: panel.noticeProgress > 0 && !panel.detailHandoff
+        anchors.bottom: parent.bottom; anchors.bottomMargin: panel.bottomInset
+        x: parent.width - width - panel.edgeMargin + (width + panel.edgeMargin) * (1 - panel.noticeProgress)
         width: Math.min(520, parent.width - 40)
         height: noticeContent.implicitHeight + 24
         radius: 10; color: Theme.card; border.color: Theme.border
+        Behavior on scale { enabled: !detailMotion.running; NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 110; easing.type: Easing.OutCubic } }
+        MouseArea {
+            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+            onPressed: panel.pressNotice(); onReleased: panel.releaseNotice(); onCanceled: panel.releaseNotice()
+            onClicked: panel.openDetails(panel.noticeEntry)
+        }
         ColumnLayout {
             id: noticeContent
             anchors.fill: parent; anchors.margins: 12; spacing: 6
@@ -50,16 +98,16 @@ Item {
                 Layout.fillWidth: true
                 UiText {
                     objectName: "feedbackMessage"
-                    Layout.fillWidth: true; text: panel.service.current.message || ""
+                    Layout.fillWidth: true; text: panel.noticeEntry.message || ""
                     textFormat: Text.PlainText; color: Theme.text; wrapMode: Text.Wrap
                     maximumLineCount: 3; elide: Text.ElideRight
                 }
-                ShellButton { objectName: "feedbackDetailsButton"; text: "详情"; flat: true; onClicked: panel.openDetails(panel.service.current) }
-                ShellButton { objectName: "feedbackDismissButton"; text: "关闭"; flat: true; onClicked: panel.service.dismiss() }
+                ShellButton { objectName: "feedbackDetailsButton"; text: "详情"; flat: true; onPressed: panel.pressNotice(); onReleased: panel.releaseNotice(); onCanceled: panel.releaseNotice(); onClicked: panel.openDetails(panel.noticeEntry) }
+                ShellButton { objectName: "feedbackDismissButton"; text: "关闭"; flat: true; onClicked: panel.dismissNotice() }
             }
             UiText {
                 objectName: "feedbackReason"
-                Layout.fillWidth: true; text: panel.service.current.reason || ""
+                Layout.fillWidth: true; text: panel.noticeEntry.reason || ""
                 visible: text.length > 0; textFormat: Text.PlainText; color: Theme.secondary
                 wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
             }
@@ -81,8 +129,8 @@ Item {
     RowLayout {
         id: historyControls
         objectName: "feedbackHistoryControls"
-        anchors.right: parent.right; anchors.rightMargin: 16
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 84
+        anchors.right: parent.right; anchors.rightMargin: panel.edgeMargin
+        anchors.bottom: parent.bottom; anchors.bottomMargin: panel.bottomInset
         visible: panel.historyAvailable && panel.service.history.length > 0 && !panel.service.visible && !panel.suspended
         ShellButton {
             objectName: "feedbackHistoryButton"; text: "操作记录"; flat: true

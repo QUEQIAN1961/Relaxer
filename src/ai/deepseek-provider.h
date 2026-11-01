@@ -15,7 +15,9 @@ class DeepSeekProvider final : public AiProvider {
   public:
     explicit DeepSeekProvider(QUrl baseUrl = QUrl(QStringLiteral("https://api.deepseek.com")),
                               QObject *parent = nullptr);
-    struct MockEndpoint { QUrl url; };
+    // Reuse the existing HTTP transport for the official compatible APIs.
+    explicit DeepSeekProvider(const QString &providerId, QObject *parent = nullptr);
+    struct MockEndpoint { QUrl url; QString providerId = QStringLiteral("deepseek"); };
     explicit DeepSeekProvider(MockEndpoint endpoint, QObject *parent = nullptr);
     ~DeepSeekProvider() override;
     QString providerId() const override;
@@ -40,6 +42,7 @@ class DeepSeekProvider final : public AiProvider {
     quint64 complete(const QString &apiKey, const ChatCompletionRequest &request) override;
     QString endpointError() const;
     bool m_mockEndpoint = false;
+    QString m_providerId = QStringLiteral("deepseek");
     QNetworkAccessManager m_network;
     QUrl m_baseUrl;
     QHash<quint64, Pending> m_pending;

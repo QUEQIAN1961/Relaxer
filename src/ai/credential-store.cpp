@@ -15,7 +15,7 @@
 namespace relaxer::ai {
 namespace {
 bool isKnownProvider(const QString &providerId) {
-    return providerId == QString::fromLatin1(DeepSeekProviderId);
+    return isSupportedProvider(providerId);
 }
 
 QString targetName(const QString &providerId) {

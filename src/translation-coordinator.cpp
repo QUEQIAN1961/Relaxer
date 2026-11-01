@@ -14,9 +14,9 @@ std::atomic<quint64> nextIdentity{0};
 quint64 identity(){return ++nextIdentity;}
 bool fail(QString *error,const QString &message){if(error)*error=message;return false;}
 QString usageText(const ai::TokenUsage &usage){
-    return usage.available?QStringLiteral("费用按 DeepSeek 实际计费；本次 token：输入 %1，输出 %2，总计 %3。")
+    return usage.available?QStringLiteral("费用按所选供应商实际计费；本次 token：输入 %1，输出 %2，总计 %3。")
         .arg(usage.inputTokens).arg(usage.outputTokens).arg(usage.totalTokens):
-        QStringLiteral("本次 token 用量未知；费用以 DeepSeek 实际账单为准。");
+        QStringLiteral("本次 token 用量未知；费用以所选供应商实际账单为准。");
 }
 }
 bool TranslationSummary::terminal() const {
@@ -204,7 +204,7 @@ void TranslationCoordinator::pump(){
             if(!error.isEmpty()){finish(task,TranslationState::Failed,QStringLiteral("翻译失败"),error,"configuration");continue;}
         }
         m_active=task->value.taskId;task->value.state=TranslationState::Running;
-        task->value.status=QStringLiteral("正在翻译");task->value.details=QStringLiteral("已发送一次整首歌词请求，正在等待 DeepSeek 响应，可取消。");
+        task->value.status=QStringLiteral("正在翻译");task->value.details=QStringLiteral("已发送一次整首歌词请求，正在等待所选供应商响应，可取消。");
         if(task->value.method==TranslationMethod::DeepSeek)
             task->requestId=m_runtime->requests()->complete(task->configuration.providerId,task->request);
         else dispatchSegment(task);

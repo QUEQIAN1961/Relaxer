@@ -27,12 +27,15 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
         contentWidth: availableWidth
+        contentHeight: settingsContent.implicitHeight
         clip: true
-        function stopAtEdges() { if (contentItem && contentItem.boundsBehavior !== undefined) contentItem.boundsBehavior = Flickable.StopAtBounds }
+        function stopAtEdges() { if (contentItem && contentItem.boundsBehavior !== undefined) { contentItem.boundsBehavior = Flickable.StopAtBounds; contentItem.boundsMovement = Flickable.StopAtBounds } }
         Component.onCompleted: Qt.callLater(stopAtEdges)
         onContentItemChanged: Qt.callLater(stopAtEdges)
         ColumnLayout {
+            id: settingsContent
             width: scroll.availableWidth
+            height: implicitHeight
             spacing: 18
             Rectangle {
                 Layout.fillWidth: true
@@ -105,13 +108,13 @@ ColumnLayout {
                         }
                         ShellButton { objectName: "lyricColorReset"; text: "跟随文字颜色"; onClicked: settingsBridge.setPreference("lyricColor", "") }
                         ShellButton { objectName: "uiFontSetting"; text: "字体"; onClicked: fontDialog.openSettings() }
-                        CheckBox {
+                        ToggleButton {
                             objectName: "playerCoverBackground"
                             text: "展开播放时使用封面背景"
                             checked: settingsBridge.values.playerCoverBackground
                             onClicked: settingsBridge.setPreference("playerCoverBackground", checked)
                         }
-                    CheckBox {
+                    ToggleButton {
                         objectName: "reduceMotionSetting"
                         text: "减少动画"
                         checked: settingsBridge.values.reduceMotion
@@ -146,7 +149,7 @@ ColumnLayout {
                         UiText { Layout.fillWidth: true; text: "AI 服务"; font.pixelSize: 22; font.weight: Font.DemiBold; color: Theme.text }
                         ShellButton { objectName: "openAiServiceSettings"; text: "管理 AI 服务"; onClicked: page.aiRequested() }
                     }
-                    UiText { Layout.fillWidth: true; text: "配置 DeepSeek 凭据、模型和歌词翻译。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
+                    UiText { Layout.fillWidth: true; text: "配置 DeepSeek、KIMI、Qwen 凭据、模型和歌词翻译。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
                 }
             }
             ShortcutsPage { Layout.fillWidth: true }
@@ -164,8 +167,7 @@ ColumnLayout {
                     UiText { text: "本地音乐播放器 · 支持联网查找歌词"; color: Theme.secondary; font.pixelSize: 14 }
                 }
             }
-            UiText { Layout.fillWidth: true; text: settingsBridge.status; wrapMode: Text.Wrap; color: Theme.accent; textFormat: Text.PlainText }
-            Item { Layout.preferredHeight: 12 }
+            UiText { Layout.fillWidth: true; visible:text.length>0; text: settingsBridge.status; wrapMode: Text.Wrap; color: Theme.accent; textFormat: Text.PlainText }
         }
     }
     ColorDialog {

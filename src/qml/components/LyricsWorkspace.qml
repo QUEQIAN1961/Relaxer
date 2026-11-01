@@ -7,29 +7,26 @@ import "../theme"
 Page {
     id: workspace
     objectName: "lyricsWorkspace"
-    visible: false
+    visible: opened || reveal > 0
     anchors.fill: parent
     focus: visible
-    readonly property bool opened: visible
+    property bool opened: false
+    property real reveal: 0
+    opacity: reveal
+    transform: Translate { y: 20 * (1 - workspace.reveal) }
+    Behavior on reveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 260; easing.type: Easing.OutCubic } }
     signal aboutToShow()
     signal closed()
     signal batchInstrumentalRequested(var keys)
-    function open() { aboutToShow(); visible = true; forceActiveFocus() }
-    function close() { visible = false; closed() }
+    function open() { aboutToShow(); opened = true; reveal = 1; forceActiveFocus() }
+    function close() { opened = false; reveal = 0; closed() }
     padding: 18
     topPadding: 6; bottomPadding: 6
     spacing: 8
-    component FilterToggle: CheckBox {
-        id: control
-        implicitHeight: 28; padding: 0; spacing: 3; font.pixelSize: 13
-        implicitWidth: contentItem.implicitWidth
-        indicator: Rectangle {
-            x: 0; anchors.verticalCenter: parent.verticalCenter; width: 14; height: 14; radius: 3
-            color: control.checked ? Theme.accent : Theme.card
-            border.color: control.activeFocus ? Theme.accent : Theme.border
-            UiText { anchors.centerIn: parent; text: "✓"; visible: control.checked; color: Theme.accentText; font.pixelSize: 12 }
-        }
-        contentItem: UiText { leftPadding: 17; text: control.text; font: control.font; color: Theme.text; verticalAlignment: Text.AlignVCenter }
+    component FilterToggle: ToggleButton {
+        implicitHeight: 28
+        font.pixelSize: 13
+        leftPadding: 6; rightPadding: 6
     }
     property var selectedTracks: []
     property int targetRevision: 0
@@ -188,7 +185,8 @@ Page {
         id: searchSettings; objectName: "lyricsSearchSettingsDialog"; parent: Overlay.overlay
         anchors.centerIn: parent; width: Math.min(480, workspace.width - 32); modal: true
         title: "搜索来源与参数"
-        footer: DialogButtonBox { ShellButton { objectName: "lyricsSearchSettingsClose"; text: "关闭"; onClicked: searchSettings.close() } }
+        footer: DialogButtonBox {
+            background: null; ShellButton { objectName: "lyricsSearchSettingsClose"; text: "关闭"; onClicked: searchSettings.close() } }
         contentItem: ColumnLayout {
             spacing: 8
             Label { Layout.fillWidth: true; text: "请求仅发送到勾选的来源。专辑和精确时长由 LRCLIB 消费；其他来源使用歌名、歌手或查询词。"; wrapMode: Text.Wrap; color: Theme.secondary }
@@ -210,9 +208,9 @@ Page {
     }
     background: Rectangle { color: Theme.background }
     header: Item {
-        implicitHeight: 46
+        implicitHeight: 70
         RowLayout {
-            anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 12
+            anchors.fill: parent; anchors.topMargin: 20; anchors.bottomMargin: 4; anchors.leftMargin: 20; anchors.rightMargin: 12
             ShellButton { objectName: "lyricsWorkspaceClose"; text: "‹ 返回"; flat: true; implicitHeight: 30; Accessible.name: "返回上一页"; onClicked: workspace.requestClose() }
             Label { text: "查找歌词"; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
             Item { Layout.preferredWidth: 126 }
@@ -231,7 +229,7 @@ Page {
                   objectName: "lyricsFilterRow"; Layout.fillWidth: true; spacing: 3
                 FilterToggle { id: missingLyrics; objectName: "lyricsMissingOnly"; text: "无歌词"; onToggled: if (checked) missingTranslation.checked = false }
                 FilterToggle { id: missingTranslation; objectName: "lyricsMissingTranslationOnly"; text: "无翻译"; onToggled: if (checked) missingLyrics.checked = false }
-                FilterToggle { id: multiSelect; objectName: "lyricsMultiSelect"; text: checked ? "取消" : "多选"; onToggled: if (!checked) workspace.selectedTracks = [] }
+                FilterToggle { id: multiSelect; objectName: "lyricsMultiSelect"; text: "多选"; onToggled: if (!checked) workspace.selectedTracks = [] }
                 ShellButton { objectName: "lyricsSelectAll"; text: "全选"; flat: true; font.pixelSize: 13; leftPadding: 4; rightPadding: 4; implicitWidth: 38; implicitHeight: 28; visible: multiSelect.checked; onClicked: workspace.selectedTracks = workspace.visibleKeys() }
                 Item { Layout.fillWidth: true }
                 }
@@ -315,8 +313,8 @@ Page {
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
-                CheckBox { id: syncedOnly; objectName: "lyricsSyncedOnly"; onToggled: { lyricsSearchBridge.selectRecommended(checked); lyricsSearchBridge.setSearchOptions(checked, replaceExisting.checked) } text: "只看滚动歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
-                CheckBox { id: replaceExisting; objectName: "lyricsReplace"; enabled: !lyricsSearchBridge.busy; onToggled: lyricsSearchBridge.setSearchOptions(syncedOnly.checked, checked); text: "替换已有歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
+                ToggleButton { id: syncedOnly; objectName: "lyricsSyncedOnly"; onToggled: { lyricsSearchBridge.selectRecommended(checked); lyricsSearchBridge.setSearchOptions(checked, replaceExisting.checked) } text: "只看滚动歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
+                ToggleButton { id: replaceExisting; objectName: "lyricsReplace"; enabled: !lyricsSearchBridge.busy; onToggled: lyricsSearchBridge.setSearchOptions(syncedOnly.checked, checked); text: "替换已有歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
@@ -477,9 +475,10 @@ Page {
         id: consent; parent: workspace.parent; objectName: "translationConsent"
         property string exactTask: ""; property string exactTarget: "0"; property bool browser: false
         anchors.centerIn: parent; width: Math.min(490, parent.width - 40); modal: true
-        title: browser ? "开始浏览器翻译？" : "发送整首歌词至 DeepSeek？"
-        contentItem: Label { wrapMode: Text.Wrap; text: consent.browser ? "将向所选翻译网站提交歌词。遇到登录或验证时，请在打开的浏览器中操作。返回结果先保留为未保存预览。" : "将把这首歌的歌词、目标语言和翻译风格发送至 DeepSeek 官方服务，可能产生费用。不会上传音频、封面或本地路径。本次仅发送一次请求；译文需要你确认保存。" }
+        title: browser ? "开始浏览器翻译？" : "发送整首歌词至 AI 供应商？"
+        contentItem: Label { wrapMode: Text.Wrap; text: consent.browser ? "将向所选翻译网站提交歌词。遇到登录或验证时，请在打开的浏览器中操作。返回结果先保留为未保存预览。" : "将把这首歌的歌词、目标语言和翻译风格发送至所选 AI 供应商官方服务，可能产生费用。不会上传音频、封面或本地路径。本次仅发送一次请求；译文需要你确认保存。" }
         footer: DialogButtonBox {
+            background: null
             ShellButton { objectName: "consentDeclineButton"; text: "不发送"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
             ShellButton { objectName: "consentAcceptButton"; text: consent.browser ? "开始浏览器翻译" : "发送一次整首歌词"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
             onAccepted: consent.accept(); onRejected: consent.reject()
@@ -505,6 +504,7 @@ Page {
         anchors.centerIn: parent; width: Math.min(460, parent.width - 40); modal: true; title: "替换歌词"
         contentItem: Label { text: replaceConfirm.reason; wrapMode: Text.Wrap }
         footer: DialogButtonBox {
+            background: null
             ShellButton { objectName: "lyricsReplaceExplicit"; text: "明确替换"; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
             ShellButton { objectName: "lyricsKeepExisting"; text: "保留现有版本"; onClicked: { lyricsSearchBridge.resolveReplacement(replaceConfirm.exactToken, 2); replaceConfirm.close() } }
             ShellButton { text: "取消"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
@@ -550,6 +550,7 @@ Page {
             Label { objectName: "lyricsFileOffsetError"; Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.accent; text: offsetEditor.info.error || ""; visible: text.length > 0 }
         }
         footer: DialogButtonBox {
+            background: null
             ShellButton { objectName: "lyricsFileOffsetCancel"; text: "取消"; onClicked: offsetEditor.reject() }
             ShellButton { objectName: "lyricsFileOffsetSave"; text: "保存到歌词文件"; enabled: !!offsetEditor.info.valid && (!offsetEditor.info.confirmationRequired || offsetDiscard.checked); onClicked: if (lyricsSearchBridge.saveFileOffset(offsetDiscard.checked)) offsetEditor.close() }
         }

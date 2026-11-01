@@ -98,7 +98,7 @@ Rectangle {
         Flow {
             Layout.fillWidth: true
             spacing: 8
-            CheckBox {
+            ToggleButton {
                 objectName: "globalShortcutsEnabled"
                 text: "启用全局快捷键"
                 checked: page.configuration.globalEnabled
