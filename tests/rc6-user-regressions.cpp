@@ -51,7 +51,7 @@ private slots:
         QFile file(":/changelog.json");QVERIFY(file.open(QIODevice::ReadOnly));const auto original=QJsonDocument::fromJson(file.readAll()).array();
         const auto summary=summarizedChangelog(original);int rc020=0,rc022=0;
         for(const auto &value:summary){const auto row=value.toArray();const auto title=row[0].toString();
-            if(title=="V0.2.0-RC")++rc020;if(title=="V0.2.2-RC")++rc022;
+            if(title=="V0.2.0-RC")++rc020;if(title=="Relaxer V0.2.2-RC")++rc022;
             QVERIFY(!QRegularExpression("V0\\.2\\.[02]-[Rr][Cc][0-9]+").match(title).hasMatch());
         }
         QCOMPARE(rc020,1);QCOMPARE(rc022,1);
@@ -79,7 +79,7 @@ private slots:
             const auto title=row[0].toString(),text=row[2].toString(),stamp=row[1].toString();
             QVERIFY(date.match(stamp).hasMatch());QVERIFY(QDate::fromString(stamp,"yyyy.MM.dd").isValid());
             QVERIFY2(!internal.match(text).hasMatch(),qPrintable(title+": "+text));
-            if(title=="V0.2.2-RC"){rc022=text;++groups022;}
+            if(title=="Relaxer V0.2.2-RC"){rc022=text;++groups022;}
             if(title=="V0.2.0-RC"){rc020=text;++groups020;}
             // Published GA history is intentionally preserved, including its
             // historical acceptance sentence; RC notes contain no such wording.
