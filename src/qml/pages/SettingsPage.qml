@@ -47,15 +47,16 @@ ColumnLayout {
                     anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
                     spacing: 16
                     GridLayout {
+                        objectName:"settingsBasicGrid"
                         Layout.fillWidth: true
                         columns: 3
                         columnSpacing: 18
                         rowSpacing: 8
-                        UiText { text: "外观"; color: Theme.secondary; font.pixelSize: 14 }
-                        UiText { text: "有效播放比例"; color: Theme.secondary; font.pixelSize: 14 }
-                        UiText { text: "关闭窗口时"; color: Theme.secondary; font.pixelSize: 14 }
+                        UiText { Layout.fillWidth:true; Layout.preferredWidth:1; Layout.minimumWidth:0; text: "外观"; color: Theme.secondary; font.pixelSize: 14 }
+                        UiText { Layout.fillWidth:true; Layout.preferredWidth:1; Layout.minimumWidth:0; text: "有效播放比例"; color: Theme.secondary; font.pixelSize: 14 }
+                        UiText { Layout.fillWidth:true; Layout.preferredWidth:1; Layout.minimumWidth:0; text: "关闭窗口时"; color: Theme.secondary; font.pixelSize: 14 }
                         RowLayout {
-                            Layout.fillWidth: true
+                            objectName:"settingsAppearanceCell"; Layout.fillWidth: true; Layout.preferredWidth:1; Layout.minimumWidth:0
                             ChoiceBox {
                                 objectName: "qmlThemeSetting"
                                 Layout.fillWidth: true
@@ -77,7 +78,7 @@ ColumnLayout {
                         }
                         SpinBox {
                             objectName: "qmlThresholdSetting"
-                            Layout.fillWidth: true
+                            Layout.fillWidth: true; Layout.preferredWidth:1; Layout.minimumWidth:0
                             from: 70; to: 100
                             value: settingsBridge.values.threshold
                             editable: true
@@ -91,7 +92,7 @@ ColumnLayout {
                         }
                         ChoiceBox {
                             objectName: "closeSetting"
-                            Layout.fillWidth: true
+                            Layout.fillWidth: true; Layout.preferredWidth:1; Layout.minimumWidth:0
                             model: ["退出播放器", "最小化到系统托盘"]
                             currentIndex: settingsBridge.values.closeToTray ? 1 : 0
                             onActivated: settingsBridge.setPreference("closeToTray", currentIndex === 1)

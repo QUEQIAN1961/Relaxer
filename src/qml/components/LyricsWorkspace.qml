@@ -14,7 +14,10 @@ Page {
     property bool opened: false
     property real reveal: 0
     readonly property real transitionOffset: -7 * (1 - reveal)
-    Behavior on reveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 260; easing.type: Easing.OutCubic } }
+    Behavior on reveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : workspace.opened ? 260 : 90; easing.type: workspace.opened ? Easing.OutCubic : Easing.InCubic } }
+    readonly property real middleColumnLift: contentItem && header ? Math.max(0, contentItem.y - header.y - headerActions.y - workspaceBack.y) : 0
+    readonly property real rightColumnLift: contentItem ? Math.max(0, contentItem.y - 32 - (height - contentItem.y - contentItem.height)) : 0
+    readonly property real localActionWidth: Math.max(pasteButton.implicitWidth, localImportButton.implicitWidth)
     signal aboutToShow()
     signal closed()
     signal batchInstrumentalRequested(var keys)
@@ -25,8 +28,29 @@ Page {
     spacing: 8
     component FilterToggle: ToggleButton {
         implicitHeight: 28
-        font.pixelSize: 13
-        leftPadding: 6; rightPadding: 6
+        font.pixelSize: filters.narrow ? 12 : 13
+        indicatorSize: 18 - (filters.narrow ? 6 : 4) * filters.selectionReveal
+        indicatorSpacing: 6 - 2 * filters.selectionReveal
+        leftPadding: 6 - (filters.narrow ? 4 : 3) * filters.selectionReveal; rightPadding: leftPadding
+    }
+    component SearchSpinner: BusyIndicator {
+        id: spinner
+        padding: 3
+        contentItem: Canvas {
+            property color ink: Theme.accent
+            onInkChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onPaint: {
+                const ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.lineCap = "round"
+                const r = Math.max(1, Math.min(width, height) / 2 - 2)
+                ctx.globalAlpha = .18; ctx.beginPath(); ctx.arc(width / 2, height / 2, r, 0, 2 * Math.PI); ctx.stroke()
+                ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(width / 2, height / 2, r, -Math.PI / 2, Math.PI); ctx.stroke()
+            }
+            NumberAnimation on rotation { from: 0; to: 360; duration: 850; loops: Animation.Infinite; running: spinner.running && spinner.visible }
+        }
     }
     property var selectedTracks: []
     property int targetRevision: 0
@@ -150,6 +174,12 @@ Page {
         fileEditToken = lyricsSearchBridge.beginLocalEdit()
         if (fileEditToken.length) localLyrics.open()
     }
+    function beginPaste() {
+        pasteDialog.exactTarget = lyricsSearchBridge.targetTrackKey
+        pasteDialog.editToken = lyricsSearchBridge.beginLocalEdit()
+        pasted.text = lyricsSearchBridge.draftText
+        if (pasteDialog.editToken.length) pasteDialog.open()
+    }
     function startSearch() {
         if (sourceActionsEnabled && !lyricsSearchBridge.busy)
             lyricsSearchBridge.searchDetailed(songTitle.text, songArtist.text, songAlbum.text, fragment.text, true, syncedOnly.checked, replaceExisting.checked, Number(searchDuration.text))
@@ -212,8 +242,9 @@ Page {
         opacity: workspace.reveal
         transform: Translate { y: workspace.transitionOffset }
         RowLayout {
+            id: headerActions
             anchors.fill: parent; anchors.topMargin: 20; anchors.bottomMargin: 4; anchors.leftMargin: 20; anchors.rightMargin: 12
-            ShellButton { objectName: "lyricsWorkspaceClose"; text: "‹ 返回"; flat: true; implicitHeight: 30; Accessible.name: "返回上一页"; onClicked: workspace.requestClose() }
+            ShellButton { id:workspaceBack; objectName: "lyricsWorkspaceClose"; text: "‹ 返回"; flat: true; implicitHeight: 30; Accessible.name: "返回上一页"; onClicked: workspace.requestClose() }
             Label { text: "查找歌词"; color: Theme.text; font.pixelSize: 22; font.weight: Font.DemiBold; Layout.fillWidth: true }
             Item { Layout.preferredWidth: 126 }
         }
@@ -223,21 +254,35 @@ Page {
         transform: Translate { y: workspace.transitionOffset }
         spacing: 14
         Rectangle {
+            objectName: "lyricsTracksPanel"
             Layout.preferredWidth: Math.max(220, workspace.availableWidth * .25)
             Layout.minimumWidth: 200; Layout.fillHeight: true
             color: Theme.panel; radius: 10
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 10; spacing: 8
                 Label { text: "歌曲 · " + workspace.visibleKeys().length + (multiSelect.checked ? " · 已选 " + workspace.searchKeys().length : ""); color: Theme.text; font.weight: Font.DemiBold }
-                Flow {
-                  objectName: "lyricsFilterRow"; Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 6
-                FilterToggle { id: missingLyrics; objectName: "lyricsMissingOnly"; text: "无歌词"; onToggled: if (checked) missingTranslation.checked = false }
-                FilterToggle { id: missingTranslation; objectName: "lyricsMissingTranslationOnly"; text: "无翻译"; onToggled: if (checked) missingLyrics.checked = false }
-                FilterToggle { id: multiSelect; objectName: "lyricsMultiSelect"; text: "多选"; onToggled: if (!checked) workspace.selectedTracks = [] }
-                ShellButton { objectName: "lyricsSelectAll"; text: "全选"; flat: true; font.pixelSize: 13; leftPadding: 4; rightPadding: 4; implicitWidth: 38; implicitHeight: 28; visible: multiSelect.checked; onClicked: workspace.selectedTracks = workspace.visibleKeys() }
+                Item {
+                    id:filters; objectName: "lyricsFilterRow"; Layout.fillWidth: true; implicitHeight: 28
+                    readonly property bool narrow: width < 260
+                    property real selectionReveal: multiSelect.checked ? 1 : 0
+                    readonly property real gap: 6 - 3 * selectionReveal
+                    readonly property real allWidth: narrow ? 44 : 58
+                    readonly property real buttonSpace: width - 2 * gap - (allWidth + 3) * selectionReveal
+                    Behavior on selectionReveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
+                    FilterToggle { id: missingLyrics; objectName: "lyricsMissingOnly"; x:0; width:filters.buttonSpace*.35; text: "无歌词"; onToggled: if (checked) missingTranslation.checked = false }
+                    FilterToggle { id: missingTranslation; objectName: "lyricsMissingTranslationOnly"; x:missingLyrics.width+filters.gap; width:filters.buttonSpace*.35; text: "无翻译"; onToggled: if (checked) missingLyrics.checked = false }
+                    FilterToggle { id: multiSelect; objectName: "lyricsMultiSelect"; x:missingTranslation.x+missingTranslation.width+filters.gap; width:filters.buttonSpace*.3; text: "多选"; onToggled: if (!checked) workspace.selectedTracks = [] }
+                    FilterToggle {
+                        objectName: "lyricsSelectAll"; x:multiSelect.x+multiSelect.width+3*filters.selectionReveal
+                        width:filters.allWidth*filters.selectionReveal; opacity:filters.selectionReveal; visible:opacity>0; clip:true
+                        text:"全选"; enabled:multiSelect.checked&&workspace.visibleKeys().length>0
+                        checked:workspace.visibleKeys().length>0&&workspace.searchKeys().length===workspace.visibleKeys().length
+                        onClicked:workspace.selectedTracks=checked?workspace.visibleKeys():[]
+                    }
                 }
                 ShellButton {
                     objectName: "lyricsBatchInstrumental"; Layout.fillWidth: true; visible: multiSelect.checked
+                    implicitHeight: workspace.compact ? 24 : 26; topPadding:4; bottomPadding:4; font.pixelSize:workspace.compact?12:13
                     text: lyricsSearchBridge.batchRunning ? "取消纯音乐处理" : "批量标记纯音乐…"
                     enabled: lyricsSearchBridge.batchRunning || workspace.searchKeys().length > 0
                     onClicked: if (lyricsSearchBridge.batchRunning) lyricsSearchBridge.cancelInstrumentalBatch(); else workspace.batchInstrumentalRequested(workspace.searchKeys())
@@ -276,7 +321,7 @@ Page {
                             CheckBox { objectName: "lyricsCheck-" + trackKey; x: 0; anchors.verticalCenter: parent.verticalCenter; width: 28; visible: multiSelect.checked; checked: workspace.selectedTracks.indexOf(trackKey) >= 0; onToggled: workspace.toggleTrack(trackKey) }
                             Item {
                                 id: stateSlot; x: multiSelect.checked ? 30 : 0; anchors.verticalCenter: parent.verticalCenter; width: 26; height: 26
-                                BusyIndicator { objectName: "lyricsStateSpinner-" + trackKey; anchors.fill: parent; visible: searchState === "searching"; running: visible }
+                                SearchSpinner { objectName: "lyricsStateSpinner-" + trackKey; anchors.fill: parent; visible: searchState === "searching"; running: visible }
                                 UiText { objectName: "lyricsStateIcon-" + trackKey; anchors.fill: parent; text: searchState === "complete" ? "✓" : searchState === "choice" ? "⚠" : ""; visible: text.length > 0; color: searchState === "complete" ? "#249c58" : "#d78816"; font.pixelSize: 20; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }
                             Column {
@@ -300,6 +345,7 @@ Page {
             }
         }
         ColumnLayout {
+            objectName:"lyricsSearchColumn"; Layout.topMargin:-workspace.middleColumnLift
             Layout.fillWidth: true; Layout.preferredWidth: 340; Layout.minimumWidth: 250; Layout.fillHeight: true; spacing: workspace.compact ? 5 : 8
             Label { text: "查找 / 更换歌词"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
             EntryField { id: songTitle; readOnly: lyricsSearchBridge.busy; onTextEdited: lyricsSearchBridge.parametersEdited(); objectName: "lyricsSearchTitle"; Layout.fillWidth: true; implicitHeight: workspace.compact ? 30 : 34; placeholderText: "歌名"; selectByMouse: true; onAccepted: workspace.startSearch() }
@@ -312,12 +358,13 @@ Page {
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
                 ShellButton { objectName: "searchLyricsButton"; text: lyricsSearchBridge.busy ? "查找中…" : "手动搜索"; primary: true; implicitHeight: workspace.compact ? 30 : 34; Layout.fillWidth: true; enabled: workspace.sourceActionsEnabled && !lyricsSearchBridge.busy; onClicked: workspace.startSearch() }
-                ShellButton { implicitHeight: workspace.compact ? 30 : 34;text: "更多操作 ⌄"; enabled: workspace.sourceActionsEnabled; onClicked: moreMenu.popup() }
+                ShellButton { id:pasteButton; objectName:"lyricsPasteButton"; implicitHeight: workspace.compact ? 30 : 34; Layout.preferredWidth:workspace.localActionWidth; Layout.minimumWidth:workspace.localActionWidth; text:"粘贴歌词"; font.pixelSize:workspace.compact?12:13; enabled:workspace.sourceActionsEnabled; onClicked:workspace.beginPaste() }
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
-                ToggleButton { id: syncedOnly; objectName: "lyricsSyncedOnly"; onToggled: { lyricsSearchBridge.selectRecommended(checked); lyricsSearchBridge.setSearchOptions(checked, replaceExisting.checked) } text: "只看滚动歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
-                ToggleButton { id: replaceExisting; objectName: "lyricsReplace"; enabled: !lyricsSearchBridge.busy; onToggled: lyricsSearchBridge.setSearchOptions(syncedOnly.checked, checked); text: "替换已有歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: 14 }
+                ToggleButton { id: syncedOnly; objectName: "lyricsSyncedOnly"; Layout.fillWidth:true; Layout.preferredWidth:1; Layout.minimumWidth:0; indicatorSize:workspace.compact?12:14; indicatorSpacing:4; leftPadding:4; rightPadding:4; onToggled: { lyricsSearchBridge.selectRecommended(checked); lyricsSearchBridge.setSearchOptions(checked, replaceExisting.checked) } text: "只看滚动歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: workspace.compact?12:13 }
+                ToggleButton { id: replaceExisting; objectName: "lyricsReplace"; Layout.fillWidth:true; Layout.preferredWidth:1; Layout.minimumWidth:0; indicatorSize:workspace.compact?12:14; indicatorSpacing:4; leftPadding:4; rightPadding:4; enabled: !lyricsSearchBridge.busy; onToggled: lyricsSearchBridge.setSearchOptions(syncedOnly.checked, checked); text: "替换已有歌词"; implicitHeight: workspace.compact ? 28 : 34; font.pixelSize: workspace.compact?12:13 }
+                ShellButton { id:localImportButton; objectName:"lyricsLocalImportButton"; implicitHeight:workspace.compact?28:34; Layout.preferredWidth:workspace.localActionWidth; Layout.minimumWidth:workspace.localActionWidth; text:"导入本地歌词"; font.pixelSize:workspace.compact?12:13; enabled:workspace.sourceActionsEnabled; onClicked:workspace.beginLocalImport() }
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
@@ -388,6 +435,7 @@ Page {
             }
         }
         ColumnLayout {
+            objectName:"lyricsTranslationColumn"; Layout.topMargin:-workspace.rightColumnLift
             Layout.fillWidth: true; Layout.preferredWidth: 360; Layout.minimumWidth: 250; Layout.fillHeight: true; spacing: workspace.compact ? 5 : 8
             Label { text: "歌词与翻译"; color: Theme.text; font.pixelSize: 16; font.weight: Font.DemiBold }
             ShellButton {
@@ -461,11 +509,6 @@ Page {
         }
     }
     RoundMenu {
-        id: moreMenu
-        RoundMenuItem { text: "导入本地歌词…"; onTriggered: workspace.beginLocalImport() }
-        RoundMenuItem { text: "粘贴歌词…"; onTriggered: { pasteDialog.exactTarget = lyricsSearchBridge.targetTrackKey; pasteDialog.editToken = lyricsSearchBridge.beginLocalEdit(); pasted.text = lyricsSearchBridge.draftText; if (pasteDialog.editToken.length) pasteDialog.open() } }
-    }
-    RoundMenu {
         id: browserMenu
         RoundMenuItem { text: "必应翻译"; onTriggered: workspace.prepareTranslation("bing") }
         RoundMenuItem { text: "百度翻译"; onTriggered: workspace.prepareTranslation("baidu") }
@@ -518,7 +561,7 @@ Page {
         onClosed: lyricsSearchBridge.cancelReplacement(exactToken)
     }
     ConfirmDialog {
-        id: pasteDialog; parent: workspace.parent; property string exactTarget: "0"; property string editToken: ""
+        id: pasteDialog; objectName:"lyricsPasteDialog"; parent: workspace.parent; property string exactTarget: "0"; property string editToken: ""
         anchors.centerIn: parent; width: Math.min(580, parent.width - 40); modal: true; title: "粘贴歌词"; standardButtons: Dialog.Save | Dialog.Cancel
         contentItem: ColumnLayout {
             Label { text: "保存会替换这首歌已有的本地歌词。"; color: Theme.secondary; wrapMode: Text.Wrap }

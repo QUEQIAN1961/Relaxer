@@ -8,28 +8,33 @@ ShellButton {
     primary: checked
     readonly property bool reduceMotion: settingsBridge.values.reduceMotion
     property real markProgress: checked ? 1 : 0
+    property real indicatorSize: 18
+    property real indicatorSpacing: 6
     Behavior on markProgress { NumberAnimation { duration: control.reduceMotion ? 0 : 280; easing.type: Easing.OutCubic } }
     leftPadding: 12
     rightPadding: 12
     Accessible.role: Accessible.CheckBox
     Accessible.checked: checked
     contentItem: Item {
-        implicitWidth: caption.implicitWidth + 24
+        implicitWidth: caption.implicitWidth + control.indicatorSize + control.indicatorSpacing
         implicitHeight: Math.max(18, caption.implicitHeight)
         Canvas {
             id: mark
             objectName: "toggleMark"
             x: Math.max(0, (parent.width - parent.implicitWidth) / 2)
             anchors.verticalCenter: parent.verticalCenter
-            width: 18; height: 18
+            width: control.indicatorSize; height: control.indicatorSize
             property real progress: control.markProgress
             property color ink: !control.enabled ? Theme.disabled : control.checked ? Theme.accentText : Theme.text
             Behavior on ink { ColorAnimation { duration: control.reduceMotion ? 0 : 180 } }
             onProgressChanged: requestPaint()
             onInkChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
             onPaint: {
                 const ctx = getContext("2d")
                 ctx.clearRect(0, 0, width, height)
+                ctx.save(); ctx.scale(width / 18, height / 18)
                 ctx.strokeStyle = ink; ctx.lineWidth = 1.7
                 ctx.lineCap = "round"; ctx.lineJoin = "round"
                 const p = Math.max(0, Math.min(1, progress))
@@ -55,12 +60,12 @@ ShellButton {
                     }
                     ctx.stroke()
                 }
-                ctx.globalAlpha = 1
+                ctx.restore()
             }
         }
         UiText {
             id: caption
-            x: Math.max(0, (parent.width - parent.implicitWidth) / 2) + 24
+            x: Math.max(0, (parent.width - parent.implicitWidth) / 2) + control.indicatorSize + control.indicatorSpacing
             anchors.verticalCenter: parent.verticalCenter
             width: Math.max(0, Math.min(implicitWidth, parent.width - x))
             text: control.text; textFormat: Text.PlainText; font: control.font

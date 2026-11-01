@@ -11,6 +11,7 @@ ColumnLayout {
     readonly property var providerIds: ["", "deepseek", "kimi", "qwen"]
     readonly property var providerLabels: ["请选择供应商", "DeepSeek 官方 API", "KIMI 官方 API", "Qwen 官方 API（百炼）"]
     signal backRequested()
+    signal subpageRequested(string section)
     Layout.fillWidth: true
     spacing: 18
     enabled: aiBridge.available
@@ -26,8 +27,8 @@ ColumnLayout {
             if (aiBridge.save()) style.dirty = false
         }
     }
-    function openHome() { flushStyle(); subpage = "home" }
-    function openTranslation() { subpage = "translation" }
+    function openHome() { flushStyle(); subpageRequested("home") }
+    function openTranslation() { subpageRequested("translation") }
     function leavePage() { flushStyle(); aiBridge.cancelModels(); backRequested() }
     function effortValue(translation) {
         const enabled = translation ? aiBridge.draft.translationThinkingEnabled : aiBridge.draft.thinkingEnabled

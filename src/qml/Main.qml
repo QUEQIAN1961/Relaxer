@@ -319,7 +319,15 @@ ApplicationWindow {
                             anchors.fill:parent
                             currentIndex:root.settingsSection==="ai"?1:root.settingsSection==="appearance"?2:root.settingsSection==="log"?3:0
                             Item { SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:16;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
-                            ScrollView { id:aiScroll;contentWidth:availableWidth;clip:true;leftPadding:34;rightPadding:34;topPadding:28;bottomPadding:16;AiPage{width:aiScroll.availableWidth;onBackRequested:root.changePage(function(){root.settingsSection="settings"})} }
+                            ScrollView {
+                                id:aiScroll;objectName:"aiSettingsScroll";contentWidth:availableWidth;clip:true
+                                leftPadding:34;rightPadding:34;topPadding:28;bottomPadding:16
+                                AiPage {
+                                    id:aiPage;width:aiScroll.availableWidth
+                                    onBackRequested:root.changePage(function(){root.settingsSection="settings"})
+                                    onSubpageRequested:section=>root.changePage(function(){aiPage.subpage=section;aiScroll.contentItem.contentY=0})
+                                }
+                            }
                             AppearancePage {
                                 id:appearancePage
                                 onBackRequested:{
@@ -329,7 +337,8 @@ ApplicationWindow {
                                         Qt.callLater(root.requestQuit)
                                         return
                                     }
-                                    const action=root.pendingPageAction;root.pendingPageAction=null;root.settingsSection="settings";root.changePage(action||function(){root.settingsSection="settings"})
+                                    const action=root.pendingPageAction;root.pendingPageAction=null
+                                    root.changePage(function(){root.settingsSection="settings";if(action)action()})
                                 }
                                 onLeaveRejected:{
                                     root.pendingPageAction=null

@@ -46,18 +46,41 @@ private slots:
         QVERIFY(f.shell->lyricsSearchBridge()->setTargetTrack(QString::number(f.a.id)));
         auto *back=visual(root,"lyricsWorkspaceClose"); QVERIFY(back); QVERIFY(bounds(back).top()>=24);
         auto *multi=visual(root,"lyricsMultiSelect"); QVERIFY(multi); shot(w,"toggle-circle");
+        const auto beforeWidth=visual(root,"lyricsMissingOnly")->width();
         QVERIFY(click(w,multi)); QVERIFY(multi->property("checked").toBool()); QTest::qWait(60);
         QVERIFY(multi->property("markProgress").toReal()>0 && multi->property("markProgress").toReal()<1); shot(w,"toggle-morph");
         QTRY_COMPARE(multi->property("markProgress").toReal(),1.); shot(w,"toggle-check");
         auto *filters=visual(root,"lyricsFilterRow"); QVERIFY(filters);
         for(auto *child:filters->childItems()) if(child->isVisible()) QVERIFY(bounds(child).right()<=bounds(filters).right()+1);
         auto *all=visual(root,"lyricsSelectAll"); QVERIFY(click(w,all));
+        QVERIFY(visual(root,"lyricsMissingOnly")->width()<beforeWidth); QVERIFY(qAbs(bounds(all).top()-bounds(multi).top())<1);
         QCOMPARE(workspace->property("selectedTracks").toList().size(),2);
+        QVERIFY(all->property("checked").toBool()); QVERIFY(click(w,all)); QVERIFY(workspace->property("selectedTracks").toList().isEmpty());
+        QVERIFY(!all->property("checked").toBool()); QVERIFY(visual(root,"lyricsBatchInstrumental")->height()<=26);
+        QVERIFY(click(w,all));
         QVERIFY(click(w,multi)); QVERIFY(!multi->property("checked").toBool());
         QVERIFY(workspace->property("selectedTracks").toList().isEmpty());
         QTRY_COMPARE(multi->property("markProgress").toReal(),0.);
+        auto *paste=visual(root,"lyricsPasteButton"), *local=visual(root,"lyricsLocalImportButton"); QVERIFY(paste); QVERIFY(local);
+        QVERIFY(qAbs(bounds(paste).right()-bounds(local).right())<1); QVERIFY(bounds(local).top()>bounds(paste).top());
+        QVERIFY(click(w,paste)); auto *pasteDialog=w->findChild<QObject *>("lyricsPasteDialog"); QVERIFY(pasteDialog);
+        QTRY_VERIFY(pasteDialog->property("opened").toBool()); QVERIFY(QMetaObject::invokeMethod(pasteDialog,"reject")); QTest::qWait(150);
+        for(const QSize size:{QSize(1000,660),QSize(1240,790)}) {
+            w->resize(size); QTest::qWait(80);
+            auto *middle=visual(root,"lyricsSearchColumn"), *right=visual(root,"lyricsTranslationColumn"); QVERIFY(middle); QVERIFY(right);
+            QVERIFY(qAbs(bounds(middle).top()-bounds(back).top())<1);
+            QVERIFY(qAbs(bounds(right).top()-32-(w->height()-bounds(right).bottom()))<1);
+            QVERIFY(click(w,multi)); QTest::qWait(300); QVERIFY(qAbs(bounds(all).top()-bounds(multi).top())<1);
+            for(auto *child:filters->childItems()) if(child->isVisible()) QVERIFY(bounds(child).right()<=bounds(filters).right()+1);
+            shot(w,size.width()==1000?"lyrics-compact-layout":"lyrics-wide-layout"); QVERIFY(click(w,multi)); QTest::qWait(200);
+        }
+        auto *target=visual(root,"lyricsTarget-"+QString::number(f.a.id)); QVERIFY(target); QVERIFY(target->setProperty("searchState","searching"));
+        auto *spinner=visual(target,"lyricsStateSpinner-"+QString::number(f.a.id)); QVERIFY(spinner);
+        auto *ring=qvariant_cast<QQuickItem *>(spinner->property("contentItem")); QVERIFY(ring);
+        QTest::qWait(100); const auto angle=ring->rotation(); QTest::qWait(100); QVERIFY(qAbs(ring->rotation()-angle)>10);
+        QVERIFY(target->setProperty("searchState","complete"));
         shot(w,"lyrics-workspace");
-        QVERIFY(QMetaObject::invokeMethod(workspace,"close")); QTRY_VERIFY(!workspace->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(workspace,"close")); QTest::qWait(160); QVERIFY(!workspace->isVisible());
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(260);
         QVERIFY(click(w,visual(root,"uiFontSetting")));
         auto *dialog=w->findChild<QObject *>("uiFontDialog"); QVERIFY(dialog);
@@ -99,6 +122,8 @@ private slots:
     }
     void compatibleProviderSettingsAndPlaybackTransitionRemainUsable() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
+        auto *list=visual(root,"trackListView"), *bar=visual(root,"playerBar"); QVERIFY(list); QVERIFY(bar);
+        QVERIFY(qAbs(bounds(list).bottom()-bounds(bar).top())<1);
         auto *bridge=f.shell->aiBridge();
         for (const auto &id : {QString("kimi"),QString("qwen")}) {
             QVERIFY(bridge->edit("providerId",id)); QVERIFY(bridge->save());
@@ -124,11 +149,60 @@ private slots:
         auto *providers=visual(root,"aiProviderSelection"); QVERIFY(providers); QCOMPARE(providers->property("count").toInt(),4);
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
+    void settingsSubpagesTransitionOnceAfterSnapshot() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
+        QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
+        QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTRY_COMPARE(w->property("settingsSection").toString(),QString("ai")); QTest::qWait(180);
+        auto *ai=visual(root,"aiPage"), *scroll=visual(root,"aiSettingsScroll"); QVERIFY(ai); QVERIFY(scroll);
+        auto *flick=qvariant_cast<QQuickItem *>(scroll->property("contentItem")); QVERIFY(flick);
+        auto *translation=visual(root,"aiLyricsTranslationSettings"); QVERIFY(translation);
+        flick->setProperty("contentY",qMax(0.,bounds(translation).bottom()-bounds(scroll).bottom()+20)); QTest::qWait(50);
+        auto revision=w->property("navigationRevision").toInt();
+        QVERIFY(click(w,translation)); QCOMPARE(ai->property("subpage").toString(),QString("home"));
+        QCOMPARE(w->property("navigationRevision").toInt(),revision+1);
+        QTRY_COMPARE(ai->property("subpage").toString(),QString("translation"));
+        auto *surface=visual(root,"pageSurface"); QVERIFY(surface); QVERIFY(surface->y()<0);
+        QTRY_COMPARE(surface->y(),0.); shot(w,"ai-translation-settings");
+        revision=w->property("navigationRevision").toInt(); QVERIFY(click(w,visual(root,"aiSettingsBack")));
+        QCOMPARE(ai->property("subpage").toString(),QString("translation"));
+        QTRY_COMPARE(ai->property("subpage").toString(),QString("home")); QTest::qWait(180);
+        QCOMPARE(w->property("navigationRevision").toInt(),revision+1);
+        QVERIFY(click(w,visual(root,"aiSettingsBack"))); QTRY_COMPARE(w->property("settingsSection").toString(),QString("settings")); QTest::qWait(180);
+        // Every exit path keeps Appearance visible until its snapshot is ready.
+        for(int path=0;path<4;++path) {
+            QVERIFY(click(w,visual(root,"editAppearance"))); QTRY_COMPARE(w->property("settingsSection").toString(),QString("appearance")); QTest::qWait(180);
+            if(path>0) {
+                const auto mode=f.shell->settingsBridge()->appearanceMode();
+                QVERIFY(click(w,visual(root,QString("appearanceMode%1").arg(mode==0?1:0))));
+                QVERIFY(f.shell->settingsBridge()->appearanceDirty());
+            }
+            revision=w->property("navigationRevision").toInt();
+            if(path==1 || path==2) {
+                QVERIFY(click(w,visual(root,"appearanceBack")));
+                auto *dialog=w->findChild<QObject *>("appearanceUnsavedDialog"); QVERIFY(dialog);
+                QTRY_VERIFY(dialog->property("opened").toBool()); QTest::qWait(180);
+                QVERIFY(click(w,visual(root,path==1?"appearanceLeaveDiscard":"appearanceLeaveSave")));
+            } else QVERIFY(click(w,visual(root,path==3?"appearanceSavePreset":"appearanceBack")));
+            QCOMPARE(w->property("settingsSection").toString(),QString("appearance"));
+            QCOMPARE(w->property("navigationRevision").toInt(),revision+1);
+            QTRY_COMPARE(w->property("settingsSection").toString(),QString("settings"));
+            QTest::qWait(280); QCOMPARE(w->property("navigationRevision").toInt(),revision+1);
+            QCOMPARE(surface->y(),0.); QCOMPARE(surface->opacity(),1.);
+            QVERIFY(!f.shell->settingsBridge()->appearanceDirty());
+        }
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void compactSettingsStopAtContentAndAppearanceOptionsStayInside() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         QVERIFY(f.shell->settingsBridge()->setTheme(1));
         w->resize(1000,660); QTest::qWait(100);
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
+        auto *appearance=visual(root,"settingsAppearanceCell"), *threshold=visual(root,"qmlThresholdSetting"), *close=visual(root,"closeSetting");
+        QVERIFY(appearance); QVERIFY(threshold); QVERIFY(close); const auto cellWidth=appearance->width();
+        for(int theme:{0,2,1}) {
+            QVERIFY(f.shell->settingsBridge()->setTheme(theme)); QVERIFY(f.shell->settingsBridge()->setPreference("closeToTray",theme==2)); QTest::qWait(50);
+            QVERIFY(qAbs(appearance->width()-cellWidth)<1); QVERIFY(qAbs(appearance->width()-threshold->width())<1); QVERIFY(qAbs(close->width()-cellWidth)<1);
+        }
         auto *scroll=visual(root,"settingsScroll"); QVERIFY(scroll);
         auto *flick=qvariant_cast<QQuickItem *>(scroll->property("contentItem")); QVERIFY(flick);
         const auto end=qMax(0.,flick->property("contentHeight").toReal()-flick->height());

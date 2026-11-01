@@ -23,7 +23,7 @@ Item {
     onVisibleChanged: if(!visible)clearBulk()
     ColumnLayout {
         anchors.fill:parent
-        anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:16
+        anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:0
         spacing:16
         RowLayout {
             Layout.fillWidth:true;spacing:16
