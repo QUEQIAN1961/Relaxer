@@ -50,23 +50,19 @@ Controls.ComboBox {
         id: choices
         objectName: control.objectName + "Popup"
         popupType: Controls.Popup.Item
-        transformOrigin: Item.Top
+        property real expansion: 1
+        readonly property real expandedHeight: Math.min(choiceList.contentHeight + topPadding + bottomPadding, control.Window.height - 20)
         y: control.height + 4
         width: control.width
-        height: Math.min(choiceList.contentHeight + topPadding + bottomPadding, control.Window.height - 20)
+        height: expandedHeight * expansion
+        clip: true
         margins: 8
         padding: 6
         enter: Transition {
-            ParallelAnimation {
-                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: settingsBridge.values.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic }
-                NumberAnimation { property: "scale"; from: .92; to: 1; duration: settingsBridge.values.reduceMotion ? 0 : 240; easing.type: Easing.OutCubic }
-            }
+            NumberAnimation { target: choices; property: "expansion"; from: 0; to: 1; duration: settingsBridge.values.reduceMotion ? 0 : 240; easing.type: Easing.OutCubic }
         }
         exit: Transition {
-            ParallelAnimation {
-                NumberAnimation { property: "opacity"; to: 0; duration: settingsBridge.values.reduceMotion ? 0 : 160; easing.type: Easing.InCubic }
-                NumberAnimation { property: "scale"; to: .92; duration: settingsBridge.values.reduceMotion ? 0 : 160; easing.type: Easing.InCubic }
-            }
+            NumberAnimation { target: choices; property: "expansion"; to: 0; duration: settingsBridge.values.reduceMotion ? 0 : 160; easing.type: Easing.InCubic }
         }
         closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutsideParent
         contentItem: ListView {

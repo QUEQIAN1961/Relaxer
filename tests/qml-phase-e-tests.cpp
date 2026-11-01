@@ -113,12 +113,16 @@ private slots:
             if(!control || !click(w,control)) return false;
             auto *popup=qvariant_cast<QObject *>(control->property("popup")); if(!popup) return false;
             QTest::qWait(60);
-            const bool animating=popup->property("opacity").toReal()>0 && popup->property("opacity").toReal()<1
-                && popup->property("scale").toReal()>.92 && popup->property("scale").toReal()<1;
+            const auto openingWidth=popup->property("width").toReal(), openingHeight=popup->property("height").toReal();
+            const bool animating=openingHeight>0 && openingHeight<popup->property("expandedHeight").toReal()
+                && popup->property("scale").toReal()==1 && popup->property("opacity").toReal()==1;
             shot(w,name+"-opening"); QTest::qWait(240); shot(w,name);
             if(!popup->property("opened").toBool()) return false;
+            const auto fullHeight=popup->property("height").toReal();
+            if(qAbs(popup->property("width").toReal()-openingWidth)>.01 || fullHeight<=openingHeight) return false;
             if(!QMetaObject::invokeMethod(popup,"close")) return false;
-            QTest::qWait(60); const bool closing=popup->property("visible").toBool() && popup->property("opacity").toReal()<1;
+            QTest::qWait(60); const bool closing=popup->property("visible").toBool() && popup->property("height").toReal()<fullHeight
+                && qAbs(popup->property("width").toReal()-openingWidth)<.01 && popup->property("scale").toReal()==1;
             QTest::qWait(180); return animating && closing && !popup->property("visible").toBool();
         };
         QVERIFY(click(w,visual(root,"findMissingLyrics"))); QTest::qWait(300);
@@ -136,7 +140,10 @@ private slots:
         for(int point:{0,1}) {
             const auto button=bounds(browser);
             QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,QPointF(button.left()+button.width()*(point?.8:.2),button.center().y()).toPoint());
-            QTest::qWait(60); QVERIFY(menu->property("scale").toReal()<1); QTest::qWait(240);
+            QTest::qWait(60); QCOMPARE(menu->property("scale").toReal(),1.);
+            const auto openingWidth=menu->property("width").toReal(), openingHeight=menu->property("height").toReal();
+            QVERIFY(openingHeight>0 && openingHeight<menu->property("expandedHeight").toReal()); QTest::qWait(240);
+            QCOMPARE(menu->property("width").toReal(),openingWidth); QVERIFY(menu->property("height").toReal()>openingHeight);
             auto *content=qvariant_cast<QQuickItem *>(menu->property("contentItem")); QVERIFY(content);
             const auto origin=bounds(content).topLeft();
             if(point) QVERIFY(QLineF(origin,menuOrigin).length()<1); else menuOrigin=origin;

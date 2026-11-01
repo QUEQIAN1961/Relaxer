@@ -392,7 +392,7 @@ ApplicationWindow {
                 ShellButton{objectName:"bulkDelete";text:"删除";enabled:root.bulkKeys.length>0&&root.bulkOwner===localPage&&root.bulkScope==="0";onClicked:{root.bulkActionKeys=root.bulkKeys.slice();bulkDelete.open()}}
                 ShellButton{objectName:"bulkUnlike";text:"取消喜欢";enabled:root.bulkKeys.length>0;onClicked:libraryBridge.applyFavorite(root.bulkKeys,false)}
                 ShellButton{objectName:"bulkLike";text:"全部喜欢";enabled:root.bulkKeys.length>0;onClicked:libraryBridge.applyFavorite(root.bulkKeys,true)}
-                ShellButton{id:bulkAdd;objectName:"bulkAddPlaylist";text:"添加至歌单";enabled:root.bulkKeys.length>0;onClicked:bulkAddMenu.popup(bulkAdd,0,-bulkAddMenu.height)}
+                ShellButton{id:bulkAdd;objectName:"bulkAddPlaylist";text:"添加至歌单";enabled:root.bulkKeys.length>0;onClicked:bulkAddMenu.popup(bulkAdd,0,-bulkAddMenu.expandedHeight)}
                 ShellButton{objectName:"bulkNewPlaylist";text:"新建歌单并加入";enabled:root.bulkKeys.length>0;onClicked:{root.bulkActionKeys=root.bulkKeys.slice();bulkNew.open()}}
                 ShellButton{objectName:"bulkRemovePlaylist";text:"从歌单移除";enabled:root.bulkKeys.length>0&&Number(root.bulkScope)>0;onClicked:libraryBridge.removeTracksFromPlaylist(root.bulkKeys)}
                 Item{Layout.fillWidth:true}

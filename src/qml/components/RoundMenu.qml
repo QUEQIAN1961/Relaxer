@@ -2,8 +2,12 @@ import QtQuick
 import QtQuick.Controls as Controls
 import "../theme"
 Controls.Menu {
+    id: menu
     popupType: Controls.Popup.Item
-    transformOrigin: Item.Top
+    property real expansion: 1
+    readonly property real expandedHeight: implicitHeight
+    height: expandedHeight * expansion
+    clip: true
     padding: 6
     margins: 8
     font.family: Theme.fontFamily
@@ -11,16 +15,10 @@ Controls.Menu {
     font.weight: Font.Medium
     delegate: RoundMenuItem {}
     enter: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: settingsBridge.values.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic }
-            NumberAnimation { property: "scale"; from: .92; to: 1; duration: settingsBridge.values.reduceMotion ? 0 : 240; easing.type: Easing.OutCubic }
-        }
+        NumberAnimation { target: menu; property: "expansion"; from: 0; to: 1; duration: settingsBridge.values.reduceMotion ? 0 : 240; easing.type: Easing.OutCubic }
     }
     exit: Transition {
-        ParallelAnimation {
-            NumberAnimation { property: "opacity"; to: 0; duration: settingsBridge.values.reduceMotion ? 0 : 160; easing.type: Easing.InCubic }
-            NumberAnimation { property: "scale"; to: .92; duration: settingsBridge.values.reduceMotion ? 0 : 160; easing.type: Easing.InCubic }
-        }
+        NumberAnimation { target: menu; property: "expansion"; to: 0; duration: settingsBridge.values.reduceMotion ? 0 : 160; easing.type: Easing.InCubic }
     }
     background: Rectangle {
         implicitWidth: 200
