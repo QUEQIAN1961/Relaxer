@@ -281,9 +281,32 @@ private slots:
         QVERIFY(click(w,thinking)); QTest::qWait(280); QTest::keyClick(w,Qt::Key_Down); QTest::keyClick(w,Qt::Key_Return);
         QTRY_COMPARE(f.runtime->configuration().defaults.reasoningEffort,QString("low"));
         QVERIFY(f.runtime->configuration().defaults.thinkingEnabled); QTest::qWait(200); shot(w,"kimi-k3-settings");
-        auto *translation=f.shell->translationBridge(); QVERIFY(translation->setTargetTrack(QString::number(f.a.id))); QVERIFY(translation->classify(1));
+        // Reproduce a valid KIMI default alongside a stale independent DeepSeek override.
+        auto configuration=f.runtime->configuration(); configuration.translationUsesDefaults=false;
+        configuration.translationOverride={"deepseek","deepseek-flash",false,{}};
+        QVERIFY(f.runtime->saveConfiguration(configuration)); QVERIFY(f.runtime->acceptModelCatalog("deepseek",{}));
+        auto *effective=visual(root,"aiEffectiveTranslationStatus"); QVERIFY(effective);
+        QVERIFY(effective->property("text").toString().contains("独立配置"));
+        QVERIFY(effective->property("text").toString().contains("DeepSeek / deepseek-flash"));
+        QVERIFY(click(w,visual(root,"aiSettingsBack"))); QTest::qWait(300);
+        QVERIFY(click(w,visual(root,"navigation0"))); QTRY_COMPARE(f.shell->appBridge()->page(),0); QTest::qWait(280);
+        QVERIFY(click(w,visual(root,"findMissingLyrics"))); QTest::qWait(300);
+        auto *translation=f.shell->translationBridge();
+        QVERIFY(f.shell->lyricsSearchBridge()->setTargetTrack(QString::number(f.a.id)));
+        QVERIFY(translation->setTargetTrack(QString::number(f.a.id))); QVERIFY(translation->classify(0));
+        auto *button=visual(root,"translateAiButton"), *hint=visual(root,"lyricsAiConfigurationStatus"); QVERIFY(button); QVERIFY(hint);
+        QVERIFY(!button->isEnabled()); QVERIFY(hint->property("text").toString().contains("请先选择“需要翻译”"));
+        QVERIFY(translation->classify(1)); QVERIFY(button->isEnabled());
+        QVERIFY(hint->property("text").toString().contains("DeepSeek / deepseek-flash"));
+        QVERIFY(translation->prepareAi().isEmpty()); QVERIFY(translation->status().contains("独立配置"));
+        QVERIFY(translation->status().contains("deepseek-flash")); QCOMPARE(f.http.requestCount(),0);
+        shot(w,"kimi-translation-override-status");
+        QVERIFY(bridge->edit("translationUsesDefaults",true)); QVERIFY(bridge->save());
+        QVERIFY(hint->property("text").toString().contains("全局默认配置"));
+        QVERIFY(hint->property("text").toString().contains("KIMI / kimi-k3 · LOW"));
         const auto task=translation->prepareAi(); QVERIFY2(!task.isEmpty(),qPrintable(translation->status()));
         QCOMPARE(f.http.requestCount(),0); translation->declineConsent();
+        shot(w,"kimi-translation-ready");
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void settingsSubpagesTransitionOnceAfterSnapshot() {

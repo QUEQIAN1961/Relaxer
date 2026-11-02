@@ -34,6 +34,7 @@ struct AiServiceConfiguration {
 };
 
 QString defaultTranslationStylePrompt();
+QString translationConfigurationLabel(const AiServiceConfiguration &configuration);
 QJsonObject configurationToJson(const AiServiceConfiguration &configuration);
 AiServiceConfiguration configurationFromJson(const QJsonObject &object);
 

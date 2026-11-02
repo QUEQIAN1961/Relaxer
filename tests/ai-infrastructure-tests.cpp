@@ -837,7 +837,9 @@ void AiInfrastructureTests::compatibleProvidersKeepCredentialsAndPayloadsSeparat
         ModelRegistry models;
         AiRequestCoordinator coordinator(&providers, &credentials, &models);
         QSignalSpy catalogs(&coordinator, &AiRequestCoordinator::modelsFinished);
-        const auto catalog = QByteArray("{\"object\":\"list\",\"data\":[{\"id\":\"") + defaultModelId(id).toUtf8() + "\"}]}";
+        // Keep the older K2.5 serializer covered as well as the K3 default below.
+        const auto modelId = id == "kimi" ? QStringLiteral("kimi-k2.5") : defaultModelId(id);
+        const auto catalog = QByteArray("{\"object\":\"list\",\"data\":[{\"id\":\"") + modelId.toUtf8() + "\"}]}";
         server.enqueue(200, catalog);
         QVERIFY(coordinator.fetchModels(id));
         QTRY_COMPARE(catalogs.size(), 1);
@@ -845,10 +847,10 @@ void AiInfrastructureTests::compatibleProvidersKeepCredentialsAndPayloadsSeparat
         const auto live = qvariant_cast<QList<ModelInfo>>(catalogs[0][2]);
         QCOMPARE(live.size(), 1); QCOMPARE(live[0].providerId, id);
         models.applyLiveCatalog(id, live);
-        QVERIFY(validateModelSelection(models.find(id, defaultModelId(id)), id, defaultModelId(id), false, {}).isEmpty());
+        QVERIFY(validateModelSelection(models.find(id, modelId), id, modelId, false, {}).isEmpty());
         QSignalSpy completions(&coordinator, &AiRequestCoordinator::completionFinished);
         server.enqueue(200, R"({"choices":[{"finish_reason":"stop","message":{"content":"{}"}}],"usage":{"prompt_tokens":20,"completion_tokens":2,"total_tokens":22}})");
-        QVERIFY(coordinator.complete(id, {defaultModelId(id), QJsonArray{QJsonObject{{"role","user"},{"content","Return json"}}}, false, {}, 1024}));
+        QVERIFY(coordinator.complete(id, {modelId, QJsonArray{QJsonObject{{"role","user"},{"content","Return json"}}}, false, {}, 1024}));
         QTRY_COMPARE(completions.size(), 1);
         const auto result = qvariant_cast<ChatCompletionResult>(completions[0][2]);
         QVERIFY(result.ok()); QCOMPARE(result.content, QString("{}")); QCOMPARE(result.usage.totalTokens, 22);
@@ -868,6 +870,7 @@ void AiInfrastructureTests::compatibleProvidersKeepCredentialsAndPayloadsSeparat
 }
 
 void AiInfrastructureTests::kimiK3UsesRequiredReasoningAndCompletionTokenBudget() {
+    QCOMPARE(defaultModelId("kimi"),QString("kimi-k3"));
     for (const auto &id : {QString("kimi-k3"),QString("kimi-k3.1-pro"),QString("kimi-k3.1-pro-highspeed")}) {
         HttpMock server; QVERIFY(server.listen());
         DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl(),"kimi"});

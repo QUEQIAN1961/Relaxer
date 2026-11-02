@@ -212,6 +212,33 @@ private slots:
         QVERIFY(f.runtime->validateConfiguration(f.runtime->translationConfiguration()).isEmpty()); QCOMPARE(f.http.requestCount(),0);
     }
 
+    void translationStatusIdentifiesTheSavedOverrideWithoutChangingIt() {
+        Fixture f; QVERIFY(f.ok); QVERIFY(f.configure());
+        const auto catalog=parseCompatibleModelCatalog(R"({"object":"list","data":[{"id":"kimi-k2.6"},{"id":"kimi-k2.7-code"},{"id":"kimi-k3"},{"id":"kimi-k3.1-pro"},{"id":"kimi-k2.7-code-highspeed"}]})","kimi");
+        QVERIFY(catalog.ok); QVERIFY(f.runtime->acceptModelCatalog("kimi",catalog.models));
+        auto configuration=f.runtime->configuration();
+        configuration.defaults={"kimi","kimi-k3",true,"low"};
+        configuration.translationUsesDefaults=false;
+        configuration.translationOverride={"deepseek","deepseek-flash",false,{}};
+        QVERIFY(f.runtime->saveConfiguration(configuration));
+        QVERIFY(f.runtime->acceptModelCatalog("deepseek",{}));
+        const auto saved=f.configurationBytes(); const auto reads=f.credentials->reads;
+        QVERIFY(f.bridge->configurationStatus().contains("独立配置"));
+        QVERIFY(f.bridge->configurationStatus().contains("DeepSeek / deepseek-flash"));
+        QVERIFY(f.bridge->configurationStatus().contains("刷新模型列表"));
+        QCOMPARE(f.bridge->configurationStatus(),f.bridge->activeTranslationStatus());
+        QVERIFY(f.bridge->edit("translationUsesDefaults",true));
+        QVERIFY(f.bridge->configurationStatus().contains("全局默认配置"));
+        QVERIFY(f.bridge->configurationStatus().contains("KIMI / kimi-k3 · LOW"));
+        QVERIFY(f.bridge->activeTranslationStatus().contains("独立配置"));
+        QCOMPARE(f.configurationBytes(),saved); QCOMPARE(f.credentials->reads,reads);
+        QVERIFY(f.bridge->save());
+        QVERIFY(f.bridge->activeTranslationStatus().contains("KIMI / kimi-k3 · LOW"));
+        QCOMPARE(f.runtime->configuration().translationOverride.providerId,QString("deepseek"));
+        QCOMPARE(f.runtime->configuration().translationOverride.modelId,QString("deepseek-flash"));
+        QCOMPARE(f.credentials->reads,reads); QCOMPARE(f.http.requestCount(),0);
+    }
+
     void replacingCredentialsCancelsCatalogAndRejectsLateResults() {
         Fixture f;
         QVERIFY(f.ok);

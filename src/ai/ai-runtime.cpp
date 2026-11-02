@@ -53,6 +53,20 @@ QList<ModelInfo> modelsFromJson(const QJsonValue &value) {
 
 QString defaultTranslationStylePrompt() { return QString::fromUtf8(TranslationStyle); }
 
+QString translationConfigurationLabel(const AiServiceConfiguration &configuration) {
+    const auto &task = configuration.translationUsesDefaults ? configuration.defaults : configuration.translationOverride;
+    auto provider = task.providerId;
+    if (provider == KimiProviderId) provider = "KIMI";
+    else if (provider == DeepSeekProviderId) provider = "DeepSeek";
+    else if (provider == QwenProviderId) provider = "Qwen";
+    if (provider.isEmpty()) provider = QStringLiteral("未选择供应商");
+    const auto model = task.modelId.isEmpty() ? QStringLiteral("未选择模型") : task.modelId;
+    auto label = QString("歌词翻译（%1）：%2 / %3")
+        .arg(configuration.translationUsesDefaults ? QStringLiteral("全局默认配置") : QStringLiteral("独立配置"), provider, model);
+    if (task.thinkingEnabled && !task.reasoningEffort.isEmpty()) label += " · " + task.reasoningEffort.toUpper();
+    return label;
+}
+
 QJsonObject configurationToJson(const AiServiceConfiguration &configuration) {
     auto object = configuration.extensions;
     object["schemaVersion"] = 1;

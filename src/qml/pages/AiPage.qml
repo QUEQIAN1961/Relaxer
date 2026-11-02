@@ -213,7 +213,9 @@ ColumnLayout {
                 ShellButton { objectName: "aiLyricsTranslationSettings"; text: "歌词翻译设置"; onClicked: page.openTranslation() }
                 UiText {
                     Layout.fillWidth: true
-                    text: "歌词翻译可使用全局默认配置或单独配置，请求完成后先预览再保存。"
+                    objectName: "aiEffectiveTranslationStatus"
+                    text: aiBridge.configurationStatus
+                    textFormat: Text.PlainText
                     wrapMode: Text.Wrap
                     color: Theme.secondary
                     font.pixelSize: 14

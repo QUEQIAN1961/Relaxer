@@ -174,13 +174,24 @@ QString AiBridge::defaultModelCapabilities() const {
 
 QString AiBridge::configurationStatus() const {
     if (!m_runtime) return "AI 服务不可用";
-    const auto selected = selection(!m_draft.value("translationUsesDefaults").toBool());
-    if (selected.providerId.isEmpty()) return "请先选择供应商并保存 API Key。";
-    const auto error = ai::validateModelSelection(m_runtime->model(selected.providerId, selected.modelId),
+    auto configuration = m_runtime->configuration();
+    configuration.defaults = selection(false);
+    configuration.translationOverride = selection(true);
+    configuration.translationUsesDefaults = m_draft.value("translationUsesDefaults").toBool();
+    return configurationStatus(configuration);
+}
+
+QString AiBridge::activeTranslationStatus() const {
+    return m_runtime ? configurationStatus(m_runtime->configuration()) : QStringLiteral("AI 服务不可用");
+}
+
+QString AiBridge::configurationStatus(const ai::AiServiceConfiguration &configuration) const {
+    const auto &selected = configuration.translationUsesDefaults ? configuration.defaults : configuration.translationOverride;
+    const auto label = ai::translationConfigurationLabel(configuration);
+    const auto error = selected.providerId.isEmpty() ? QStringLiteral("请先选择供应商并保存 API Key。")
+        : ai::validateModelSelection(m_runtime->model(selected.providerId, selected.modelId),
         selected.providerId, selected.modelId, selected.thinkingEnabled, selected.reasoningEffort);
-    return error.isEmpty()
-        ? QString("歌词翻译使用 %1；开始翻译前仍会检查已保存凭据。整首歌词仅在确认后发送。").arg(selected.modelId)
-        : error;
+    return error.isEmpty() ? label : label + '\n' + error;
 }
 
 bool AiBridge::edit(const QString &key, const QVariant &value) {

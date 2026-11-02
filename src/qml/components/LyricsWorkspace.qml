@@ -478,6 +478,12 @@ Page {
                 ShellButton { objectName: "translateAiButton"; Layout.fillWidth: true; implicitHeight: 34; text: "AI 翻译整首"; primary: true; enabled: workspace.hasTarget && translationBridge.classification === 1 && !workspace.taskNeedsAction; onClicked: workspace.prepareTranslation("") }
                 ShellButton { id: browserButton; objectName:"lyricsBrowserButton"; implicitHeight:34;text: "浏览器 ⌄"; enabled: workspace.hasTarget && !workspace.taskNeedsAction; onClicked: browserMenu.popup(browserButton, browserButton.width - browserMenu.width, browserButton.height + 4) }
             }
+            UiText {
+                objectName: "lyricsAiConfigurationStatus"; Layout.fillWidth: true
+                text: aiBridge.activeTranslationStatus + (workspace.hasTarget && translationBridge.classification !== 1
+                    ? "\n请先选择“需要翻译”，再启动 AI 翻译。" : "")
+                textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12
+            }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
                 UiText { text: "原文语言"; color: Theme.secondary; font.pixelSize: 13 }

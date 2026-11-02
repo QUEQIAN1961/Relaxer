@@ -57,7 +57,7 @@ bool isSupportedProvider(const QString &id) {
 
 QString defaultModelId(const QString &id) {
     if (id == DeepSeekProviderId) return QStringLiteral("deepseek-flash");
-    if (id == KimiProviderId) return QStringLiteral("kimi-k2.5");
+    if (id == KimiProviderId) return QStringLiteral("kimi-k3");
     if (id == QwenProviderId) return QStringLiteral("qwen-plus");
     return {};
 }

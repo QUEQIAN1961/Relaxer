@@ -20,6 +20,7 @@ class AiBridge final : public QObject {
     Q_PROPERTY(QString credentialStatus READ credentialStatus NOTIFY changed)
     Q_PROPERTY(QString defaultModelCapabilities READ defaultModelCapabilities NOTIFY changed)
     Q_PROPERTY(QString configurationStatus READ configurationStatus NOTIFY changed)
+    Q_PROPERTY(QString activeTranslationStatus READ activeTranslationStatus NOTIFY changed)
     Q_PROPERTY(QStringList defaultEfforts READ defaultEfforts NOTIFY changed)
     Q_PROPERTY(QStringList translationEfforts READ translationEfforts NOTIFY changed)
     Q_PROPERTY(QVariantList defaultThinkingChoices READ defaultThinkingChoices NOTIFY changed)
@@ -41,6 +42,7 @@ public:
     QString credentialStatus() const { return m_credentialStatus; }
     QString defaultModelCapabilities() const;
     QString configurationStatus() const;
+    QString activeTranslationStatus() const;
     QStringList defaultEfforts() const;
     QStringList translationEfforts() const;
     QVariantList defaultThinkingChoices() const;
@@ -78,6 +80,7 @@ private:
     QVariantList thinkingChoices(bool translation) const;
     QStringList efforts(bool translation) const;
     bool thinkingEditable(bool translation) const;
+    QString configurationStatus(const ai::AiServiceConfiguration &configuration) const;
 };
 
 } // namespace relaxer

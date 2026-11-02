@@ -104,7 +104,7 @@ quint64 TranslationCoordinator::prepare(qint64 id,TranslationMethod method,const
         if(!m_runtime||!m_runtime->requests())return reject(QStringLiteral("AI 服务不可用。请从主窗口打开歌词翻译。"));
         task->configuration=m_runtime->translationConfiguration();
         const auto validation=m_runtime->validateConfiguration(task->configuration);
-        if(!validation.isEmpty())return reject(validation);
+        if(!validation.isEmpty())return reject(ai::translationConfigurationLabel(m_runtime->configuration())+'\n'+validation);
         const auto *model=m_runtime->model(task->configuration.providerId,task->configuration.modelId);
         if(!model)return reject(QStringLiteral("所选模型不可用，请在 AI 服务设置中刷新模型列表。"));
         const auto service=m_runtime->configuration();
