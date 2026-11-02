@@ -28,7 +28,7 @@ Item {
     onVisibleChanged: if (!visible) trackList.clearBulk()
     ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: 34; anchors.topMargin: 28; anchors.rightMargin: 34; anchors.bottomMargin: 16
+        anchors.leftMargin: 34; anchors.topMargin: 28; anchors.rightMargin: 34; anchors.bottomMargin: 0
         spacing: 20
         UiText { text: "个人"; color: Theme.text; font.pixelSize: 28; font.weight: Font.DemiBold }
         Item {

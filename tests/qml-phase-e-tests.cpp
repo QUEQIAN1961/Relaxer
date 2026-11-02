@@ -193,6 +193,10 @@ private slots:
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         auto *list=visual(root,"trackListView"), *bar=visual(root,"playerBar"); QVERIFY(list); QVERIFY(bar);
         QVERIFY(qAbs(bounds(list).bottom()-bounds(bar).top())<1);
+        QVERIFY(click(w,visual(root,"navigation2"))); QTRY_COMPARE(f.shell->appBridge()->page(),2); QTest::qWait(280);
+        auto *recent=visual(visual(root,"profilePage"),"trackListView"); QVERIFY(recent);
+        QVERIFY(qAbs(bounds(recent).bottom()-bounds(bar).top())<1); shot(w,"profile-list-bottom");
+        QVERIFY(click(w,visual(root,"navigation0"))); QTRY_COMPARE(f.shell->appBridge()->page(),0); QTest::qWait(280);
         auto *bridge=f.shell->aiBridge();
         for (const auto &id : {QString("kimi"),QString("qwen")}) {
             QVERIFY(bridge->edit("providerId",id)); QVERIFY(bridge->save());
@@ -273,6 +277,7 @@ private slots:
             QVERIFY(qAbs(appearance->width()-cellWidth)<1); QVERIFY(qAbs(appearance->width()-threshold->width())<1); QVERIFY(qAbs(close->width()-cellWidth)<1);
         }
         auto *scroll=visual(root,"settingsScroll"); QVERIFY(scroll);
+        QVERIFY(qAbs(bounds(scroll).bottom()-bounds(visual(root,"playerBar")).top())<1);
         auto *bold=visual(root,"mutedBoldSetting"), *reduce=visual(root,"reduceMotionSetting"); QVERIFY(bold); QVERIFY(reduce);
         QVERIFY(qAbs(bounds(bold).top()-bounds(reduce).top())<1); QVERIFY(bounds(bold).left()>bounds(reduce).right());
         QVERIFY(click(w,bold)); QVERIFY(f.shell->settingsBridge()->values().value("mutedBold").toBool());
