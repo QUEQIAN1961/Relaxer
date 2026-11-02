@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QJSValue>
 #include <QAbstractItemModelTester>
+#include <QSignalSpy>
 
 using namespace c4c5_fixture;
 namespace {
@@ -98,14 +99,20 @@ private slots:
         for (const QSize size : {QSize(1240,790),QSize(1000,660)}) {
             w->resize(size); QTest::qWait(50);
             auto *multi=visual(root,"lyricsMultiSelect"); auto *all=visual(root,"lyricsSelectAll");
-            QVERIFY(click(w,multi)); QTRY_VERIFY(all->isVisible()); QCOMPARE(multi->property("text").toString(),QString("取消"));
+            QVERIFY(multi && all); QVERIFY(!multi->property("checked").toBool());
+            QCOMPARE(multi->property("text").toString(),QString("多选"));
+            QVERIFY(click(w,multi)); QTRY_VERIFY(multi->property("checked").toBool());
+            QTRY_COMPARE(multi->property("markProgress").toReal(),1.); QTRY_VERIFY(all->isVisible());
+            QCOMPARE(multi->property("text").toString(),QString("多选"));
             auto *filter=visual(root,"lyricsFilterRow"); QVERIFY(filter);
             for (const char *name : {"lyricsMissingOnly","lyricsMissingTranslationOnly","lyricsMultiSelect","lyricsSelectAll"}) {
                 auto *control=visual(root,name); QVERIFY(control);
                 QVERIFY(bounds(filter).adjusted(-1,-1,1,1).contains(bounds(control)));
                 QVERIFY(qAbs(bounds(control).center().y()-bounds(multi).center().y())<1);
             }
-            QVERIFY(click(w,multi)); QTRY_VERIFY(!all->isVisible());
+            QVERIFY(click(w,multi)); QTRY_VERIFY(!multi->property("checked").toBool());
+            QTRY_COMPARE(multi->property("markProgress").toReal(),0.); QTRY_VERIFY(!all->isVisible());
+            QCOMPARE(multi->property("text").toString(),QString("多选"));
             auto *instrumental=visual(root,"lyricsInstrumentalButton"), *apply=visual(root,"lyricsApplyButton");
             QVERIFY(instrumental && apply); QCOMPARE(instrumental->height(),apply->height());
             QVERIFY(qAbs(instrumental->width()/(instrumental->width()+apply->width())-.35)<.01);
@@ -113,7 +120,9 @@ private slots:
             shot(w, size.width()==1240 ? "lyrics-normal" : "lyrics-compact");
         }
         QVERIFY(click(w,visual(root,"lyricsMissingOnly")));
-        QVERIFY(click(w,visual(root,"lyricsMultiSelect"))); QVERIFY(click(w,visual(root,"lyricsSelectAll")));
+        auto *multi=visual(root,"lyricsMultiSelect"); QVERIFY(click(w,multi));
+        QTRY_COMPARE(multi->property("markProgress").toReal(),1.);
+        QVERIFY(click(w,visual(root,"lyricsSelectAll")));
         QCOMPARE(selected(workspace).size(),2);
         shot(w,"lyrics-filtered-select-all");
         QVERIFY(click(w,visual(root,"lyricsMultiSelect"))); QCOMPARE(selected(workspace).size(),0);
@@ -199,6 +208,8 @@ private slots:
         QVERIFY(f.library.saveLookupCache(next.id,QJsonArray{candidate(next)},false));
         QVERIFY(openWorkspace(f,{QString::number(f.a.id),QString::number(next.id)}));
         auto *translation=f.shell->translationBridge(); auto *search=f.shell->lyricsSearchBridge();
+        QSignalSpy saved(search,&LyricsSearchBridge::saved), failed(search,&LyricsSearchBridge::operationFailed);
+        QSignalSpy replacements(search,&LyricsSearchBridge::replacementRequested);
         QVERIFY(translation->classify(1));
         f.http.enqueue(completion(QString::fromUtf8(translationJson({{0,"月亮你好"},{1,"走回家"}}))));
         const auto task=translation->prepareAi(); QVERIFY(!task.isEmpty()); QVERIFY(translation->start(task));
@@ -206,17 +217,31 @@ private slots:
         QVERIFY(click(w,visual(w->contentItem(),"lyricsApplyButton")));
         auto *dialog=w->findChild<QObject *>("lyricsTranslationConflict"); QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("opened").toBool()); QCOMPARE(search->sourceText().toUtf8(),source);
+        QCOMPARE(replacements.size(),1); const auto firstToken=dialog->property("exactToken").toString(); QVERIFY(!firstToken.isEmpty());
         QVERIFY(translation->preview()); QVERIFY(QMetaObject::invokeMethod(dialog,"reject"));
-        QVERIFY(translation->preview());
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QVERIFY(translation->preview()); QCOMPARE(saved.size(),0); QCOMPARE(failed.size(),0);
+        QCOMPARE(search->sourceText().toUtf8(),source);
         QVERIFY(click(w,visual(w->contentItem(),"lyricsApplyButton")));
+        QTRY_VERIFY(dialog->property("opened").toBool()); QCOMPARE(replacements.size(),2);
+        const auto secondToken=dialog->property("exactToken").toString(); QVERIFY(!secondToken.isEmpty()); QVERIFY(secondToken!=firstToken);
         const QByteArray newer="[00:00.00]Independent change\n";
-        QVERIFY(f.library.saveLyrics(f.a.id,newer)); QVERIFY(QMetaObject::invokeMethod(dialog,"accept"));
+        QVERIFY(f.library.saveLyrics(f.a.id,newer));
+        QVERIFY(click(w,visual(w->contentItem(),"lyricsReplaceExplicit")));
+        QTRY_VERIFY(!dialog->property("visible").toBool()); QTRY_COMPARE(failed.size(),1); QCOMPARE(saved.size(),0);
         QCOMPARE(search->sourceText().toUtf8(),newer); QCOMPARE(search->targetTrackKey(),QString::number(f.a.id));
         QVERIFY(translation->preview());
         QVERIFY(search->select(0)); // Explicitly refresh the source guard before replacing.
         QVERIFY(click(w,visual(w->contentItem(),"lyricsApplyButton")));
-        QVERIFY(QMetaObject::invokeMethod(dialog,"accept"));
+        QTRY_VERIFY(dialog->property("opened").toBool()); QCOMPARE(replacements.size(),3);
+        const auto finalToken=dialog->property("exactToken").toString(); QVERIFY(!finalToken.isEmpty()); QVERIFY(finalToken!=secondToken);
+        QVERIFY(click(w,visual(w->contentItem(),"lyricsReplaceExplicit")));
+        QTRY_VERIFY(!dialog->property("visible").toBool()); QTRY_COMPARE(saved.size(),1); QCOMPARE(failed.size(),1);
+        QCOMPARE(saved.first().first().toString(),QString::number(f.a.id));
+        const auto file=LyricsDocumentReader::readFile(f.library.absolute(f.library.track(f.a.id).lyrics));
+        QVERIFY(file.opened && file.complete); QCOMPARE(file.bytes,candidate(f.a)["syncedLyrics"].toString().toUtf8());
         QTRY_COMPARE(search->targetTrackKey(),QString::number(next.id));
+        QVERIFY(f.library.track(next.id).lyrics.isEmpty()); QCOMPARE(f.http.requestCount(),1);
         QVERIFY(translation->setTargetTrack(QString::number(f.a.id)));
         QCOMPARE(translation->state(),QString("Cancelled")); QVERIFY(!translation->preview());
     }
