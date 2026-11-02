@@ -34,7 +34,15 @@ Item {
         ShellButton{objectName:"playerCollapse";text:"收起";flat:true;symbol:"collapse";onClicked:page.collapseRequested()}
         Item{Layout.fillWidth:true}
     }
+    LyricsList {
+        id: lyrics
+        x: columns.x + lyricSide.x - previewInset
+        y: columns.y + lyricSide.y
+        width: lyricSide.width + previewInset; height: lyricSide.height
+        opacity: page.detailsOpacity
+    }
     RowLayout{
+        id: columns
         anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;anchors.bottom:parent.bottom
         anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:76;anchors.bottomMargin:20;spacing:32
         Item{
@@ -60,7 +68,6 @@ Item {
         }
         Item{
             id:lyricSide;Layout.fillWidth:true;Layout.fillHeight:true;Layout.preferredWidth:page.width/2;opacity:page.detailsOpacity
-            LyricsList{id:lyrics;anchors.fill:parent}
             HoverHandler{onPointChanged:{page.toolsVisible=true;if(!tools.opened)idle.restart()} onHoveredChanged:if(hovered){page.toolsVisible=true;if(!tools.opened)idle.restart()}}
             ToolButton{
                 id:question;objectName:"lyricToolsQuestion";width:20;height:20;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.rightMargin:26;anchors.bottomMargin:6

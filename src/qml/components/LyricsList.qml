@@ -7,6 +7,7 @@ Item {
     objectName: "lyricsPanel"
     property bool manualScroll: false
     property bool reduceMotion: settingsBridge.values.reduceMotion
+    readonly property real previewInset: previewTime.implicitWidth + 12
     readonly property int previewIndex: {
         const center = list.contentY + list.height / 2
         let nearest = -1, distance = Number.MAX_VALUE
@@ -43,7 +44,7 @@ Item {
         followMotion.restart()
     }
     NumberAnimation { id: followMotion; objectName: "lyricsFollowMotion"; target: list; property: "contentY"; duration: 360; easing.type: Easing.OutCubic }
-    Timer { id: returnIdle; interval: 3000; onTriggered: { if (list.dragging || list.flicking || lyricBar.pressed) restart(); else panel.returnCurrent() } }
+    Timer { id: returnIdle; interval: 3000; onTriggered: { if (list.dragging || list.flicking || lyricBar.pressed || previewTime.pressed) restart(); else panel.returnCurrent() } }
     Connections {
         target: lyricsModel
         function onModelAboutToBeReset() { followMotion.stop(); list.cancelFlick() }
@@ -51,7 +52,8 @@ Item {
         function onDocumentChanged() { if (lyricsModel.trackKey !== list.documentKey) { list.documentKey = lyricsModel.trackKey; panel.manualScroll = false; returnIdle.stop() }; Qt.callLater(panel.centerCurrent) }
     }
     ColumnLayout {
-        anchors.fill: parent; spacing: 8
+        id: layout
+        anchors.fill: parent; anchors.leftMargin: panel.previewInset; spacing: 8
         RowLayout {
             visible: lyricsModel.preview || panel.manualScroll || lyricsModel.loading || lyricsModel.error.length > 0
             Layout.fillWidth: true
@@ -60,6 +62,7 @@ Item {
         }
         UiText { Layout.fillWidth: true; visible: lyricsModel.error.length > 0; text: lyricsModel.error; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.accent }
         Item {
+          id: viewport
           Layout.fillWidth: true; Layout.fillHeight: true
           ListView {
             id: list
@@ -121,20 +124,33 @@ Item {
               anchors.leftMargin: 0; anchors.rightMargin: 20
               height: 1; color: Theme.text; opacity: .28
           }
-          ShellButton {
-              id: previewTime; objectName: "lyricsPreviewTime"
-              anchors.right: parent.left; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
-              z: 3; visible: panel.manualScroll && lyricsModel.timed && panel.previewIndex >= 0
-              text: {
-                  const ms = panel.previewIndex >= 0 ? Number(lyricsModel.timestampAt(panel.previewIndex)) : 0
-                  return Math.floor(ms / 60000) + ":" + String(Math.floor(ms / 1000) % 60).padStart(2, "0") + "  ▶"
-              }
-              Accessible.name: "播放中线对应歌词 " + text
-              onClicked: { const index = panel.previewIndex; if (lyricsModel.seekRow(index)) panel.returnCurrent() }
-          }
           // A viewport sibling: ListView's contentItem may have zero width.
           MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; onWheel: wheel => { panel.takeOver(); wheel.accepted = false } }
           EmptyState { anchors.centerIn: parent; width: Math.min(parent.width - 20, 420); visible: lyricsModel.count === 0; heading: lyricsModel.loading ? "正在读取" : "让音乐，留一点空白"; description: lyricsModel.status }
         }
+    }
+    // Keep the left-side control inside its ancestors' pointer bounds.
+    ShellButton {
+        id: previewTime; objectName: "lyricsPreviewTime"
+        anchors.left: parent.left
+        y: layout.y + viewport.y + (viewport.height - height) / 2
+        z: 3; visible: panel.manualScroll && lyricsModel.timed && panel.previewIndex >= 0
+        property int pressedIndex: -1
+        property string pressedTrack: "0"
+        text: {
+            const ms = panel.previewIndex >= 0 ? Number(lyricsModel.timestampAt(panel.previewIndex)) : 0
+            return Math.floor(ms / 60000) + ":" + String(Math.floor(ms / 1000) % 60).padStart(2, "0") + "  ▶"
+        }
+        Accessible.name: "播放中线对应歌词 " + text
+        onPressed: {
+            list.cancelFlick()
+            followMotion.stop()
+            returnIdle.stop()
+            pressedIndex = panel.previewIndex
+            pressedTrack = lyricsModel.trackKey
+        }
+        onReleased: if (panel.manualScroll) returnIdle.restart()
+        onCanceled: if (panel.manualScroll) returnIdle.restart()
+        onClicked: if (pressedTrack === lyricsModel.trackKey && lyricsModel.seekRow(pressedIndex)) panel.returnCurrent()
     }
 }

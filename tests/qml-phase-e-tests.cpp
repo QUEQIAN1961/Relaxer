@@ -212,6 +212,36 @@ private slots:
         }
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
+    void lyricsPreviewClickKeepsItsTargetWhilePlaying() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem(); auto *player=f.shell->facade();
+        QTRY_VERIFY(player->seekable()); player->toggle(); QTRY_VERIFY(player->playing());
+        QVERIFY(QMetaObject::invokeMethod(w,"showLyrics")); QTRY_COMPARE(w->property("playerProgress").toReal(),1.);
+        auto *panel=visual(root,"lyricsPanel"), *list=visual(root,"lyricsList"), *stamp=visual(root,"lyricsPreviewTime"); QVERIFY(panel); QVERIFY(list); QVERIFY(stamp);
+        player->seek(3000); QVERIFY(QMetaObject::invokeMethod(panel,"returnCurrent")); QTest::qWait(420);
+        QVERIFY(QMetaObject::invokeMethod(panel,"takeOver"));
+        list->setProperty("contentY",list->property("contentY").toReal()+1000); QTest::qWait(80);
+        QVERIFY(stamp->isVisible()); const auto selected=panel->property("previewIndex").toInt(); QVERIFY(selected>8);
+        const auto time=f.shell->lyricsModel()->timestampAt(selected);
+        QTest::mouseMove(w,bounds(stamp).center().toPoint());
+        QTest::mousePress(w,Qt::LeftButton,Qt::NoModifier,bounds(stamp).center().toPoint());
+        QVERIFY(stamp->property("pressed").toBool()); QTest::qWait(3200);
+        QVERIFY(stamp->isVisible()); QVERIFY(panel->property("manualScroll").toBool());
+        QTest::mouseRelease(w,Qt::LeftButton,Qt::NoModifier,bounds(stamp).center().toPoint());
+        QTRY_VERIFY(qAbs(player->position()-time)<500); QVERIFY(player->playing());
+        QVERIFY(!panel->property("manualScroll").toBool());
+        QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen")); QTRY_COMPARE(w->visibility(),QWindow::FullScreen);
+        QTest::qWait(250); QVERIFY(QMetaObject::invokeMethod(panel,"takeOver"));
+        list->setProperty("contentY",list->property("contentY").toReal()+400); QTest::qWait(80);
+        const auto fullTime=f.shell->lyricsModel()->timestampAt(panel->property("previewIndex").toInt());
+        QVERIFY(click(w,stamp)); QTRY_VERIFY(qAbs(player->position()-fullTime)<500);
+        QVERIFY(!panel->property("manualScroll").toBool()); QVERIFY(player->playing());
+        QVERIFY(QMetaObject::invokeMethod(w,"toggleFullscreen")); QTRY_COMPARE(w->visibility(),QWindow::Windowed);
+        QTest::mouseMove(w,bounds(list).center().toPoint());
+        auto *tools=visual(root,"lyricToolsQuestion"); QVERIFY(tools); QTRY_VERIFY(tools->opacity()>.99); QVERIFY(click(w,tools));
+        auto *menu=w->findChild<QObject *>("lyricToolsMenu"); QVERIFY(menu); QTRY_VERIFY(menu->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(menu,"close"));
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void feedbackStaysAbovePlayerAndHandsOffToAnimatedDetails() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         auto *notice=visual(root,"feedbackNotice"); auto *bar=visual(root,"playerBar"); QVERIFY(notice); QVERIFY(bar);
