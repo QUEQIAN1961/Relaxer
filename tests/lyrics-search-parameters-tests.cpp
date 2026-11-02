@@ -203,7 +203,7 @@ private slots:
         QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());const auto a=seed(lib),b=search_fixture::seed(lib,"two","Second");Network net;
         QmlShell shell(&lib,nullptr,true,nullptr,{}, {},&net);QVERIFY(shell.load());auto *w=shell.window();w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));
         auto *bridge=shell.lyricsSearchBridge();QVERIFY(bridge->setTargetTracks({QString::number(a.id),QString::number(b.id)},false,true));
-        auto *ws=c4c5_fixture::visual(w->contentItem(),"lyricsWorkspace");QVERIFY(ws);QVERIFY(QMetaObject::invokeMethod(ws,"open"));
+        QVERIFY(QMetaObject::invokeMethod(w,"ensureLyricsWorkspace"));auto *ws=c4c5_fixture::visual(w->contentItem(),"lyricsWorkspace");QVERIFY(ws);QVERIFY(QMetaObject::invokeMethod(ws,"open"));
         QVERIFY(click(w,c4c5_fixture::visual(w->contentItem(),"lyricsSearchSettingsButton")));auto *dialog=w->findChild<QObject *>("lyricsSearchSettingsDialog");QVERIFY(dialog);QTRY_VERIFY(dialog->property("opened").toBool());
         QVERIFY(shot(shell,"qml-sources-before"));
         for(const auto &id:QStringList{"ovh","netease","qq","kugou"}){

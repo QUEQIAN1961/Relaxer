@@ -101,6 +101,19 @@ bool QmlShell::load() {
     if (!m_engine->rootObjects().isEmpty()) return window() != nullptr;
     m_engine->load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
     if (auto *loaded = window()) {
+        // Release render resources on unexpose, preserving the QML state,
+        // playback, tasks and native shortcut registrations.
+        loaded->setPersistentGraphics(false);
+        loaded->setPersistentSceneGraph(false);
+        connect(loaded, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility) {
+            if (visibility != QWindow::Hidden && visibility != QWindow::Minimized) return;
+            QTimer::singleShot(300, this, [this] {
+                auto *view = window();
+                if (!view || (view->isVisible() && view->visibility() != QWindow::Minimized)) return;
+                if (auto *images = dynamic_cast<UiImages *>(m_engine->imageProvider("relaxer"))) images->clearCache();
+                view->releaseResources();
+            });
+        });
         m_uiIntegration.attach(loaded);
         if(!m_artworkRecoveryScheduled){m_artworkRecoveryScheduled=true;QTimer::singleShot(0,this,[this]{m_import.repairLegacyArtwork();});}
     }

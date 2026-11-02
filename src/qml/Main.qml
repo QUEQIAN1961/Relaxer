@@ -7,6 +7,12 @@ import "pages"
 import "theme"
 ApplicationWindow {
     id: root
+    component DeferredPage: Loader {
+        property bool requested: false
+        active: false
+        onRequestedChanged: if (requested) active = true
+        Component.onCompleted: if (requested) active = true
+    }
     objectName: "qmlMainWindow"
     visible: true
     width: 1240
@@ -29,6 +35,13 @@ ApplicationWindow {
     readonly property QtObject designTokens: Theme
     property color themeAccent: Theme.accent
     property bool lyricsOpen: false
+    readonly property bool backgrounded: !visible || visibility === Window.Minimized
+    readonly property var appearancePage: appearanceLoader.item
+    readonly property var lyricsWorkspace: lyricsWorkspaceLoader.item
+    readonly property bool workspaceOpened: lyricsWorkspace ? lyricsWorkspace.opened : false
+    readonly property bool workspaceVisible: lyricsWorkspace ? lyricsWorkspace.visible : false
+    function ensureAppearancePage() { appearanceLoader.active = true; return appearancePage }
+    function ensureLyricsWorkspace() { lyricsWorkspaceLoader.active = true; return lyricsWorkspace }
     readonly property bool fullScreenMode: visibility === Window.FullScreen
     property var savedGeometry: [0,0,1240,790]
     property bool wasMaximized: false
@@ -130,7 +143,7 @@ ApplicationWindow {
         } else { savedGeometry=[x,y,width,height]; wasMaximized=visibility===Window.Maximized; showLyrics(); showFullScreen() }
     }
     function changePage(action) {
-        if (appBridge.page === 3 && settingsSection === "appearance" && !appearancePage.confirmLeave()) {
+        if (appBridge.page === 3 && settingsSection === "appearance" && !ensureAppearancePage().confirmLeave()) {
             pendingPageAction = action
             return
         }
@@ -183,16 +196,16 @@ ApplicationWindow {
         if (!lyricsSearchBridge.targetTracks.length) { toast.show("没有需要处理的歌曲"); return }
         const target=lyricsSearchBridge.targetTracks[0].trackKey
         lyricsSearchBridge.setTargetTrack(target); translationBridge.setTargetTrack(target)
-        lyricsWorkspace.open()
+        ensureLyricsWorkspace().open()
     }
-    function backgroundUrl(file,blur){return String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
+    function backgroundUrl(file,blur){return root.backgrounded ? "" : String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
     function applySettings() { Theme.fontFamily=root.restFontFamily; if(settingsBridge.values.reduceMotion)relocateUpcoming(lyricsOpen); Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}) }
     Component.onCompleted: { width=settingsBridge.windowBounds.width;height=settingsBridge.windowBounds.height;applySettings(); if(settingsBridge.windowBounds.maximized)showMaximized() }
     Connections {
         target: lyricsSearchBridge
         function onLocalImportRequested(key) {
-            if (!lyricsWorkspace.visible || lyricsSearchBridge.targetTrackKey !== key) root.openLyricsTools([key], false)
-            if (lyricsWorkspace.visible && lyricsSearchBridge.targetTrackKey === key) lyricsWorkspace.beginLocalImport()
+            if (!root.workspaceVisible || lyricsSearchBridge.targetTrackKey !== key) root.openLyricsTools([key], false)
+            if (root.workspaceVisible && lyricsSearchBridge.targetTrackKey === key) lyricsWorkspace.beginLocalImport()
         }
     }
     Connections { target: settingsBridge; function onSettingsChanged(){root.applySettings()} }
@@ -210,10 +223,10 @@ ApplicationWindow {
             coverMotion.duration=460;coverMotion.restart()
         }
     }
-    Shortcut { sequence: "Escape"; enabled: !lyricsWorkspace.visible && !root.popupOpen; onActivated: {if(root.bulkActive)root.clearBulk();else if(root.fullScreenMode)root.toggleFullscreen();else if(root.lyricsOpen)root.animatePlayer(false);else upcoming.panelExpanded=false} }
+    Shortcut { sequence: "Escape"; enabled: !root.workspaceVisible && !root.popupOpen; onActivated: {if(root.bulkActive)root.clearBulk();else if(root.fullScreenMode)root.toggleFullscreen();else if(root.lyricsOpen)root.animatePlayer(false);else upcoming.panelExpanded=false} }
     Shortcut {sequence:"Ctrl+O";onActivated:importDialog.chooseFiles()}
     Shortcut {sequence:"Ctrl+Shift+O";onActivated:importDialog.chooseFolder()}
-    Shortcut {sequence:"Ctrl+F";enabled:!lyricsWorkspace.visible;onActivated:{root.navigateOriginal(0);searchFocus.restart()}}
+    Shortcut {sequence:"Ctrl+F";enabled:!root.workspaceVisible;onActivated:{root.navigateOriginal(0);searchFocus.restart()}}
     Timer{id:searchFocus;interval:260;onTriggered:localPage.focusSearch()}
     onClosing: close => {
         feedbackBridge.setClosing(true)
@@ -226,7 +239,7 @@ ApplicationWindow {
             close.accepted=false
             pendingAppearanceClose=true
             pendingPageAction=null
-            appearancePage.confirmLeave()
+            ensureAppearancePage().confirmLeave()
             feedbackBridge.setClosing(false)
             return
         }
@@ -253,7 +266,7 @@ ApplicationWindow {
     Timer { id: windowSave; interval: 350; onTriggered: if(root.visibility!==Window.FullScreen && root.visibility!==Window.Minimized)settingsBridge.saveWindowState(root.width,root.height,root.visibility===Window.Maximized) }
     Item {
         id: contentHost
-        visible: !lyricsWorkspace.opened
+        visible: !root.workspaceOpened
         objectName: "contentHost"
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
         anchors.bottom: importPanel.visible ? importPanel.top : playerBar.top
@@ -312,40 +325,64 @@ ApplicationWindow {
                 StackLayout {
                     id: pages;objectName:"pageStack";anchors.fill:parent;anchors.topMargin:Theme.pageContentOffset;currentIndex:appBridge.page
                     LocalPage { id:localPage;onBulkChanged:(active,keys)=>root.updateBulk(localPage,active,keys);onLyricsRequested:(keys,missing)=>root.openLyricsTools(keys,missing);onImportRequested:anchor=>importDialog.openMenu(anchor);onEditRequested:(key,name)=>playlistEditor.edit(key,name) }
-                    PlaylistsPage { onOpenRequested:key=>root.openPlaylist(key);onEditRequested:(key,name)=>playlistEditor.edit(key,name);onCreateRequested:playlistEditor.create() }
-                    ProfilePage { id:profilePage;onBulkChanged:(active,keys)=>root.updateBulk(profilePage,active,keys);onLyricsRequested:keys=>root.openLyricsTools(keys,false) }
+                    DeferredPage {
+                        id: playlistsLoader
+                        requested: appBridge.page === 1
+                        sourceComponent: PlaylistsPage { onOpenRequested:key=>root.openPlaylist(key);onEditRequested:(key,name)=>playlistEditor.edit(key,name);onCreateRequested:playlistEditor.create() }
+                    }
+                    DeferredPage {
+                        id: profileLoader
+                        requested: appBridge.page === 2
+                        sourceComponent: ProfilePage { id:profilePage;onBulkChanged:(active,keys)=>root.updateBulk(profilePage,active,keys);onLyricsRequested:keys=>root.openLyricsTools(keys,false) }
+                    }
                     Item {
                         StackLayout {
                             anchors.fill:parent
                             currentIndex:root.settingsSection==="ai"?1:root.settingsSection==="appearance"?2:root.settingsSection==="log"?3:0
-                            Item { SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:0;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
-                            ScrollView {
-                                id:aiScroll;objectName:"aiSettingsScroll";contentWidth:availableWidth;clip:true
-                                leftPadding:34;rightPadding:34;topPadding:28;bottomPadding:16
-                                AiPage {
-                                    id:aiPage;width:aiScroll.availableWidth
-                                    onBackRequested:root.changePage(function(){root.settingsSection="settings"})
-                                    onSubpageRequested:section=>root.changePage(function(){aiPage.subpage=section;aiScroll.contentItem.contentY=0})
-                                }
+                            DeferredPage {
+                                id: settingsLoader
+                                requested: appBridge.page === 3 && root.settingsSection === "settings"
+                                sourceComponent: Item { SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:0;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
                             }
-                            AppearancePage {
-                                id:appearancePage
-                                onBackRequested:{
-                                    if(root.pendingAppearanceClose){
-                                        root.pendingAppearanceClose=false
-                                        // Resume through the existing task, playback-save and import guards.
-                                        Qt.callLater(root.requestQuit)
-                                        return
+                            DeferredPage {
+                                id: aiLoader
+                                requested: appBridge.page === 3 && root.settingsSection === "ai"
+                                sourceComponent: ScrollView {
+                                    id:aiScroll;objectName:"aiSettingsScroll";contentWidth:availableWidth;clip:true
+                                    leftPadding:34;rightPadding:34;topPadding:28;bottomPadding:16
+                                    AiPage {
+                                        id:aiPage;width:aiScroll.availableWidth
+                                        onBackRequested:root.changePage(function(){root.settingsSection="settings"})
+                                        onSubpageRequested:section=>root.changePage(function(){aiPage.subpage=section;aiScroll.contentItem.contentY=0})
                                     }
-                                    const action=root.pendingPageAction;root.pendingPageAction=null
-                                    root.changePage(function(){root.settingsSection="settings";if(action)action()})
-                                }
-                                onLeaveRejected:{
-                                    root.pendingPageAction=null
-                                    if(root.pendingAppearanceClose){root.pendingAppearanceClose=false;root.exitRequested=false}
                                 }
                             }
-                            VersionLogPage{onBackRequested:root.changePage(function(){root.settingsSection="settings"})}
+                            DeferredPage {
+                                id: appearanceLoader
+                                requested: appBridge.page === 3 && root.settingsSection === "appearance"
+                                sourceComponent: AppearancePage {
+                                    id:appearancePage
+                                    onBackRequested:{
+                                        if(root.pendingAppearanceClose){
+                                            root.pendingAppearanceClose=false
+                                            // Resume through the existing task, playback-save and import guards.
+                                            Qt.callLater(root.requestQuit)
+                                            return
+                                        }
+                                        const action=root.pendingPageAction;root.pendingPageAction=null
+                                        root.changePage(function(){root.settingsSection="settings";if(action)action()})
+                                    }
+                                    onLeaveRejected:{
+                                        root.pendingPageAction=null
+                                        if(root.pendingAppearanceClose){root.pendingAppearanceClose=false;root.exitRequested=false}
+                                    }
+                                }
+                            }
+                            DeferredPage {
+                                id: logLoader
+                                requested: appBridge.page === 3 && root.settingsSection === "log"
+                                sourceComponent: VersionLogPage{onBackRequested:root.changePage(function(){root.settingsSection="settings"})}
+                            }
                         }
                     }
                 }
@@ -368,13 +405,13 @@ ApplicationWindow {
     }
     PlayerBar {
         id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98
-        visible:!root.bulkActive&&!lyricsWorkspace.opened;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
+        visible:!root.bulkActive&&!root.workspaceOpened;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling
         backgroundCanvasHeight: root.height; backgroundOffsetY: playerBar.y
         onExpandRequested:root.animatePlayer(!root.lyricsOpen)
     }
 
     Rectangle {
-        objectName:"bulkBar";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98;visible:root.bulkActive&&!lyricsWorkspace.opened;color:Theme.card;z:3
+        objectName:"bulkBar";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98;visible:root.bulkActive&&!root.workspaceOpened;color:Theme.card;z:3
         ColumnLayout {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;anchors.topMargin:10;anchors.bottomMargin:10;spacing:4
             RowLayout {
@@ -416,7 +453,7 @@ ApplicationWindow {
         property bool completionVisible:false
         property string completionText:""
         readonly property string shownStatus:importBridge.busy?importBridge.status:completionText
-        visible:(importBridge.busy||completionVisible)&&!lyricsWorkspace.opened
+        visible:(importBridge.busy||completionVisible)&&!root.workspaceOpened
         height:Math.min(144,Math.max(44,importStatus.implicitHeight+16));color:Theme.panel;clip:true;z:3
         function updateTask(){
             if(importBridge.busy){
@@ -441,7 +478,7 @@ ApplicationWindow {
         onPressedChanged:if(pressed&&upcoming.panelExpanded&&!upcoming.contains(upcoming.mapFromItem(root.contentItem,point.position.x,point.position.y)))upcoming.panelExpanded=false
     }
     Item {
-        objectName:"upcomingWindowClip";anchors.fill:parent;clip:true;z:2;visible:!lyricsWorkspace.opened
+        objectName:"upcomingWindowClip";anchors.fill:parent;clip:true;z:2;visible:!root.workspaceOpened
         UpcomingPanel {
             id:upcoming;objectName:"nextQueuePanel"
             expandedPlayer:root.upcomingAtLeft;x:root.upcomingAtLeft?8:root.width-8-width
@@ -457,7 +494,7 @@ ApplicationWindow {
     }
     NumberAnimation {id:upcomingIn;target:root;property:"upcomingTravel";to:0;duration:210;easing.type:Easing.OutCubic}
     Artwork {
-        id:flight;objectName:"sharedArtworkFlight";z:4;visible:root.coverTravelling&&!lyricsWorkspace.opened
+        id:flight;objectName:"sharedArtworkFlight";z:4;visible:root.coverTravelling&&!root.workspaceOpened
         file:root.flightFile;seed:root.flightSeed;resolution:768
         x:root.coverFrom.x+(root.coverTo.x-root.coverFrom.x)*root.coverProgress
         y:root.coverFrom.y+(root.coverTo.y-root.coverFrom.y)*root.coverProgress
@@ -466,7 +503,7 @@ ApplicationWindow {
     }
 
     UiText {
-        id:titleFlight;objectName:"sharedTitleFlight";z:4;visible:root.metadataTravelling&&!lyricsWorkspace.opened
+        id:titleFlight;objectName:"sharedTitleFlight";z:4;visible:root.metadataTravelling&&!root.workspaceOpened
         text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideNone;color:Theme.text
         x:root.titleFrom.x+(root.titleTo.x-root.titleFrom.x)*root.coverProgress
         y:root.titleFrom.y+(root.titleTo.y-root.titleFrom.y)*root.coverProgress
@@ -477,7 +514,7 @@ ApplicationWindow {
         font.family:root.titleTo.family;font.weight:root.titleTo.weight
     }
     UiText {
-        id:artistFlight;objectName:"sharedArtistFlight";z:4;visible:root.metadataTravelling&&!lyricsWorkspace.opened
+        id:artistFlight;objectName:"sharedArtistFlight";z:4;visible:root.metadataTravelling&&!root.workspaceOpened
         text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideNone;color:Theme.secondary
         x:root.artistFrom.x+(root.artistTo.x-root.artistFrom.x)*root.coverProgress
         y:root.artistFrom.y+(root.artistTo.y-root.artistFrom.y)*root.coverProgress
@@ -580,7 +617,10 @@ ApplicationWindow {
     }
     ImportDialog{id:importDialog;parent:root.popupLayer}
     PlaylistEditor{id:playlistEditor;parent:root.popupLayer;onCreated:key=>root.openPlaylist(key)}
-    LyricsWorkspace{id:lyricsWorkspace;parent:root.contentItem;z:6;onBatchInstrumentalRequested:keys=>batchInstrumental.review(keys)}
+    Loader {
+        id: lyricsWorkspaceLoader; anchors.fill: parent; z: 6; active: false
+        sourceComponent: LyricsWorkspace { onBatchInstrumentalRequested: keys => batchInstrumental.review(keys) }
+    }
     BatchInstrumentalDialog{id:batchInstrumental;parent:root.popupLayer}
     FeedbackPanel{id:feedbackPanel;parent:root.popupLayer;z:100;suspended:root.popupOpen;bottomInset:playerBar.visible?playerBar.height+edgeMargin:edgeMargin}
     Toast{id:toast;anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:playerBar.top;anchors.bottomMargin:16;z:20}

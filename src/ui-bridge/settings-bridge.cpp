@@ -54,6 +54,14 @@ bool systemDark() {
 
 SettingsBridge::SettingsBridge(Library *library, QObject *parent, SystemThemeReader systemTheme)
     : QObject(parent), m_library(library), m_store(library), m_appearance(library), m_systemTheme(std::move(systemTheme)) {
+    // Invalidate before QML handles the existing notification, including live previews.
+    connect(this, &SettingsBridge::settingsChanged, this, &SettingsBridge::invalidateCaches);
+    connect(library, &Library::settingsUpdated, this, [this](const QStringList &keys) {
+        static const QStringList relevant{"theme", "threshold", "closeToTray", "showLyricTranslation",
+            "playerCoverBackground", "lyricColor", "qml.reduceMotion", "mutedBold", "songColumnWidths",
+            "shortcuts", "uiFont", "windowWidth", "windowHeight", "windowMaximized", "appearanceHistory"};
+        for (const auto &key : keys) if (relevant.contains(key)) { invalidateCaches(); break; }
+    });
     resetDraft();
     updateFont();
     if (auto *app = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
@@ -73,7 +81,8 @@ SettingsBridge::~SettingsBridge() {
 QVariantList SettingsBridge::changelog() const {QFile file(":/changelog.json");return file.open(QIODevice::ReadOnly)?summarizedChangelog(QJsonDocument::fromJson(file.readAll()).array()).toVariantList():QVariantList();}
 
 QVariantMap SettingsBridge::values() const {
-    return {{"theme", m_store.get("theme", 0).toInt()}, {"threshold", m_store.get("threshold", 80).toInt()},
+    if (m_valuesCache) return *m_valuesCache;
+    m_valuesCache = QVariantMap{{"theme", m_store.get("theme", 0).toInt()}, {"threshold", m_store.get("threshold", 80).toInt()},
             {"closeToTray", m_store.get("closeToTray", false).toBool()},
             {"showLyricTranslation", m_store.get("showLyricTranslation", true).toBool()},
             {"playerCoverBackground", m_store.get("playerCoverBackground", true).toBool()},
@@ -86,10 +95,12 @@ QVariantMap SettingsBridge::values() const {
             {"windowBounds", QVariantMap{{"width", m_store.get("windowWidth", 1240).toInt()},
                                           {"height", m_store.get("windowHeight", 790).toInt()},
                                           {"maximized", m_store.get("windowMaximized", false).toBool()}}}};
+    return *m_valuesCache;
 }
 
 QVariantMap SettingsBridge::palette() const {
-    const int theme = m_preview.isEmpty() ? m_store.get("theme", 0).toInt() : m_preview["preset"].toInt(3);
+    if (m_paletteCache) return *m_paletteCache;
+    const int theme = m_preview.isEmpty() ? values().value("theme").toInt() : m_preview["preset"].toInt(3);
     const bool custom = theme == 3;
     const auto appearance = m_preview.isEmpty() ? m_appearance.active() : m_preview;
     bool dark = theme == 1 || (theme == 2 && (m_systemTheme ? m_systemTheme() : systemDark()));
@@ -127,7 +138,7 @@ QVariantMap SettingsBridge::palette() const {
     const bool manual = progress["customProgressColors"].toBool();
     const auto progressFill = custom ? progress[manual ? "progressFill" : "recommendedProgressFill"].toString() : accent.name();
     const auto progressTrack = custom ? progress[manual ? "progressTrack" : "recommendedProgressTrack"].toString() : border.name();
-    return {{"dark", dark}, {"custom", custom}, {"background", background.name()}, {"panel", side.name()},
+    m_paletteCache = QVariantMap{{"dark", dark}, {"custom", custom}, {"background", background.name()}, {"panel", side.name()},
             {"card", card.name()}, {"footer", footer.name()}, {"accent", accent.name()},
             {"text", ink.name()}, {"sideText", sideInk.name()}, {"secondary", muted.name()}, {"border", border.name()},
             {"accentText", autoInk(accent).name()}, {"mutedBold", values().value("mutedBold").toBool()},
@@ -141,23 +152,31 @@ QVariantMap SettingsBridge::palette() const {
             {"blurRight", imageMode ? appearance["blurRight"].toDouble() : 0.},
             {"blurFooter", imageMode ? appearance["blurFooter"].toDouble(appearance["blurRight"].toDouble()) : 0.},
             {"blurExpanded", custom ? appearance["blurExpanded"].toDouble(15) : 25.}};
+    return *m_paletteCache;
 }
 
 QVariantList SettingsBridge::appearances() const {
+    if (m_appearancesCache) return *m_appearancesCache;
     QVariantList rows;
-    for (const auto &value : m_appearance.state()["items"].toArray()) {
+    const auto state = m_appearance.state();
+    for (const auto &value : state["items"].toArray()) {
         auto item = value.toObject().toVariantMap();
-        item["active"] = value.toObject()["id"] == m_appearance.state()["active"];
+        item["active"] = value.toObject()["id"] == state["active"];
         const auto left = m_appearance.imagePath(value.toObject(), "left");
         const auto right = value.toObject()["shareLR"].toBool() ? left : m_appearance.imagePath(value.toObject(), "right");
         item["leftImageUrl"] = left.isEmpty() ? QUrl() : QUrl::fromLocalFile(left);
         item["rightImageUrl"] = right.isEmpty() ? QUrl() : QUrl::fromLocalFile(right);
         rows.append(item);
     }
-    return rows;
+    m_appearancesCache = rows;
+    return *m_appearancesCache;
+}
+void SettingsBridge::invalidateCaches() {
+    m_valuesCache.reset(); m_paletteCache.reset(); m_appearancesCache.reset();
 }
 void SettingsBridge::message(const QString &value) { m_status = value; emit statusChanged(); }
 void SettingsBridge::resetDraft() {
+    invalidateCaches();
     const auto preferences = values();
     m_draft = {};
     for (const auto &key : preferenceKeys()) m_draft[key] = QJsonValue::fromVariant(preferences.value(key));
@@ -224,7 +243,7 @@ void SettingsBridge::updateFont() {
     if (m_fontId >= 0) m_fontFamily = QFontDatabase::applicationFontFamilies(m_fontId).value(0);
 }
 QString SettingsBridge::fontFamilyFor(const QString &region) const {
-    return !m_fontFamily.isEmpty() && m_store.get("uiFont").toObject()[region].toBool() ? m_fontFamily : QString();
+    return !m_fontFamily.isEmpty() && values().value("uiFont").toMap().value(region).toBool() ? m_fontFamily : QString();
 }
 bool SettingsBridge::saveFont(const QUrl &source, const QVariantMap &regions) {
     QJsonObject font;

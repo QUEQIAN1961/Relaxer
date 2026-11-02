@@ -169,7 +169,7 @@ ColumnLayout {
                         model: aiBridge.defaultModels
                         textRole: "label"
                         valueRole: "id"
-                        currentIndex: Math.max(0, indexOfValue(aiBridge.draft.modelId))
+                        currentValue: model.some(row => row.id === aiBridge.draft.modelId) ? aiBridge.draft.modelId : ""
                         enabled: aiBridge.draft.providerId.length > 0
                         onActivated: page.saveField("modelId", currentValue)
 
@@ -185,7 +185,7 @@ ColumnLayout {
                         model: aiBridge.defaultThinkingChoices
                         textRole: "label"
                         valueRole: "id"
-                        currentIndex: indexOfValue(page.effortValue(false))
+                        currentValue: page.effortValue(false)
                         enabled: aiBridge.defaultThinkingEditable || aiBridge.draft.thinkingEnabled
                         onActivated: aiBridge.setThinkingEffort(false, currentValue)
                     }
@@ -268,7 +268,7 @@ ColumnLayout {
                         model: aiBridge.translationModels
                         textRole: "label"
                         valueRole: "id"
-                        currentIndex: Math.max(0, indexOfValue(aiBridge.draft.translationModelId))
+                        currentValue: model.some(row => row.id === aiBridge.draft.translationModelId) ? aiBridge.draft.translationModelId : ""
                         enabled: !aiBridge.draft.translationUsesDefaults && aiBridge.draft.translationProviderId.length > 0
                         onActivated: page.saveField("translationModelId", currentValue)
                     }
@@ -282,7 +282,7 @@ ColumnLayout {
                         model: aiBridge.translationThinkingChoices
                         textRole: "label"
                         valueRole: "id"
-                        currentIndex: indexOfValue(page.effortValue(true))
+                        currentValue: page.effortValue(true)
                         enabled: !aiBridge.draft.translationUsesDefaults && (aiBridge.translationThinkingEditable || aiBridge.draft.translationThinkingEnabled)
                         onActivated: aiBridge.setThinkingEffort(true, currentValue)
                     }

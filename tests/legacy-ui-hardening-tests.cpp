@@ -50,8 +50,8 @@ private slots:
     void actualQmlDialogsRouteAndSafeNotification(){
         QTemporaryDir d;Library lib(d.filePath("data"));QVERIFY(lib.open());const auto a=search_fixture::seed(lib);QVERIFY(lib.saveLyricsPreservingText(a.id,replacement_fixture::bilingual()));
         QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *root=w->contentItem();auto *bridge=shell.lyricsSearchBridge();
-        auto *ws=c4c5_fixture::visual(root,"lyricsWorkspace");QVERIFY(ws);QVERIFY(!ws->isVisible());
-        QVERIFY(bridge->requestLocalImport(QString::number(a.id)));QTRY_VERIFY(ws->isVisible());QVERIFY(!ws->property("fileEditToken").toString().isEmpty());
+        QVERIFY(!c4c5_fixture::visual(root,"lyricsWorkspace"));
+        QVERIFY(bridge->requestLocalImport(QString::number(a.id)));auto *ws=c4c5_fixture::visual(root,"lyricsWorkspace");QVERIFY(ws);QTRY_VERIFY(ws->isVisible());QVERIFY(!ws->property("fileEditToken").toString().isEmpty());
         auto *picker=w->findChild<QObject *>("lyricsImportDialog");QVERIFY(picker);QTRY_VERIFY(picker->property("visible").toBool());QVERIFY(QMetaObject::invokeMethod(picker,"close"));
         const auto path=d.filePath("changed.lrc");QVERIFY(write(path,"[00:01.00]New original\n[00:02.00]New words\n"));
         QVERIFY(!bridge->importLocalLyrics(QUrl::fromLocalFile(path),true,ws->property("fileEditToken").toString()));auto *replace=w->findChild<QObject *>("lyricsTranslationConflict");

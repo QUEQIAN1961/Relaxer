@@ -95,6 +95,7 @@ class Library : public QObject {
     void querySucceeded(const QString &query) const;
     void changed();
     void statsChanged();
+    void settingsUpdated(const QStringList &keys);
 
   private:
     bool artworkMetadataMatches(const ArtworkResult &result) const;

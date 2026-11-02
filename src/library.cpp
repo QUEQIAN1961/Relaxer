@@ -756,9 +756,11 @@ bool Library::setTranslationJudgment(qint64 id,TranslationJudgment judgment) {
     if(ok)notifyChanged();return ok;
 }
 bool Library::setSetting(const QString &k, const QJsonValue &v) {
-    return exec(
+    const bool ok = exec(
         "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         {k, QString::fromUtf8(QJsonDocument(QJsonArray{v}).toJson(QJsonDocument::Compact))});
+    if (ok) emit settingsUpdated({k});
+    return ok;
 }
 bool Library::setSettings(const QJsonObject &values) {
     if (!m_db.transaction()) {
@@ -766,7 +768,8 @@ bool Library::setSettings(const QJsonObject &values) {
         return false;
     }
     for (auto it = values.begin(); it != values.end(); ++it)
-        if (!setSetting(it.key(), it.value())) {
+        if (!exec("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                  {it.key(), QString::fromUtf8(QJsonDocument(QJsonArray{it.value()}).toJson(QJsonDocument::Compact))})) {
             m_db.rollback();
             return false;
         }
@@ -775,6 +778,7 @@ bool Library::setSettings(const QJsonObject &values) {
         m_db.rollback();
         return false;
     }
+    emit settingsUpdated(values.keys());
     return true;
 }
 Session Library::startSession(qint64 id, qint64 duration) {

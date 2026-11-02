@@ -59,6 +59,12 @@ static bool selfTest(Library &lib) {
     return lib.deletePlaylist(list) && lib.remove({id});
 }
 int main(int argc, char **argv) {
+    // Relaxer is audio-only. Avoid probing video decoding/encoding devices at
+    // media initialization; keep Qt Quick's own graphics acceleration intact.
+    if (!qEnvironmentVariableIsSet("QT_FFMPEG_DECODING_HW_DEVICE_TYPES"))
+        qputenv("QT_FFMPEG_DECODING_HW_DEVICE_TYPES", ",");
+    if (!qEnvironmentVariableIsSet("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES"))
+        qputenv("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES", ",");
     UiRunDiagnostics diagnostics;
     QApplication app(argc, argv);
     diagnostics.mark("qtInitializedMs");

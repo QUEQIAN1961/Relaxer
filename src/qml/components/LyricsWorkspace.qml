@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import QtQuick.Dialogs
 import "../theme"
 
@@ -11,6 +12,7 @@ Page {
     anchors.fill: parent
     clip: true
     focus: visible
+    readonly property bool presentationActive: !Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized)
     property bool opened: false
     property real reveal: 0
     readonly property real transitionOffset: -7 * (1 - reveal)
@@ -49,7 +51,7 @@ Page {
                 ctx.globalAlpha = .18; ctx.beginPath(); ctx.arc(width / 2, height / 2, r, 0, 2 * Math.PI); ctx.stroke()
                 ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(width / 2, height / 2, r, -Math.PI / 2, Math.PI); ctx.stroke()
             }
-            NumberAnimation on rotation { from: 0; to: 360; duration: 850; loops: Animation.Infinite; running: spinner.running && spinner.visible }
+            NumberAnimation on rotation { from: 0; to: 360; duration: 850; loops: Animation.Infinite; running: spinner.running && spinner.visible && workspace.presentationActive }
         }
     }
     property var selectedTracks: []

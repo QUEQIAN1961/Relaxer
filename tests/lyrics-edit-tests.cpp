@@ -226,7 +226,7 @@ private slots:
     void qmlOffsetAndWorkspaceBatchDialogs(){
         QTemporaryDir d;Library l(d.filePath("data"));QVERIFY(l.open());auto t=seed(l,"ui-offset");QVERIFY(l.saveLyricsPreservingText(t.id,bilingual()));
         QmlShell shell(&l,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));auto *bridge=shell.lyricsSearchBridge();
-        QVERIFY(bridge->setTargetTracks({QString::number(t.id)},false,true));auto *ws=visual(w->contentItem(),"lyricsWorkspace");QVERIFY(ws);QVERIFY(QMetaObject::invokeMethod(ws,"open"));
+        QVERIFY(bridge->setTargetTracks({QString::number(t.id)},false,true));QVERIFY(QMetaObject::invokeMethod(w,"ensureLyricsWorkspace"));auto *ws=visual(w->contentItem(),"lyricsWorkspace");QVERIFY(ws);QVERIFY(QMetaObject::invokeMethod(ws,"open"));
         auto *open=visual(w->contentItem(),"lyricsFileOffsetButton");QVERIFY(click(w,open));auto *dialog=w->findChild<QObject *>("lyricsFileOffsetDialog");QVERIFY(dialog);QTRY_VERIFY(dialog->property("opened").toBool());
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!dialog->property("visible").toBool());QVERIFY(ws->isVisible());QCOMPARE(read(l,t.id),bilingual());
         QVERIFY(click(w,open));QTRY_VERIFY(dialog->property("opened").toBool());auto *amount=visual(w->contentItem(),"lyricsFileOffsetAmount");QVERIFY(amount);

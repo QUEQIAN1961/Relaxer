@@ -32,7 +32,9 @@ Item {
         settingsBridge.chooseAppearanceColor(key, page.Window.window)
     }
     function chooseImage(key) { imageKey = key; imagePicker.open() }
-    onVisibleChanged: if (!visible) settingsBridge.discardAppearance()
+    property bool initialized: false
+    Component.onCompleted: initialized = true
+    onVisibleChanged: if (initialized && !visible) settingsBridge.discardAppearance()
 
     ColumnLayout {
       anchors.fill: parent; anchors.leftMargin: 34; anchors.rightMargin: 34

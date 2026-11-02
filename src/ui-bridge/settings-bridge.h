@@ -9,6 +9,7 @@
 #include <QUrl>
 #include <QPointer>
 #include <functional>
+#include <optional>
 
 class QColorDialog;
 
@@ -94,6 +95,9 @@ private:
     QString m_fontFamily;
     QPointer<QColorDialog> m_colorDialog;
     quint64 m_appearanceSession = 0;
+    mutable std::optional<QVariantMap> m_valuesCache, m_paletteCache;
+    mutable std::optional<QVariantList> m_appearancesCache;
+    void invalidateCaches();
     void message(const QString &value);
     QString validatePreference(const QString &key, const QJsonValue &value) const;
     QString validate(const QJsonObject &value) const;

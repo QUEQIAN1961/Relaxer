@@ -6,6 +6,13 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QWheelEvent>
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#endif
 using namespace c4c5_fixture;
 namespace {
 QRectF bounds(QQuickItem *item) { return item->mapRectToScene(QRectF(QPointF(), item->size())); }
@@ -17,17 +24,84 @@ bool prepare(Fixture &f) {
     if (!f.ok) return false;
     auto *w=f.shell->window(); w->showNormal(); w->setGeometry(50,50,1240,790); w->requestActivate();
     if (!QTest::qWaitForWindowExposed(w)) return false;
-    f.shell->playbackBridge()->pause(); QTest::qWait(100); return true;
+    if (!QTest::qWaitFor([&] { return f.shell->facade()->playing(); })) return false;
+    f.shell->playbackBridge()->pause();
+    return QTest::qWaitFor([&] { return !f.shell->facade()->playing(); });
 }
 void shot(QQuickWindow *w, const QString &name) {
     const auto folder=qEnvironmentVariable("RELAXER_PHASE_E_SCREENSHOTS");
     if (folder.isEmpty()) return;
     QDir().mkpath(folder); w->grabWindow().save(QDir(folder).filePath(name+".png"));
 }
+QJsonObject memorySnapshot() {
+    QJsonObject result;
+#ifdef Q_OS_WIN
+    PROCESS_MEMORY_COUNTERS_EX info{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&info), sizeof(info))) {
+        result["workingSetMiB"] = double(info.WorkingSetSize) / 1048576.;
+        result["privateMiB"] = double(info.PrivateUsage) / 1048576.;
+    }
+#endif
+    return result;
+}
 }
 class PhaseEUiTests final : public QObject {
     Q_OBJECT
 private slots:
+    void pagesAreDeferredAndBackgroundKeepsUnsavedAppearance() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
+        for (const auto *name : {"settingsPage", "aiPage", "appearancePage", "versionLogPage", "lyricsWorkspace"})
+            QVERIFY2(!visual(root, name), name);
+        QVERIFY(f.shell->appBridge()->navigate(3));
+        QTRY_VERIFY(visual(root, "settingsPage"));
+        auto *settings=visual(root,"settingsPage");
+        QVERIFY(!visual(root,"aiPage")); QVERIFY(!visual(root,"appearancePage"));
+        QVERIFY(f.shell->appBridge()->navigate(0)); QVERIFY(f.shell->appBridge()->navigate(3));
+        QCOMPARE(visual(root,"settingsPage"),settings);
+        f.shell->settingsBridge()->beginAppearance();
+        w->setProperty("settingsSection","appearance");
+        QTRY_VERIFY(visual(root,"appearancePage"));
+        QVERIFY(f.shell->settingsBridge()->setAppearanceMode(3));
+        QVERIFY(f.shell->settingsBridge()->editAppearance("right","#335577"));
+        const auto draft=f.shell->settingsBridge()->appearanceDraft();
+        w->hide(); QTRY_VERIFY(w->property("backgrounded").toBool()); QTest::qWait(400);
+        QVERIFY(f.shell->settingsBridge()->appearanceDirty());
+        QCOMPARE(f.shell->settingsBridge()->appearanceDraft(),draft);
+        w->showNormal(); QTRY_VERIFY(!w->property("backgrounded").toBool());
+        QCOMPARE(f.shell->settingsBridge()->appearanceDraft(),draft);
+        f.shell->settingsBridge()->discardAppearance();
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void backgroundReleasesImagesAndRestoresWhileTransportContinues() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
+        auto *art=visual(root,"bottomCover"); QVERIFY(art);
+        QTRY_VERIFY(!art->property("displayedUrl").toUrl().isEmpty());
+        f.shell->facade()->toggle(); QTRY_VERIFY(f.shell->facade()->playing());
+        const auto track=f.shell->facade()->current().id;
+        const auto queue=f.shell->facade()->queue().items;
+        QTest::qWait(1200);
+        QJsonObject evidence{{"foreground",memorySnapshot()}};
+        const auto position=f.shell->facade()->position();
+        w->hide(); QTRY_VERIFY(w->property("backgrounded").toBool());
+        QTRY_VERIFY(art->property("displayedUrl").toUrl().isEmpty());
+        QTest::qWait(1600); evidence["hidden"]=memorySnapshot();
+        QVERIFY(f.shell->facade()->playing());
+        QVERIFY(f.shell->facade()->position()>position+500);
+        QCOMPARE(f.shell->facade()->current().id,track); QCOMPARE(f.shell->facade()->queue().items,queue);
+        w->showNormal(); QTRY_VERIFY(QTest::qWaitForWindowExposed(w));
+        QTRY_VERIFY(!art->property("displayedUrl").toUrl().isEmpty());
+        QTest::qWait(500); evidence["restored"]=memorySnapshot();
+        w->showMinimized(); QTRY_VERIFY(w->property("backgrounded").toBool());
+        QTRY_VERIFY(art->property("displayedUrl").toUrl().isEmpty());
+        QTest::qWait(500); evidence["minimized"]=memorySnapshot();
+        QVERIFY(f.shell->facade()->playing());
+        w->showNormal(); QTRY_VERIFY(!w->property("backgrounded").toBool());
+        QTRY_VERIFY(!art->property("displayedUrl").toUrl().isEmpty());
+        qInfo().noquote()<<"BACKGROUND_RESOURCE_EVIDENCE"<<QJsonDocument(evidence).toJson(QJsonDocument::Compact);
+        QTest::qWait(300); // Allow the restored Canvas image to reach a rendered frame.
+        shot(w,"background-restored");
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void songRowPlaybackIconsAreLargerAndFollowTransportState() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem(); auto *player=f.shell->facade();
         const auto key=QString::number(f.a.id);
@@ -56,8 +130,9 @@ private slots:
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         const auto missing=seed(f.library,"Missing lyrics","phase-e-missing"); QVERIFY(missing.id);
         QTRY_COMPARE(f.shell->libraryModel()->count(),3);
-        auto *workspace=visual(root,"lyricsWorkspace"); QVERIFY(workspace);
+        QVERIFY(!visual(root,"lyricsWorkspace"));
         QVERIFY(click(w,visual(root,"findMissingLyrics")));
+        auto *workspace=visual(root,"lyricsWorkspace"); QVERIFY(workspace);
         QVERIFY(workspace->isVisible()); QVERIFY(!visual(root,"contentHost")->isVisible()); QVERIFY(!visual(root,"playerBar")->isVisible());
         auto *body=qvariant_cast<QQuickItem *>(workspace->property("contentItem")); QVERIFY(body);
         const auto firstTop=bounds(body).top(); shot(w,"lyrics-entry-start");
@@ -195,6 +270,7 @@ private slots:
         QStringList keys{QString::number(f.a.id),QString::number(f.b.id)};
         for(int i=0;i<24;++i) { const auto track=seed(f.library,QString("Selection track %1").arg(i),QString("selection-%1").arg(i)); QVERIFY(track.id); keys.append(QString::number(track.id)); }
         QVERIFY(f.shell->lyricsSearchBridge()->setTargetTracks(keys,false,true));
+        QVERIFY(QMetaObject::invokeMethod(w,"ensureLyricsWorkspace"));
         auto *workspace=visual(root,"lyricsWorkspace"), *tracks=visual(root,"lyricsTargetTracks"); QVERIFY(workspace); QVERIFY(tracks);
         QVERIFY(QMetaObject::invokeMethod(workspace,"open")); QTest::qWait(300); QCOMPARE(tracks->property("count").toInt(),keys.size());
         auto *text=visual(root,"lyricsTargetText-"+keys.first()), *check=visual(root,"lyricsCheck-"+keys.first()); QVERIFY(text); QVERIFY(check);

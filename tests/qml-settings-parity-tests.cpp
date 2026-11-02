@@ -38,6 +38,34 @@ QVariantMap allRegions(bool value) {
 class QmlSettingsParityTests final : public QObject {
     Q_OBJECT
 private slots:
+    void committedSettingsRefreshCachedUiAndRollbackKeepsPreviousValues() {
+        Fixture f; QVERIFY(f.ok);
+        const auto original = f.bridge->values();
+        f.bridge->palette();
+        QSignalSpy committed(&f.library, &Library::settingsUpdated);
+        QVERIFY(f.library.setSettings({{"theme", 1}, {"threshold", 93}}));
+        QCOMPARE(committed.size(), 1);
+        QCOMPARE(f.bridge->values().value("threshold").toInt(), 93);
+        QCOMPARE(f.bridge->palette().value("background").toString(), QString("#19191e"));
+        QSqlDatabase db;
+        for (const auto &name : QSqlDatabase::connectionNames()) {
+            auto candidate = QSqlDatabase::database(name);
+            if (QFileInfo(candidate.databaseName()) == QFileInfo(f.library.absolute("relaxer.sqlite"))) db = candidate;
+        }
+        QVERIFY(db.isValid());
+        QSqlQuery query(db);
+        QVERIFY(query.exec("CREATE TEMP TRIGGER fail_setting BEFORE INSERT ON settings WHEN NEW.key='threshold' BEGIN SELECT RAISE(ABORT,'fixture'); END"));
+        QVERIFY(!f.library.setSettings({{"theme", 0}, {"threshold", 90}}));
+        QCOMPARE(committed.size(), 1); // No notification for a rolled-back batch.
+        QCOMPARE(f.bridge->values().value("theme").toInt(), 1);
+        QCOMPARE(f.library.setting("theme").toInt(), 1);
+        QVERIFY(query.exec("DROP TRIGGER fail_setting"));
+        QVERIFY(f.bridge->saveWindowState(1300, 850, false));
+        QCOMPARE(f.bridge->windowBounds().value("width").toInt(), 1300);
+        QVERIFY(f.bridge->setTheme(0));
+        QCOMPARE(f.bridge->palette().value("background").toString(), QString("#ffffff"));
+        QVERIFY(!original.isEmpty());
+    }
     void preferenceCommandsAreImmediateValidatedAndUseOriginalKeys() {
         Fixture f; QVERIFY(f.ok);
         QSignalSpy changed(f.bridge.get(), &SettingsBridge::settingsChanged);

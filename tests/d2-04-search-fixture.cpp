@@ -35,7 +35,7 @@ int main(int argc,char **argv){
     };
     QmlShell shell(&lib,nullptr,true,nullptr,{}, {},&network);if(!shell.load())return 68;
     auto *bridge=shell.lyricsSearchBridge();if(!bridge->setTargetTracks({QString::number(a.id),QString::number(b.id),QString::number(c.id)},false,true))return 69;
-    auto *workspace=c4c5_fixture::visual(shell.window()->contentItem(),"lyricsWorkspace");if(!workspace||!QMetaObject::invokeMethod(workspace,"open"))return 70;
+    QMetaObject::invokeMethod(shell.window(),"ensureLyricsWorkspace");auto *workspace=c4c5_fixture::visual(shell.window()->contentItem(),"lyricsWorkspace");if(!workspace||!QMetaObject::invokeMethod(workspace,"open"))return 70;
     const auto quitAfter=args.value("quit-after").toInt();if(quitAfter>0)QTimer::singleShot(quitAfter,&app,&QApplication::quit);
     QTextStream(stdout)<<"Controlled provider fixture; data="<<root<<"; no real provider calls\n";
     const int result=app.exec();return shell.shutdown()?result:71;

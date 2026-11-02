@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 Item {
     id: artwork
     property url file
@@ -18,12 +19,14 @@ Item {
     property real transition: 1
     property bool initialized: false
     property bool pendingTransition: false
+    readonly property bool presentationActive: !Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized)
     readonly property bool reduceMotion: settingsBridge.values.reduceMotion
     readonly property alias imageItem: pocket
     implicitWidth: 62
     implicitHeight: 62
     clip: true
     function updateImage() {
+        if (!presentationActive) return
         const next = String(imageUrl)
         if (next === String(displayedUrl)) return
         const previousDisplay = displayedUrl
@@ -44,6 +47,13 @@ Item {
             pocket.requestPaint()
         }
     }
+    function suspendImages() {
+        motion.stop(); pendingTransition = false; transition = 1
+        if (String(displayedUrl).length) pocket.unloadImage(displayedUrl)
+        if (String(outgoingUrl).length) pocket.unloadImage(outgoingUrl)
+        displayedUrl = ""; outgoingUrl = ""
+    }
+    onPresentationActiveChanged: if (initialized) { if (presentationActive) updateImage(); else suspendImages() }
     function retireOutgoing() {
         if (String(outgoingUrl).length && String(outgoingUrl) !== String(displayedUrl)) pocket.unloadImage(outgoingUrl)
         outgoingUrl = ""
@@ -62,6 +72,7 @@ Item {
         anchors.fill: parent
         renderStrategy: Canvas.Immediate
         onImageLoaded: {
+            if (!artwork.presentationActive) { artwork.suspendImages(); return }
             if (isImageLoaded(artwork.displayedUrl)) {
                 if (artwork.pendingTransition && !motion.running) motion.restart()
                 else if (!artwork.pendingTransition) artwork.retireOutgoing()
