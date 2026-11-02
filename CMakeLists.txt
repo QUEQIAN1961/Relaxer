@@ -195,6 +195,18 @@ relaxer_add_qt_test(relaxer_lyrics_replacement_policy relaxer_lyrics_replacement
 endif()
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Sql Multimedia ${RELAXER_QT_TEST_COMPONENT})
 add_library(relaxer_core src/artwork-recovery.cpp src/library.cpp src/storage/settings-store.cpp src/storage/appearance-store.cpp src/appearance-image.cpp src/importer.cpp src/import-coordinator.cpp src/lyrics.cpp src/lyrics-document-reader.cpp src/lyric-text.cpp src/playback.cpp src/midi-transport.cpp)
+target_sources(relaxer_core PRIVATE src/bass-midi-backend.cpp src/bass-midi-backend.h)
+set(RELAXER_MIDI_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.dependencies/midi" CACHE PATH "Prepared local BASS MIDI runtime")
+if(WIN32 AND EXISTS "${RELAXER_MIDI_RUNTIME_DIR}/runtime-midi.json")
+  add_custom_target(relaxer_midi_runtime
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/midi" "${CMAKE_BINARY_DIR}/licenses/midi"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/bass.dll" "${RELAXER_MIDI_RUNTIME_DIR}/bassmidi.dll" "${RELAXER_MIDI_RUNTIME_DIR}/runtime-midi.json" "${CMAKE_BINARY_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/midi/GeneralUser-GS.sf2" "${CMAKE_BINARY_DIR}/midi"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/BASS.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/BASSMIDI.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GeneralUser-GS-License.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GeneralUser-GS-README.md" "${CMAKE_BINARY_DIR}/licenses/midi")
+  add_dependencies(relaxer_core relaxer_midi_runtime)
+elseif(WIN32)
+  message(STATUS "MIDI runtime not staged: run python scripts/prepare-midi-runtime.py before MIDI playback")
+endif()
 target_include_directories(relaxer_core PUBLIC src)
 target_link_libraries(relaxer_core PUBLIC relaxer_domain relaxer_lyrics_replacement_policy Qt6::Core Qt6::Gui Qt6::Sql Qt6::Multimedia)
 if(WIN32)
@@ -412,6 +424,9 @@ endif()
 if(WIN32)
   if(BUILD_TESTING)
   add_executable(relaxer_midi_tests tests/midi-tests.cpp)
+  add_executable(relaxer_bass_midi_tests tests/bass-midi-tests.cpp)
+  target_link_libraries(relaxer_bass_midi_tests PRIVATE relaxer_core Qt6::Test)
+  relaxer_add_qt_test(relaxer_bass_midi relaxer_bass_midi_tests)
   target_link_libraries(relaxer_midi_tests PRIVATE relaxer_core Qt6::Test)
   relaxer_add_qt_test(relaxer_midi relaxer_midi_tests)
   add_executable(relaxer_midi_runtime_probe tests/midi-runtime-probe.cpp)

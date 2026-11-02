@@ -23,7 +23,7 @@
 namespace relaxer {
 Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     : QObject(p), m_library(l), m_player(this), m_decodeOnly(decodeOnly) {
-    m_midiBackend = std::make_unique<MidiTransport>(l->root());
+    m_midiBackend = std::make_unique<MidiTransport>(l->root(), MidiTransport::Sender{}, MidiTransport::PathResolver{}, decodeOnly);
     // Headless self-tests must not initialize an arbitrary physical audio driver.
     // Real application launches do not set this variable and keep normal audio.
     // QAudioOutput's constructor itself enumerates devices, so even an
@@ -320,6 +320,7 @@ void Playback::setVolume(int v) {
     if (m_shutdown) return;
     m_volume = qBound(0, v, 100);
     if (m_output) m_output->setVolume(float(m_volume) / 100);
+    if (!m_midiBackend->setVolume(m_volume) && m_midi) emit error(m_midiBackend->error());
     m_library->setSetting("volume", qBound(0, v, 100));
 }
 bool Playback::saveQueue() {
@@ -466,7 +467,7 @@ bool Playback::startMidi(const QString &path, bool autoplay) {
     Q_UNUSED(path);
     Q_UNUSED(autoplay);
     m_loading = false;
-    onError("MIDI 需要在 Windows 上使用系统合成器播放。");
+    onError("MIDI 播放需要 Windows BASSMIDI 运行库。");
     return false;
 #else
     if (!m_midiBackend->open(path)) {
@@ -474,6 +475,7 @@ bool Playback::startMidi(const QString &path, bool autoplay) {
         onError(m_midiBackend->error());
         return false;
     }
+    if (!m_midiBackend->setVolume(m_volume)) { onError(m_midiBackend->error()); return false; }
     m_midiDuration = m_midiBackend->duration();
     m_session.duration = m_midiDuration;
     m_library->saveSession(m_session, 0, m_threshold);

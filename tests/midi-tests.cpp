@@ -145,7 +145,7 @@ class MidiTests : public QObject {
         QVERIFY2(transport.open(input),
                  qPrintable(transport.error() + " open=" + transport.openedPath() +
                             " chars=" + QString::number(transport.openedPath().size())));
-        QVERIFY(transport.openedPath().size() < 128);
+        QCOMPARE(transport.openedPath(), QFileInfo(path).absoluteFilePath());
         QVERIFY(QFileInfo::exists(transport.openedPath()));
         QVERIFY(transport.duration() >= 990 && transport.duration() <= 1010);
         QVERIFY2(transport.close(), qPrintable(transport.error()));

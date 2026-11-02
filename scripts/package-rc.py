@@ -61,6 +61,19 @@ def assemble(source, build, baseline, destination):
     for binary, target in [('RelaxerPortable.exe', 'Relaxer.exe'), ('Relaxer.exe', 'runtime/Relaxer.exe'),
                            ('RelaxerQmlUi.dll', 'runtime/RelaxerQmlUi.dll')]:
         shutil.copy2(build / binary, stage / target)
+    midi_runtime = json.loads((build / 'runtime-midi.json').read_text(encoding='utf-8'))
+    for name, expected in midi_runtime['files'].items():
+        relative = PurePosixPath(name)
+        if relative.is_absolute() or '..' in relative.parts or '\\' in name or ':' in name:
+            raise ValueError('Unsafe MIDI runtime path')
+        path = build / name
+        if digest(path) != expected:
+            raise ValueError('MIDI runtime differs from its staged manifest: ' + name)
+        target = stage / 'runtime' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+    shutil.copy2(build / 'runtime-midi.json', stage / 'runtime/runtime-midi.json')
+    shutil.copy2(source / 'docs/MIDI-BASS.md', stage / 'MIDI-BASS.md')
     for name in ('LICENSE', 'LICENSE-NOTICE.txt', 'THIRD_PARTY_NOTICES.md'):
         shutil.copy2(source / name, stage / name)
     notes = source / 'docs/releases' / ('v' + version)
@@ -70,12 +83,14 @@ def assemble(source, build, baseline, destination):
         '本包自带运行依赖，不需要 Qt、编译环境或源码准备工具；保留完整 runtime 和配套清单。\n'
         '默认资料位于同级 data/，也可用 --data 指定独立目录。升级前退出旧程序并备份资料，先用副本验证。\n'
         '这是本地候选版，尚未发布 GitHub。更新与验证范围见 RELEASE-NOTES.md。\n'
+        'MIDI 使用 BASS/BASSMIDI 与 GeneralUser GS；当前仅用于本地非商业测试，分发许可说明见 MIDI-BASS.md。\n'
         '应用源码附件：Relaxer-' + display + '-Source.zip；第三方源码沿用已有 V0.2.2-GA 附件。\n', encoding='utf-8')
 
     metadata = dict(sourceCommit=frozen['commit'], sourceTree=frozen['tree'], sourceFingerprint=fingerprint,
                     displayVersion=display, fileVersion=version.split('-')[0] + '.0', entry='Relaxer.exe',
                     published=False, channel='RC', dependencyBaseline=baseline.name,
                     dependencyBaselineSHA256=BASELINE_SHA256)
+    metadata['midiDependencies'] = midi_runtime
     metadata['coreBinarySHA256'] = {'Relaxer.exe': core['RelaxerPortable.exe'],
                                    'runtime/Relaxer.exe': core['Relaxer.exe'],
                                    'runtime/RelaxerQmlUi.dll': core['RelaxerQmlUi.dll']}
@@ -86,6 +101,14 @@ def assemble(source, build, baseline, destination):
     components['displayVersion'] = display
     components['publicReleaseApproved'] = False
     components['sourceMaterials'] = 'Relaxer-' + display + '-Source.zip; Relaxer-V0.2.2-GA-Third-Party-Source.zip'
+    components['midiDistributionScope'] = midi_runtime['distribution']
+    for key, name, license_name in [('bass', 'BASS', 'LicenseRef-BASS-noncommercial'),
+                                     ('bassmidi', 'BASSMIDI', 'LicenseRef-BASSMIDI'),
+                                     ('soundfont', 'GeneralUser GS', 'LicenseRef-GeneralUser-GS')]:
+        components['packages'].append(dict(name=name, version=[midi_runtime[key]['version']],
+                                          licenses=[license_name], upstream=[midi_runtime[key]['url']]))
+    for name, component in [('bass.dll', 'BASS'), ('bassmidi.dll', 'BASSMIDI')]:
+        components['binaries'].append(dict(path='runtime/' + name, component=component))
     for package in components['packages']:
         if package['name'] == 'Relaxer':
             package['version'] = [display]

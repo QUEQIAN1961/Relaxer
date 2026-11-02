@@ -28,6 +28,9 @@ Windows x64 便携包名称为 `Relaxer-V0.2.3-RC-Win64.zip`。完整解压到�
 |0.2.0-GA|[Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.0-GA)|
 |0.2.0-rc2|[历史预发行版](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.0-rc2)|
 
+
+开发版 MIDI 使用 BASS/BASSMIDI 与 GeneralUser GS。构建 MIDI 支持前运行 `python scripts/prepare-midi-runtime.py`。当前集成为本地非商业测试，依赖准备与公开分发许可边界见 [MIDI-BASS.md](docs/MIDI-BASS.md)。
+
 ## 校验与源码
 
 应用源码附件为 `Relaxer-V0.2.3-RC-Source.zip`；第三方源码沿用正式 V0.2.2-GA 的既有附件。程序保留原有启动完整性校验，GitHub 自动 Source code 归档不是可运行播放器。

@@ -11,3 +11,5 @@ Local playback works offline. Online lyrics and optional translation use user-se
 See the [Chinese guide](README.md), [release notes](docs/releases/v0.2.3-RC/RELEASE-NOTES.md), and [build/source instructions](docs/releases/v0.2.3-RC/BUILD-AND-SOURCE.md). Historical releases and changelogs are preserved.
 
 Relaxer-authored code is GPL-3.0-only. Third-party code retains its own licenses, copyrights and applicable exceptions; retain all notices and accompanying corresponding source. This grant does not cover external music, artwork, lyrics or service content.
+
+The development MIDI backend uses BASS/BASSMIDI and GeneralUser GS. Run `python scripts/prepare-midi-runtime.py` before building MIDI support. This integration is for local non-commercial testing; dependency preparation and the unresolved public-distribution licensing scope are described in [MIDI-BASS.md](docs/MIDI-BASS.md).

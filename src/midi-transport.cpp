@@ -1,4 +1,6 @@
 #include "midi-transport.h"
+#include "bass-midi-backend.h"
+#include <QElapsedTimer>
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
@@ -33,24 +35,13 @@ QString shortPath(const QString &path) {
 #endif
     return QDir::toNativeSeparators(path);
 }
-quint32 nativeSend(const QString &command, QString *result) {
-#ifdef Q_OS_WIN
-    wchar_t buffer[512] = {};
-    const auto code = mciSendStringW(command.toStdWString().c_str(), buffer, 512, nullptr);
-    if (result)
-        *result = QString::fromWCharArray(buffer);
-    return code;
-#else
-    Q_UNUSED(command);
-    Q_UNUSED(result);
-    return 1;
-#endif
-}
 } // namespace
-MidiTransport::MidiTransport(QString root, Sender sender, PathResolver resolver)
+MidiTransport::MidiTransport(QString root, Sender sender, PathResolver resolver, bool decodeOnly)
     : m_root(std::move(root)), m_alias("rm" + QUuid::createUuid().toString(QUuid::Id128)),
-      m_sender(sender ? std::move(sender) : nativeSend),
-      m_resolver(resolver ? std::move(resolver) : shortPath) {}
+      m_sender(std::move(sender)), m_decodeOnly(decodeOnly),
+      m_resolver(resolver ? std::move(resolver) : shortPath) {
+    if (!m_sender) m_bass = std::make_unique<BassMidiBackend>();
+}
 MidiTransport::~MidiTransport() {
     if(!close())qWarning().noquote()<<"MIDI cleanup incomplete:"<<m_error<<"ownedCopy="<<m_temporaryPath;
 }
@@ -70,7 +61,7 @@ void MidiTransport::diagnostic(const QString &root, const QJsonObject &event) {
         return;
     auto value = event;
     value["time"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    value["backend"] = "Windows MCI sequencer";
+    if (!value.contains("backend")) value["backend"] = "BASSMIDI";
     file.write(QJsonDocument(value).toJson(QJsonDocument::Compact) + '\n');
 }
 void MidiTransport::clearError() const {
@@ -86,13 +77,18 @@ bool MidiTransport::fail(const QString &operation, const QString &message, quint
         QString("MIDI %1 失败（%2）：%3。诊断：data/logs/midi.jsonl").arg(operation).arg(code).arg(message);
     diagnostic(m_root, {{"operation", operation},
                         {"code", double(code)},
-                        {"errorDomain",domain==ErrorDomain::Local?"local":"native-mci"},
+                        {"errorDomain",domain==ErrorDomain::Local?"local":domain==ErrorDomain::NativeBass?"bassmidi":"native-mci"},
                         {"description", message},
                         {"originalPath", m_original},
                         {"openedPath", m_path},
                         {"exists", QFileInfo::exists(m_original)},
                         {"bytes", double(QFileInfo(m_original).size())}});
     return false;
+}
+bool MidiTransport::bassFailure() const {
+    const auto code = m_bass->errorCode();
+    return fail(m_bass->errorStage(), m_bass->error(), code ? code : LocalErrorBase | quint32(LocalError::Runtime),
+                code ? ErrorDomain::NativeBass : ErrorDomain::Local);
 }
 bool MidiTransport::send(const QString &operation, const QString &command, QString *result) const {
     const auto code = m_sender(command, result);
@@ -124,6 +120,16 @@ bool MidiTransport::open(const QString &path) {
     const auto header = source.peek(14);
     if (header.size() != 14 || header.left(4) != "MThd")
         return localFailure("header", "文件为空或不是 Standard MIDI File",LocalError::Header);
+    if (m_bass) {
+        source.close();
+        QElapsedTimer timer; timer.start();
+        if (!m_bass->open(m_original, m_decodeOnly || qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))) return bassFailure();
+        m_path = m_original; m_duration = m_bass->duration(); m_open = true; m_position = 0;
+        diagnostic(m_root, {{"operation", "open"}, {"originalPath", m_original}, {"openedPath", m_path},
+                            {"durationMs", double(m_duration)}, {"prepareMs", double(timer.elapsed())},
+                            {"soundfont", "GeneralUser GS 2.0.3"}});
+        return true;
+    }
     m_path = m_resolver(m_original);
     // The legacy Windows sequencer rejects long element names (275), including
     // valid 64-character imported hashes. A Unicode API alone does not fix this.
@@ -186,21 +192,33 @@ bool MidiTransport::open(const QString &path) {
     return true;
 }
 bool MidiTransport::play() {
+    if (m_bass) { if (!m_bass->play()) return bassFailure(); clearError(); return true; }
     if(!m_open||!send("play", "play " + m_alias))return false;
     clearError();return true;
 }
 bool MidiTransport::pause() {
+    if (m_bass) { if (!m_bass->pause()) return bassFailure(); clearError(); return true; }
     if(!m_open||!send("pause", "pause " + m_alias))return false;
     clearError();return true;
 }
 bool MidiTransport::seek(qint64 position) {
+    if (m_bass) { if (!m_bass->seek(position)) return bassFailure(); m_position = position; clearError(); return true; }
     if (!m_open || !send("seek", QString("seek %1 to %2").arg(m_alias).arg(position)))
         return false;
     m_position = position;
     clearError();
     return true;
 }
+bool MidiTransport::setVolume(int percent) {
+    if (m_bass && !m_bass->setVolume(percent)) return bassFailure();
+    return true;
+}
 qint64 MidiTransport::position() const {
+    if (m_bass) {
+        const auto position = m_bass->position();
+        if (m_bass->errorStage() == "position") bassFailure(); else m_position = position;
+        return m_position;
+    }
     QString result;
     if (m_open && send("position", "status " + m_alias + " position", &result)) {
         bool ok = false;
@@ -222,6 +240,11 @@ bool MidiTransport::cleanupCopy() {
     return false;
 }
 bool MidiTransport::close() {
+    if (m_bass) {
+        const bool ok = m_bass->close(); m_open = false; m_duration = 0; m_position = 0;
+        if (!ok) return bassFailure();
+        clearError(); return true;
+    }
     if (m_open) {
         send("stop", "stop " + m_alias);
         if (!send("close", "close " + m_alias)) {

@@ -27,7 +27,7 @@ OpenCC STCharacters 嵌入数据采用 Apache-2.0，原 LICENSE、AUTHORS、改�
 
 ## 对应源码、修改、构建与替换
 
-`Relaxer-V0.2.3-RC-Source.zip` 提供本候选版完整应用源码与打包/重建脚本。本版第三方运行文件沿用正式 V0.2.2-GA，字节保持一致；对应的精确第三方源归档、补丁、配方、原构建信息、锁、crate、通知和来源索引继续使用 `Relaxer-V0.2.2-GA-Third-Party-Source.zip`。公开发行时将完整对应源码与二进制放在同一 Release，提供同等访问；仅上游主页链接不替代对应源码。未签发书面要约。
+`Relaxer-V0.2.3-RC-Source.zip` 提供本候选版完整应用源码与打包/重建脚本。基础第三方运行文件沿用正式 V0.2.2-GA，字节保持一致；新增的本地 MIDI 依赖另见下节。基础依赖的精确第三方源归档、补丁、配方、原构建信息、锁、crate、通知和来源索引继续使用 `Relaxer-V0.2.2-GA-Third-Party-Source.zip`。公开发行时将完整对应源码与二进制放在同一 Release，提供同等访问；仅上游主页链接不替代对应源码。未签发书面要约。
 
 允许依各库许可证修改、调试和替换。ABI 兼容 DLL 可由拥有者主动执行完整源码中的 `scripts/ga01-update-manifest.py --package <目录> --acknowledge-modified-package` 更新校验清单；不需要厂商密钥或联网批准。应用修改须从同源重建应用、QML DLL 和根入口。没有新增禁止为调试库修改而逆向工程的条款；适用 LGPL/GPL 的源代码、通知、用户权利及必要重链接材料按实际组合处理。
 
@@ -55,3 +55,9 @@ OpenCC STCharacters 嵌入数据采用 Apache-2.0，原 LICENSE、AUTHORS、改�
 原始 librsvg Cargo.lock 未取得；重放锁按重放材料标识。原 CI 的实际编译版本、registry checksum、647 个精确 crate 和配方支撑来源/构建依赖对应；该限制影响原构建的逐字节复现，未发现因此缺失的特定 covered source 或用户修改权利，不以补造旧锁或更新 crate 代替原件。
 
 MPL covered source 和所有适用 GPL/LGPL 对应源码的获取方式：在同一 GitHub Release 下载完整应用源码及第三方源码两个附件，链接入口为 https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.2-GA 。二进制公开时必须同时提供这两份附件及校验值；GitHub 自动源码归档不包含全部第三方材料。此为网络同址提供方式，不使用书面要约。
+
+## 开发版 MIDI 本地依赖
+
+本地性能测试新增 BASS 2.4.18.3、BASSMIDI 2.4.16（Un4seen Developments Ltd.）及 GeneralUser GS 2.0.3（S. Christian Collins）。BASS 免费使用限非商业条件，BASSMIDI 随 BASS 使用；它们是专有运行库，不被既有 GPL/LGPL 声明覆盖。GeneralUser GS 使用作者自定许可，保留原文，包括部分早期采样来源的不确定性说明。运行库及音色原文位于运行目录的 `licenses/midi/`。
+
+该集成目前仅作个人本地非商业测试。公开分发的 GPL 兼容性尚未解决，未改动项目 LICENSE 或授予链接例外，也未更新正式版本归档。准备方法、固定来源与当前边界见 [docs/MIDI-BASS.md](docs/MIDI-BASS.md) 和 `resources/midi-dependencies.json`。既有 V0.2.2-GA 第三方源码附件不包含这些新增专有运行库；不能据此声称新增部分已取得 GPL 源码或公开发行许可。
