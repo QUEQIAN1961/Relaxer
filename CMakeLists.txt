@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Relaxer VERSION 0.2.2 LANGUAGES CXX)
+project(Relaxer VERSION 0.2.3 LANGUAGES CXX)
 include(CTest)
 set(RELAXER_QT_TEST_COMPONENT)
 if(BUILD_TESTING)

@@ -27,7 +27,7 @@ OpenCC STCharacters 嵌入数据采用 Apache-2.0，原 LICENSE、AUTHORS、改�
 
 ## 对应源码、修改、构建与替换
 
-同批 `Relaxer-V0.2.2-GA-Source.zip` 提供完整应用源码与打包/重建脚本；`Relaxer-V0.2.2-GA-Third-Party-Source.zip` 提供对应的精确第三方源归档、补丁、配方、原构建信息、锁、crate、通知和来源索引。公开发行时将完整对应源码与二进制放在同一 Release，提供同等访问；仅上游主页链接不替代对应源码。未签发书面要约。
+`Relaxer-V0.2.3-RC-Source.zip` 提供本候选版完整应用源码与打包/重建脚本。本版第三方运行文件沿用正式 V0.2.2-GA，字节保持一致；对应的精确第三方源归档、补丁、配方、原构建信息、锁、crate、通知和来源索引继续使用 `Relaxer-V0.2.2-GA-Third-Party-Source.zip`。公开发行时将完整对应源码与二进制放在同一 Release，提供同等访问；仅上游主页链接不替代对应源码。未签发书面要约。
 
 允许依各库许可证修改、调试和替换。ABI 兼容 DLL 可由拥有者主动执行完整源码中的 `scripts/ga01-update-manifest.py --package <目录> --acknowledge-modified-package` 更新校验清单；不需要厂商密钥或联网批准。应用修改须从同源重建应用、QML DLL 和根入口。没有新增禁止为调试库修改而逆向工程的条款；适用 LGPL/GPL 的源代码、通知、用户权利及必要重链接材料按实际组合处理。
 

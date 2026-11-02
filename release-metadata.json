@@ -1,8 +1,14 @@
 {
   "applicationName": "Relaxer",
-  "latestStableTag": "v0.2.1-GA",
+  "latestStableTag": "v0.2.2-GA",
   "repository": "https://github.com/QUEQIAN1961/Relaxer",
   "releases": [
+    {
+      "tag": "v0.2.2-GA",
+      "status": "stable",
+      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.2-GA",
+      "notes": "docs/releases/v0.2.2-GA/RELEASE-NOTES.md"
+    },
     {
       "tag": "v0.2.1-GA",
       "status": "stable",
@@ -29,8 +35,9 @@
     }
   ],
   "currentCandidate": {
-    "version": "V0.2.2-RC7",
-    "status": "private-test-unverified",
+    "version": "V0.2.3-RC",
+    "status": "local-release-candidate",
+    "published": false,
     "publicDistributionApproved": false
   }
 }
