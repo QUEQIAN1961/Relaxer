@@ -100,7 +100,8 @@ Page {
     }
     Connections {
         target: lyricsSearchBridge
-        function onChanged() { workspace.syncTargets() }
+        // Resetting targets during close must not replace the outgoing list.
+        function onChanged() { if (workspace.opened) workspace.syncTargets() }
         function onReplacementRequested(token, reason) {
             replaceConfirm.exactToken = token
             replaceConfirm.reason = reason
@@ -261,7 +262,7 @@ Page {
             color: Theme.panel; radius: 10
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 10; spacing: 8
-                Label { text: "歌曲 · " + workspace.visibleKeys().length + (multiSelect.checked ? " · 已选 " + workspace.searchKeys().length : ""); color: Theme.text; font.weight: Font.DemiBold }
+                Label { objectName: "lyricsTargetSummary"; text: "歌曲 · " + workspace.visibleKeys().length + (multiSelect.checked ? " · 已选 " + workspace.searchKeys().length : ""); color: Theme.text; font.weight: Font.DemiBold }
                 Item {
                     id:filters; objectName: "lyricsFilterRow"; Layout.fillWidth: true; implicitHeight: 28
                     readonly property bool narrow: width < 260
@@ -269,7 +270,7 @@ Page {
                     readonly property real gap: 6 - 3 * selectionReveal
                     readonly property real allWidth: narrow ? 44 : 58
                     readonly property real buttonSpace: width - 2 * gap - (allWidth + 3) * selectionReveal
-                    Behavior on selectionReveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 180; easing.type: Easing.OutCubic } }
+                    Behavior on selectionReveal { NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 240; easing.type: Easing.OutCubic } }
                     FilterToggle { id: missingLyrics; objectName: "lyricsMissingOnly"; x:0; width:filters.buttonSpace*.35; text: "无歌词"; onToggled: if (checked) missingTranslation.checked = false }
                     FilterToggle { id: missingTranslation; objectName: "lyricsMissingTranslationOnly"; x:missingLyrics.width+filters.gap; width:filters.buttonSpace*.35; text: "无翻译"; onToggled: if (checked) missingLyrics.checked = false }
                     FilterToggle { id: multiSelect; objectName: "lyricsMultiSelect"; x:missingTranslation.x+missingTranslation.width+filters.gap; width:filters.buttonSpace*.3; text: "多选"; onToggled: if (!checked) workspace.selectedTracks = [] }
@@ -328,10 +329,12 @@ Page {
                         ToolTip.delay: 700
                         background: Rectangle { radius: 7; color: parent.highlighted ? Theme.selected : parent.hovered ? Theme.hover : "transparent" }
                         contentItem: Item {
-                            implicitHeight: 54
-                            CheckBox { objectName: "lyricsCheck-" + trackKey; x: 0; anchors.verticalCenter: parent.verticalCenter; width: 28; visible: multiSelect.checked; checked: workspace.selectedTracks.indexOf(trackKey) >= 0; onToggled: workspace.toggleTrack(trackKey) }
+                            implicitHeight: 54; clip: true
+                            // All rows follow one transition; newly created rows inherit
+                            // its settled position instead of replaying an entrance.
+                            CheckBox { objectName: "lyricsCheck-" + trackKey; x: -30 * (1 - filters.selectionReveal); opacity: filters.selectionReveal; anchors.verticalCenter: parent.verticalCenter; width: 28; visible: filters.selectionReveal > 0; checked: workspace.selectedTracks.indexOf(trackKey) >= 0; onToggled: workspace.toggleTrack(trackKey) }
                             Item {
-                                id: stateSlot; x: multiSelect.checked ? 30 : 0; anchors.verticalCenter: parent.verticalCenter; width: 26; height: 26
+                                id: stateSlot; x: 30 * filters.selectionReveal; anchors.verticalCenter: parent.verticalCenter; width: 26; height: 26
                                 SearchSpinner { objectName: "lyricsStateSpinner-" + trackKey; anchors.fill: parent; visible: searchState === "searching"; running: visible }
                                 UiText { objectName: "lyricsStateIcon-" + trackKey; anchors.fill: parent; text: searchState === "complete" ? "✓" : searchState === "choice" ? "⚠" : ""; visible: text.length > 0; color: searchState === "complete" ? "#249c58" : "#d78816"; font.pixelSize: 20; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }

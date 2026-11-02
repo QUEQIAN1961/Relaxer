@@ -27,7 +27,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.fillHeight: true
         contentWidth: availableWidth
-        contentHeight: settingsContent.implicitHeight
+        contentHeight: settingsContent.implicitHeight + 16
         clip: true
         function stopAtEdges() { if (contentItem && contentItem.boundsBehavior !== undefined) { contentItem.boundsBehavior = Flickable.StopAtBounds; contentItem.boundsMovement = Flickable.StopAtBounds } }
         Component.onCompleted: Qt.callLater(stopAtEdges)
@@ -164,6 +164,7 @@ ColumnLayout {
             }
             ShortcutsPage { Layout.fillWidth: true }
             Rectangle {
+                objectName: "settingsAboutCard"
                 Layout.fillWidth: true
                 implicitHeight: about.implicitHeight + 40
                 radius: 14

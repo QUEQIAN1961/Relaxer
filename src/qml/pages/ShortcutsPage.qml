@@ -93,19 +93,26 @@ Rectangle {
                 }
             }
         }
-        UiText { Layout.fillWidth: true; text: uiIntegration.shortcutStatus; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
-        UiText { Layout.fillWidth: true; text: "录入后点击保存；输入文字时不触发应用内播放快捷键。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
-        Flow {
-            Layout.fillWidth: true
-            spacing: 8
-            ToggleButton {
-                objectName: "globalShortcutsEnabled"
-                text: "启用全局快捷键"
-                checked: page.configuration.globalEnabled
-                onClicked: { const copy = JSON.parse(JSON.stringify(page.configuration)); copy.globalEnabled = checked; page.configuration = copy; page.dirty = true }
+        RowLayout {
+            Layout.fillWidth: true; spacing: 16
+            ColumnLayout {
+                objectName: "shortcutsHelp"
+                Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 8
+                UiText { Layout.fillWidth: true; text: uiIntegration.shortcutStatus; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
+                UiText { Layout.fillWidth: true; text: "录入后点击保存；输入文字时不触发应用内播放快捷键。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
             }
-            ShellButton { objectName: "shortcutsReset"; text: "恢复默认"; onClicked: { page.configuration = settingsBridge.defaultShortcuts(); page.dirty = true } }
-            ShellButton { objectName: "shortcutsSave"; text: "保存快捷键"; onClicked: { if (uiIntegration.saveShortcuts(page.configuration)) page.load() } }
+            Row {
+                objectName: "shortcutsActions"
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter; spacing: 8
+                ToggleButton {
+                    objectName: "globalShortcutsEnabled"
+                    text: "启用全局快捷键"
+                    checked: page.configuration.globalEnabled
+                    onClicked: { const copy = JSON.parse(JSON.stringify(page.configuration)); copy.globalEnabled = checked; page.configuration = copy; page.dirty = true }
+                }
+                ShellButton { objectName: "shortcutsReset"; text: "恢复默认"; onClicked: { page.configuration = settingsBridge.defaultShortcuts(); page.dirty = true } }
+                ShellButton { objectName: "shortcutsSave"; text: "保存快捷键"; onClicked: { if (uiIntegration.saveShortcuts(page.configuration)) page.load() } }
+            }
         }
     }
 }

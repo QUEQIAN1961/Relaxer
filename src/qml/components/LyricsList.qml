@@ -112,19 +112,18 @@ Item {
                         color: row.scrollSelected ? Theme.text : Theme.secondary; font.pixelSize: 17
                     }
                 }
-                TapHandler { onTapped: if (lyricsModel.seekRow(row.index)) panel.returnCurrent() }
             }
           }
           Rectangle {
               objectName: "lyricsPreviewGuide"
               visible: panel.manualScroll && lyricsModel.timed && panel.previewIndex >= 0
               anchors.left: parent.left; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-              anchors.leftMargin: previewTime.width + 12; anchors.rightMargin: 20
+              anchors.leftMargin: 0; anchors.rightMargin: 20
               height: 1; color: Theme.text; opacity: .28
           }
           ShellButton {
               id: previewTime; objectName: "lyricsPreviewTime"
-              anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+              anchors.right: parent.left; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
               z: 3; visible: panel.manualScroll && lyricsModel.timed && panel.previewIndex >= 0
               text: {
                   const ms = panel.previewIndex >= 0 ? Number(lyricsModel.timestampAt(panel.previewIndex)) : 0

@@ -165,6 +165,53 @@ private slots:
         shot(w,"translation-toggle-button");
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
+    void multiSelectSlidesOnceAndClosingKeepsRowsStable() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
+        QStringList keys{QString::number(f.a.id),QString::number(f.b.id)};
+        for(int i=0;i<24;++i) { const auto track=seed(f.library,QString("Selection track %1").arg(i),QString("selection-%1").arg(i)); QVERIFY(track.id); keys.append(QString::number(track.id)); }
+        QVERIFY(f.shell->lyricsSearchBridge()->setTargetTracks(keys,false,true));
+        auto *workspace=visual(root,"lyricsWorkspace"), *tracks=visual(root,"lyricsTargetTracks"); QVERIFY(workspace); QVERIFY(tracks);
+        QVERIFY(QMetaObject::invokeMethod(workspace,"open")); QTest::qWait(300); QCOMPARE(tracks->property("count").toInt(),keys.size());
+        auto *text=visual(root,"lyricsTargetText-"+keys.first()), *check=visual(root,"lyricsCheck-"+keys.first()); QVERIFY(text); QVERIFY(check);
+        const auto initialX=text->x(); QVERIFY(!check->isVisible());
+        QVERIFY(click(w,visual(root,"lyricsMultiSelect"))); QTest::qWait(60);
+        QVERIFY(check->isVisible()); QVERIFY(check->x()>-30 && check->x()<0);
+        QVERIFY(check->opacity()>0 && check->opacity()<1); QVERIFY(text->x()>initialX && text->x()<initialX+30);
+        shot(w,"multiselect-slide-middle"); QTest::qWait(240); QCOMPARE(text->x(),initialX+30);
+        QVERIFY(QMetaObject::invokeMethod(tracks,"positionViewAtEnd")); QTest::qWait(60);
+        text=visual(root,"lyricsTargetText-"+keys.last()); check=visual(root,"lyricsCheck-"+keys.last()); QVERIFY(text); QVERIFY(check);
+        QCOMPARE(text->x(),initialX+30); QCOMPARE(check->x(),0.); QCOMPARE(check->opacity(),1.);
+        shot(w,"multiselect-scrolled");
+        QVERIFY(QMetaObject::invokeMethod(tracks,"positionViewAtBeginning")); QTest::qWait(60);
+        check=visual(root,"lyricsCheck-"+keys.first()); QVERIFY(check); QCOMPARE(check->x(),0.); QCOMPARE(check->opacity(),1.);
+        auto *summary=visual(root,"lyricsTargetSummary"); QVERIFY(summary); const auto caption=summary->property("text").toString();
+        QVERIFY(QMetaObject::invokeMethod(workspace,"close")); QTest::qWait(100); QVERIFY(workspace->isVisible());
+        QCOMPARE(summary->property("text").toString(),caption); QCOMPARE(tracks->property("count").toInt(),keys.size());
+        shot(w,"lyrics-exit-keeps-count"); QTRY_VERIFY(!workspace->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(workspace,"open")); QTest::qWait(300);
+        QCOMPARE(tracks->property("count").toInt(),f.shell->lyricsSearchBridge()->targetTracks().size());
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void lyricsSeekOnlyThroughLeftPreviewButton() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem(); auto *player=f.shell->facade();
+        QTRY_VERIFY(player->seekable()); QVERIFY(QMetaObject::invokeMethod(w,"showLyrics")); QTRY_COMPARE(w->property("playerProgress").toReal(),1.);
+        auto *panel=visual(root,"lyricsPanel"), *list=visual(root,"lyricsList"), *stamp=visual(root,"lyricsPreviewTime"); QVERIFY(panel); QVERIFY(list); QVERIFY(stamp);
+        for(const QSize size:{QSize(1000,660),QSize(1240,790)}) {
+            w->resize(size); player->seek(3000); QTRY_COMPARE(f.shell->lyricsModel()->currentIndex(),3);
+            QVERIFY(QMetaObject::invokeMethod(panel,"returnCurrent")); QTest::qWait(420);
+            QVERIFY(QMetaObject::invokeMethod(panel,"takeOver")); QTest::qWait(60);
+            list->setProperty("contentY",list->property("contentY").toReal()+400); QTest::qWait(80);
+            QVERIFY(stamp->isVisible()); QVERIFY(bounds(stamp).right()<=bounds(list).left()-11); QVERIFY(bounds(stamp).left()>=0);
+            const auto selected=panel->property("previewIndex").toInt(); QVERIFY(selected>3);
+            QQuickItem *row=nullptr; for(auto *item:delegates(list)) if(item->property("index").toInt()==selected) row=item; QVERIFY(row);
+            const auto before=player->position(); QVERIFY(click(w,row)); QTest::qWait(100);
+            QVERIFY(qAbs(player->position()-before)<100); QVERIFY(panel->property("manualScroll").toBool());
+            shot(w,size.width()==1000?"lyrics-left-preview-compact":"lyrics-left-preview-wide");
+            const auto time=f.shell->lyricsModel()->timestampAt(selected); QVERIFY(click(w,stamp));
+            QTRY_VERIFY(qAbs(player->position()-time)<250); QVERIFY(!panel->property("manualScroll").toBool());
+        }
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void feedbackStaysAbovePlayerAndHandsOffToAnimatedDetails() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         auto *notice=visual(root,"feedbackNotice"); auto *bar=visual(root,"playerBar"); QVERIFY(notice); QVERIFY(bar);
@@ -292,6 +339,15 @@ private slots:
         QCoreApplication::sendEvent(w,&wheel); QTest::qWait(300);
         QVERIFY(flick->property("contentY").toReal()<=end+1);
         shot(w,"compact-settings-bottom");
+        auto *about=visual(root,"settingsAboutCard"), *help=visual(root,"shortcutsHelp"), *actions=visual(root,"shortcutsActions"), *shortcuts=visual(root,"shortcutsPage");
+        QVERIFY(about); QVERIFY(help); QVERIFY(actions); QVERIFY(shortcuts);
+        for(const QSize size:{QSize(1240,790),QSize(1000,660)}) {
+            w->resize(size); QTest::qWait(80); flick->setProperty("contentY",qMax(0.,flick->property("contentHeight").toReal()-flick->height())); QTest::qWait(50);
+            QVERIFY(qAbs(bounds(scroll).bottom()-bounds(about).bottom()-16)<1);
+            QVERIFY(qAbs(bounds(help).center().y()-bounds(actions).center().y())<1);
+            QVERIFY(bounds(actions).left()>bounds(help).right()); QVERIFY(qAbs(bounds(actions).right()-bounds(shortcuts).right()+20)<1);
+            shot(w,size.width()==1240?"settings-actions-wide":"settings-actions-compact");
+        }
         flick->setProperty("contentY",0); QTest::qWait(60);
         QVERIFY(click(w,visual(root,"editAppearance"))); QTest::qWait(280);
         QVERIFY(click(w,visual(root,"appearanceMode4"))); QTest::qWait(120);
