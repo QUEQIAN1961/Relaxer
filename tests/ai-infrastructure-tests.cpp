@@ -40,6 +40,7 @@ class AiInfrastructureTests final : public QObject {
     void operationBudgetsAllowSlowTranslationWithoutExtendingModelLookup();
     void completionTimeoutsAreSingleTerminalAndIdentifyTheirLayer();
     void compatibleProvidersKeepCredentialsAndPayloadsSeparate();
+    void kimiK3UsesRequiredReasoningAndCompletionTokenBudget();
 
 };
 
@@ -862,6 +863,44 @@ void AiInfrastructureTests::compatibleProvidersKeepCredentialsAndPayloadsSeparat
         } else {
             QCOMPARE(payload["enable_thinking"].toBool(true), false);
             QVERIFY(!payload.contains("thinking"));
+        }
+    }
+}
+
+void AiInfrastructureTests::kimiK3UsesRequiredReasoningAndCompletionTokenBudget() {
+    for (const auto &id : {QString("kimi-k3"),QString("kimi-k3.1-pro"),QString("kimi-k3.1-pro-highspeed")}) {
+        HttpMock server; QVERIFY(server.listen());
+        DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl(),"kimi"});
+        FakeCredentials credentials; QVERIFY(credentials.store("kimi","fake-k3-test-key",nullptr));
+        ProviderRegistry providers; QVERIFY(providers.add(&provider)); ModelRegistry models;
+        AiRequestCoordinator coordinator(&providers,&credentials,&models);
+        QSignalSpy catalogs(&coordinator,&AiRequestCoordinator::modelsFinished);
+        server.enqueue(200,QJsonDocument(QJsonObject{{"object","list"},{"data",QJsonArray{
+            QJsonObject{{"id",id},{"context_window",1048576},{"max_output_tokens",1048576}},QJsonObject{{"id","kimi-future"}}}}}).toJson());
+        QVERIFY(coordinator.fetchModels("kimi")); QTRY_COMPARE(catalogs.size(),1);
+        const auto live=qvariant_cast<QList<ModelInfo>>(catalogs[0][2]); QCOMPARE(live.size(),2); models.applyLiveCatalog("kimi",live);
+        const auto *model=models.find("kimi",id); QVERIFY(model); QVERIFY(model->capabilities.thinkingRequired);
+        QCOMPARE(model->capabilities.contextWindow,qint64(1048576)); QCOMPARE(model->capabilities.maxOutputTokens,qint64(131072));
+        QCOMPARE(model->capabilities.reasoningEfforts,QStringList({"low","high","max"}));
+        const auto restored=modelFromJson(modelToJson(*model)); QVERIFY(restored.capabilities.thinkingRequired);
+        QVERIFY(!models.find("kimi","kimi-future")->protocol.supportsStructuredChat());
+        QVERIFY(validateModelSelection(model,"kimi",id,false,{}).contains("始终开启思考"));
+        QSignalSpy completed(&coordinator,&AiRequestCoordinator::completionFinished);
+        ChatCompletionRequest request{id,QJsonArray{QJsonObject{{"role","user"},{"content","Return json"}}},false,{},4096};
+        QVERIFY(coordinator.complete("kimi",request)); QTRY_COMPARE(completed.size(),1);
+        QVERIFY(!qvariant_cast<ChatCompletionResult>(completed.last()[2]).ok()); QCOMPARE(server.requestCount(),1);
+        request.thinkingEnabled=true;
+        for(const auto &effort:{QString("low"),QString("high"),QString("max")}) {
+            request.reasoningEffort=effort;
+            server.enqueue(200,R"({"choices":[{"finish_reason":"stop","message":{"reasoning_content":"not JSON; never include in lyrics","content":"{\"translations\":[]}"}}],"usage":{"prompt_tokens":20,"completion_tokens":40,"total_tokens":60}})");
+            const auto before=completed.size(); QVERIFY(coordinator.complete("kimi",request)); QTRY_COMPARE(completed.size(),before+1);
+            const auto result=qvariant_cast<ChatCompletionResult>(completed.last()[2]); QVERIFY(result.ok()); QCOMPARE(result.content,QString("{\"translations\":[]}"));
+            const auto wire=server.request(server.requestCount()-1);
+            QVERIFY(wire.startsWith("POST /chat/completions ")); QVERIFY(wire.contains("Bearer fake-k3-test-key"));
+            const auto body=QJsonDocument::fromJson(wire.mid(wire.indexOf("\r\n\r\n")+4)).object();
+            QCOMPARE(body["model"].toString(),id); QCOMPARE(body["reasoning_effort"].toString(),effort);
+            QCOMPARE(body["max_completion_tokens"].toInt(),4096); QCOMPARE(body["response_format"].toObject()["type"].toString(),QString("json_object"));
+            QVERIFY(!body.contains("thinking")); QVERIFY(!body.contains("max_tokens")); QVERIFY(!body.contains("temperature")); QVERIFY(!body.contains("enable_thinking"));
         }
     }
 }

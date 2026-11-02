@@ -177,7 +177,15 @@ quint64 DeepSeekProvider::listModels(const QString &apiKey) {
 quint64 DeepSeekProvider::complete(const QString &apiKey, const ChatCompletionRequest &chat) {
     QString payloadError;
     auto payload = deepSeekChatPayload(chat, &payloadError);
-    if (m_providerId != DeepSeekProviderId && !payload.isEmpty()) {
+    if (m_providerId == KimiProviderId && usesKimiK3Protocol(chat.modelId) && !payload.isEmpty()) {
+        if (!chat.thinkingEnabled) {
+            payloadError = QStringLiteral("Kimi K3 始终开启思考，请选择思考强度");
+            payload = {};
+        } else {
+            payload.remove("thinking");
+            payload["max_completion_tokens"] = payload.take("max_tokens");
+        }
+    } else if (m_providerId != DeepSeekProviderId && !payload.isEmpty()) {
         if (chat.thinkingEnabled) {
             payloadError = QStringLiteral("此供应商的结构化歌词翻译使用非思考模式");
             payload = {};

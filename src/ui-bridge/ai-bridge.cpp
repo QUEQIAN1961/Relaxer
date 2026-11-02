@@ -137,11 +137,15 @@ bool AiBridge::translationThinkingEditable() const { return thinkingEditable(tru
 QVariantList AiBridge::thinkingChoices(bool translation) const {
     const auto selected = selection(translation);
     const auto supported = efforts(translation);
+    const auto *model = m_runtime ? m_runtime->model(selected.providerId, selected.modelId) : nullptr;
+    const bool required = model && model->capabilities.thinkingRequired;
     QVariantList result;
+    if (required && !selected.thinkingEnabled)
+        result.append(QVariantMap{{"id", "invalid"}, {"label", "请选择强度（此模型始终开启思考）"}});
     if (selected.thinkingEnabled && !supported.contains(selected.reasoningEffort))
         result.append(QVariantMap{{"id", "invalid"},
                                   {"label", QString("需重新选择（%1）").arg(selected.reasoningEffort)}});
-    result.append(QVariantMap{{"id", "off"}, {"label", "关闭思考"}});
+    if (!required) result.append(QVariantMap{{"id", "off"}, {"label", "关闭思考"}});
     for (const auto &effort : supported)
         result.append(QVariantMap{{"id", effort}, {"label", effort.toUpper()}});
     return result;
@@ -162,6 +166,7 @@ QString AiBridge::defaultModelCapabilities() const {
     parts << (model->capabilities.reasoningMetadataKnown
                   ? QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / "))
                   : QStringLiteral("思考能力未知"));
+    if (model->capabilities.thinkingRequired) parts << QStringLiteral("始终开启思考");
     parts << (model->protocol.supportsStructuredChat()
                   ? QStringLiteral("请求协议已确认") : QStringLiteral("请求协议未确认，暂不可调用"));
     return parts.join(" · ");
@@ -245,6 +250,12 @@ bool AiBridge::save() {
 }
 
 bool AiBridge::setThinkingEffort(bool translation, const QString &effort) {
+    const auto selected = selection(translation);
+    const auto *model = m_runtime ? m_runtime->model(selected.providerId, selected.modelId) : nullptr;
+    if (effort == "off" && model && model->capabilities.thinkingRequired) {
+        status("此模型始终开启思考，请选择 LOW、HIGH 或 MAX 思考强度");
+        return false;
+    }
     if (!m_runtime || (effort != "off" &&
         (!thinkingEditable(translation) || !efforts(translation).contains(effort)))) {
         status("当前模型不支持所选思考强度，请重新选择");

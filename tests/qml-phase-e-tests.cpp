@@ -269,6 +269,23 @@ private slots:
         auto *providers=visual(root,"aiProviderSelection"); QVERIFY(providers); QCOMPARE(providers->property("count").toInt(),4);
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
+    void kimiK3SettingsCanPrepareLyricsTranslation() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem(); auto *bridge=f.shell->aiBridge();
+        const auto catalog=ai::parseCompatibleModelCatalog(R"({"object":"list","data":[{"id":"kimi-k3"}]})","kimi");
+        QVERIFY(f.runtime->acceptModelCatalog("kimi",catalog.models)); QVERIFY(f.runtime->credentials()->store("kimi","fake-k3-ui-key",nullptr));
+        QVERIFY(bridge->edit("providerId","kimi")); QVERIFY(bridge->edit("modelId","kimi-k3")); QVERIFY(bridge->save());
+        QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
+        QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTest::qWait(300);
+        auto *thinking=visual(root,"aiDefaultThinking"); QVERIFY(thinking); QVERIFY(thinking->isEnabled());
+        QCOMPARE(thinking->property("currentValue").toString(),QString("invalid")); QCOMPARE(thinking->property("count").toInt(),4);
+        QVERIFY(click(w,thinking)); QTest::qWait(280); QTest::keyClick(w,Qt::Key_Down); QTest::keyClick(w,Qt::Key_Return);
+        QTRY_COMPARE(f.runtime->configuration().defaults.reasoningEffort,QString("low"));
+        QVERIFY(f.runtime->configuration().defaults.thinkingEnabled); QTest::qWait(200); shot(w,"kimi-k3-settings");
+        auto *translation=f.shell->translationBridge(); QVERIFY(translation->setTargetTrack(QString::number(f.a.id))); QVERIFY(translation->classify(1));
+        const auto task=translation->prepareAi(); QVERIFY2(!task.isEmpty(),qPrintable(translation->status()));
+        QCOMPARE(f.http.requestCount(),0); translation->declineConsent();
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void settingsSubpagesTransitionOnceAfterSnapshot() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);

@@ -582,15 +582,17 @@ void AiSettingsPage::updateThinkingOptions(QComboBox *combo, const AiTaskConfigu
                                             const ModelInfo *model, bool featureEnabled) {
     const QSignalBlocker blocker(combo);
     const auto requested = currentEffort(selection);
+    const bool required = model && model->capabilities.thinkingRequired;
     combo->clear();
-    combo->addItem("关闭思考", "off");
+    if (!required) combo->addItem("关闭思考", "off");
     if (model && model->capabilities.reasoningMetadataKnown) {
         for (const auto &effort : model->capabilities.reasoningEfforts)
             combo->addItem(effortLabel(effort), effort);
     }
     auto index = combo->findData(requested);
-    if (index < 0 && requested != "off") {
-        combo->insertItem(0, QString("需重新选择（%1）").arg(effortLabel(requested)), "invalid");
+    if (index < 0 && (requested != "off" || required)) {
+        combo->insertItem(0, required && requested == "off" ? QStringLiteral("请选择强度（此模型始终开启思考）")
+                                                        : QString("需重新选择（%1）").arg(effortLabel(requested)), "invalid");
         index = 0;
         if (auto *modelObject = qobject_cast<QStandardItemModel *>(combo->model()))
             if (auto *item = modelObject->item(0))
@@ -624,6 +626,7 @@ void AiSettingsPage::updateCapabilityText() {
                       : QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / ")));
     else
         parts << "思考能力未知";
+    if (model->capabilities.thinkingRequired) parts << "始终开启思考";
     parts << (model->protocol.supportsStructuredChat()
                   ? QStringLiteral("请求协议已确认")
                   : QStringLiteral("请求协议未确认，暂不可调用"));

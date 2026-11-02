@@ -80,6 +80,19 @@ ModelInfo liveModel(QString id, QString name, bool reasoning = true) {
 class AiSettingsWidgetsTests final : public QObject {
     Q_OBJECT
   private slots:
+    void kimiK3OffersReasoningStrengthsWithoutAnOffChoice() {
+        QTemporaryDir directory; Library library(directory.filePath("data")); QVERIFY(library.open());
+        AiRuntime runtime(&library,std::make_unique<MemoryCredentials>());
+        auto configuration=runtime.configuration(); configuration.defaults={"kimi","kimi-k3",false,{}};
+        QVERIFY(runtime.saveConfiguration(configuration));
+        const auto catalog=parseCompatibleModelCatalog(R"({"object":"list","data":[{"id":"kimi-k3"}]})","kimi");
+        QVERIFY(runtime.acceptModelCatalog("kimi",catalog.models));
+        AiSettingsPage page(&runtime); page.show();
+        auto *thinking=page.findChild<QComboBox *>("aiDefaultThinking"); QVERIFY(thinking); QVERIFY(thinking->isEnabled());
+        QVERIFY(thinking->findData("off")<0); QCOMPARE(thinking->currentData().toString(),QString("invalid"));
+        thinking->setCurrentIndex(thinking->findData("low"));
+        QVERIFY(runtime.configuration().defaults.thinkingEnabled); QCOMPARE(runtime.configuration().defaults.reasoningEffort,QString("low"));
+    }
     void credentialControlsStayMaskedAndSeparateFromSettings() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());

@@ -194,6 +194,23 @@ private slots:
         QCOMPARE(f.bridge->draft().value("modelId").toString(), unknown.id);
         QCOMPARE(f.credentials->reads, 0);
     }
+    void kimiK3RequiresAnExplicitThinkingStrength() {
+        Fixture f; QVERIFY(f.ok); QVERIFY(f.bridge->edit("providerId","kimi")); QVERIFY(f.bridge->save());
+        const auto catalog=parseCompatibleModelCatalog(R"({"object":"list","data":[{"id":"kimi-k3"}]})","kimi"); QVERIFY(catalog.ok);
+        QVERIFY(f.runtime->acceptModelCatalog("kimi",catalog.models)); QVERIFY(f.bridge->edit("modelId","kimi-k3")); QVERIFY(f.bridge->save());
+        QVERIFY(f.bridge->defaultThinkingEditable()); QVERIFY(!hasChoice(f.bridge->defaultThinkingChoices(),"off"));
+        QVERIFY(hasChoice(f.bridge->defaultThinkingChoices(),"invalid","始终开启思考"));
+        QVERIFY(f.bridge->configurationStatus().contains("始终开启思考"));
+        f.credentials->values.insert("kimi","fake-k3-bridge-key");
+        QVERIFY(f.bridge->setThinkingEffort(false,"low"));
+        QVERIFY(f.runtime->validateConfiguration(f.runtime->configuration().defaults).isEmpty());
+        QVERIFY(!hasChoice(f.bridge->defaultThinkingChoices(),"invalid")); QVERIFY(!f.bridge->setThinkingEffort(false,"off"));
+        QCOMPARE(f.runtime->configuration().defaults.reasoningEffort,QString("low"));
+        QVERIFY(f.bridge->defaultModelCapabilities().contains("请求协议已确认")); QVERIFY(f.bridge->defaultModelCapabilities().contains("始终开启思考"));
+        QVERIFY(f.bridge->edit("translationUsesDefaults",false)); QVERIFY(f.bridge->edit("translationModelId","kimi-k3"));
+        QVERIFY(f.bridge->setThinkingEffort(true,"high")); QVERIFY(!hasChoice(f.bridge->translationThinkingChoices(),"off"));
+        QVERIFY(f.runtime->validateConfiguration(f.runtime->translationConfiguration()).isEmpty()); QCOMPARE(f.http.requestCount(),0);
+    }
 
     void replacingCredentialsCancelsCatalogAndRejectsLateResults() {
         Fixture f;

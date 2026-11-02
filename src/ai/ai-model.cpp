@@ -70,6 +70,10 @@ qint64 nonNegativeJsonInteger(const QJsonValue &value, bool *valid) {
     return ok ? qint64(number) : 0;
 }
 
+bool usesKimiK3Protocol(const QString &modelId) {
+    return modelId == "kimi-k3" || modelId == "kimi-k3.1-pro" || modelId == "kimi-k3.1-pro-highspeed";
+}
+
 ModelCatalogResult parseDeepSeekModelCatalog(const QByteArray &body) {
     ModelCatalogResult result;
     QJsonParseError parseError;
@@ -134,7 +138,7 @@ ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QSt
         bool supported = false;
         qint64 context = 32768, output = 8192;
         if (providerId == KimiProviderId) {
-            supported = model.id == "kimi-k2.5" || model.id == "kimi-k2-0905-preview" || model.id == "kimi-k2-0711-preview"
+            supported = usesKimiK3Protocol(model.id) || model.id == "kimi-k2.5" || model.id == "kimi-k2-0905-preview" || model.id == "kimi-k2-0711-preview"
                      || model.id == "moonshot-v1-8k" || model.id == "moonshot-v1-32k" || model.id == "moonshot-v1-128k";
             if (model.id == "kimi-k2.5") { context = 262144; output = 32768; }
             else if (model.id == "kimi-k2-0905-preview") context = 262144;
@@ -151,10 +155,22 @@ ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QSt
             // Conservative request budgets when /models omits token limits.
             if (!model.capabilities.contextWindow) model.capabilities.contextWindow = context;
             if (!model.capabilities.maxOutputTokens) model.capabilities.maxOutputTokens = output;
-            // Structured translation uses non-thinking mode on these APIs.
+            // Older compatible models translate without thinking; K3 below
+            // requires reasoning instead.
             model.capabilities.reasoningMetadataKnown = true;
             model.capabilities.reasoningEfforts.clear();
             model.capabilities.defaultReasoningEffort.clear();
+            // K3 uses reasoning_effort, cannot disable thinking, and supports
+            // max_completion_tokens. See platform.kimi.com/docs/api/models-overview.
+            if (providerId == KimiProviderId && usesKimiK3Protocol(model.id)) {
+                model.capabilities.thinkingRequired = true;
+                model.capabilities.reasoningEfforts = {"low", "high", "max"};
+                model.capabilities.defaultReasoningEffort = "max";
+                model.capabilities.contextWindow = 1048576;
+                // Use the documented default completion budget, leaving room
+                // for lyrics instead of reserving the entire 1M context as output.
+                model.capabilities.maxOutputTokens = 131072;
+            }
         }
     }
     return result;
@@ -172,6 +188,7 @@ QJsonObject modelToJson(const ModelInfo &model) {
             {"contextWindow", double(cap.contextWindow)},
             {"maxOutputTokens", double(cap.maxOutputTokens)},
             {"reasoningMetadataKnown", cap.reasoningMetadataKnown},
+            {"thinkingRequired", cap.thinkingRequired},
             {"protocol", QJsonObject{{"chatCompletions", model.protocol.chatCompletions},
                                      {"jsonObjectOutput", model.protocol.jsonObjectOutput},
                                      {"maxTokens", model.protocol.maxTokens},
@@ -192,6 +209,7 @@ ModelInfo modelFromJson(const QJsonObject &object) {
     model.capabilities.contextWindow = nonNegativeJsonInteger(object.value("contextWindow"));
     model.capabilities.maxOutputTokens = nonNegativeJsonInteger(object.value("maxOutputTokens"));
     model.capabilities.reasoningMetadataKnown = object.value("reasoningMetadataKnown").toBool();
+    model.capabilities.thinkingRequired = object.value("thinkingRequired").toBool();
     const auto protocol = object.value("protocol").toObject();
     model.protocol.chatCompletions = protocol.value("chatCompletions").toBool();
     model.protocol.jsonObjectOutput = protocol.value("jsonObjectOutput").toBool();
@@ -280,6 +298,8 @@ QString validateModelSelection(const ModelInfo *selected, const QString &provide
         return QStringLiteral("所选模型未确认支持文本输入和输出");
     if (selected->capabilities.contextWindow <= 0 || selected->capabilities.maxOutputTokens <= 0)
         return QStringLiteral("所选模型的上下文或输出上限尚未确认");
+    if (selected->capabilities.thinkingRequired && !thinkingEnabled)
+        return QStringLiteral("此模型始终开启思考，请选择 LOW、HIGH 或 MAX 思考强度");
     if (thinkingEnabled && (!selected->capabilities.reasoningMetadataKnown ||
         !selected->capabilities.reasoningEfforts.contains(effort) ||
         (effort != "low" && effort != "high" && effort != "max")))

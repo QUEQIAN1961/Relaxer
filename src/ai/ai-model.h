@@ -12,6 +12,7 @@ inline constexpr const char *KimiProviderId = "kimi";
 inline constexpr const char *QwenProviderId = "qwen";
 bool isSupportedProvider(const QString &providerId);
 QString defaultModelId(const QString &providerId);
+bool usesKimiK3Protocol(const QString &modelId);
 
 enum class ModelAvailability { Unverified, Available, Unavailable };
 
@@ -23,6 +24,7 @@ struct ModelCapabilities {
     qint64 contextWindow = 0;
     qint64 maxOutputTokens = 0;
     bool reasoningMetadataKnown = false;
+    bool thinkingRequired = false;
 };
 
 struct ModelProtocolCapabilities {

@@ -34,7 +34,8 @@ ColumnLayout {
         const enabled = translation ? aiBridge.draft.translationThinkingEnabled : aiBridge.draft.thinkingEnabled
         const effort = translation ? aiBridge.draft.translationReasoningEffort : aiBridge.draft.reasoningEffort
         const choices = translation ? aiBridge.translationEfforts : aiBridge.defaultEfforts
-        return enabled ? (choices.indexOf(effort) >= 0 ? effort : "invalid") : "off"
+        const modes = translation ? aiBridge.translationThinkingChoices : aiBridge.defaultThinkingChoices
+        return enabled ? (choices.indexOf(effort) >= 0 ? effort : "invalid") : modes.some(mode => mode.id === "off") ? "off" : "invalid"
     }
     onVisibleChanged: if (!visible) { flushStyle(); aiBridge.cancelModels() }
     Component.onDestruction: { flushStyle(); aiBridge.cancelModels() }
