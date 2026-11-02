@@ -187,8 +187,22 @@ quint64 DeepSeekProvider::listModels(const QString &apiKey) {
 
 quint64 DeepSeekProvider::complete(const QString &apiKey, const ChatCompletionRequest &chat) {
     QString payloadError;
-    auto payload = deepSeekChatPayload(chat, &payloadError);
-    if (m_providerId == KimiProviderId && usesKimiK3Protocol(chat.modelId) && !payload.isEmpty()) {
+    auto wireRequest = chat;
+    if (m_providerId == QwenProviderId) {
+        wireRequest.thinkingEnabled = false;
+        wireRequest.reasoningEffort.clear();
+    }
+    auto payload = deepSeekChatPayload(wireRequest, &payloadError);
+    if (m_providerId == QwenProviderId && !payload.isEmpty()) {
+        if (chat.thinkingEnabled && chat.reasoningEffort != "default") {
+            payloadError = QStringLiteral("Qwen 思考模式请使用模型默认预算");
+            payload = {};
+        } else {
+            payload.remove("thinking");
+            payload.remove("reasoning_effort");
+            if (chat.modelId != "qwen-max") payload["enable_thinking"] = chat.thinkingEnabled;
+        }
+    } else if (m_providerId == KimiProviderId && usesKimiK3Protocol(chat.modelId) && !payload.isEmpty()) {
         if (!chat.thinkingEnabled) {
             payloadError = QStringLiteral("Kimi K3 始终开启思考，请选择思考强度");
             payload = {};
@@ -207,7 +221,6 @@ quint64 DeepSeekProvider::complete(const QString &apiKey, const ChatCompletionRe
                 payload["thinking"] = QJsonObject{{"type", "disabled"}};
                 payload["temperature"] = 0.6;
             }
-            if (m_providerId == QwenProviderId && chat.modelId != "qwen-max") payload["enable_thinking"] = false;
         }
     }
     if (payload.isEmpty()) {

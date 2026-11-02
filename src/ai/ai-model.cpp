@@ -12,6 +12,11 @@
 
 namespace relaxer::ai {
 namespace {
+const QRegularExpression &qwenGeneralModelPattern() {
+    static const QRegularExpression pattern(QStringLiteral("^qwen([1-9][0-9]*(?:\\.[0-9]+)*)-(max|plus|flash)(?:-([0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2}))?$"));
+    return pattern;
+}
+
 QStringList strings(const QJsonValue &value) {
     QStringList result;
     if (!value.isArray())
@@ -23,12 +28,12 @@ QStringList strings(const QJsonValue &value) {
     return result;
 }
 
-QStringList supportedEfforts(const QJsonValue &value) {
+QStringList supportedEfforts(const QJsonValue &value, bool allowDefault = false) {
     static const QSet<QString> supported{"low", "high", "max"};
     QStringList result;
     for (const auto &effort : strings(value)) {
         const auto normalized = effort.trimmed().toLower();
-        if (supported.contains(normalized) && !result.contains(normalized))
+        if ((supported.contains(normalized) || (allowDefault && normalized == "default")) && !result.contains(normalized))
             result.append(normalized);
     }
     return result;
@@ -170,6 +175,14 @@ ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QSt
                     strings(item.value("features")).contains("structured-outputs")) {
                     model.protocol = {true, true, true, true};
                     model.capabilities.reasoningMetadataKnown = true;
+                    const auto family = qwenGeneralModelPattern().match(model.id);
+                    // These commercial families support synchronous JSON output
+                    // with enable_thinking. Older families require it disabled.
+                    if (strings(item.value("capabilities")).contains("Reasoning") && family.hasMatch() &&
+                        QVersionNumber::compare(QVersionNumber::fromString(family.captured(1)), QVersionNumber(3, 7)) >= 0) {
+                        model.capabilities.reasoningEfforts = {"default"};
+                        model.capabilities.defaultReasoningEffort = "default";
+                    }
                 }
                 catalog.models.append(model);
             }
@@ -224,7 +237,7 @@ ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QSt
 }
 
 QList<ModelInfo> recommendedQwenModels(const QList<ModelInfo> &models) {
-    static const QRegularExpression family(QStringLiteral("^qwen([1-9][0-9]*(?:\\.[0-9]+)*)-(max|plus|flash)(?:-([0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2}))?$"));
+    const auto &family = qwenGeneralModelPattern();
     QList<ModelInfo> aliases, snapshots;
     for (const auto &model : models) {
         if (model.providerId != QwenProviderId || model.availability == ModelAvailability::Unavailable ||
@@ -295,7 +308,7 @@ ModelInfo modelFromJson(const QJsonObject &object) {
         model.displayName = model.id;
     model.capabilities.inputModalities = strings(object.value("inputModalities"));
     model.capabilities.outputModalities = strings(object.value("outputModalities"));
-    model.capabilities.reasoningEfforts = supportedEfforts(object.value("reasoningEfforts"));
+    model.capabilities.reasoningEfforts = supportedEfforts(object.value("reasoningEfforts"), model.providerId == QwenProviderId);
     model.capabilities.defaultReasoningEffort = object.value("defaultReasoningEffort").toString();
     model.capabilities.contextWindow = nonNegativeJsonInteger(object.value("contextWindow"));
     model.capabilities.maxOutputTokens = nonNegativeJsonInteger(object.value("maxOutputTokens"));
@@ -393,7 +406,7 @@ QString validateModelSelection(const ModelInfo *selected, const QString &provide
         return QStringLiteral("此模型始终开启思考，请选择 LOW、HIGH 或 MAX 思考强度");
     if (thinkingEnabled && (!selected->capabilities.reasoningMetadataKnown ||
         !selected->capabilities.reasoningEfforts.contains(effort) ||
-        (effort != "low" && effort != "high" && effort != "max")))
+        (effort != "low" && effort != "high" && effort != "max" && !(providerId == QwenProviderId && effort == "default"))))
         return QStringLiteral("当前模型不支持所选思考强度，请重新选择");
     return {};
 }

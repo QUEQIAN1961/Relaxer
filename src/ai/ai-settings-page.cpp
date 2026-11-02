@@ -62,6 +62,7 @@ QWidget *rowHost(QWidget *parent = nullptr) {
 QHBoxLayout *rowLayout(QWidget *row) { return qobject_cast<QHBoxLayout *>(row->layout()); }
 
 QString effortLabel(const QString &effort) {
+    if (effort == "default") return "开启思考（模型默认）";
     if (effort == "low") return "Low";
     if (effort == "high") return "High";
     if (effort == "max") return "Max";
@@ -625,7 +626,9 @@ void AiSettingsPage::updateCapabilityText() {
         parts << QString("上下文 %1 tokens").arg(model->capabilities.contextWindow);
     if (model->capabilities.maxOutputTokens > 0)
         parts << QString("输出上限 %1 tokens").arg(model->capabilities.maxOutputTokens);
-    if (model->capabilities.reasoningMetadataKnown)
+    if (model->providerId == QwenProviderId && model->capabilities.reasoningEfforts.contains("default"))
+        parts << QStringLiteral("支持开启或关闭思考（模型默认预算）");
+    else if (model->capabilities.reasoningMetadataKnown)
         parts << (model->capabilities.reasoningEfforts.isEmpty()
                       ? model->providerId == QwenProviderId ? QStringLiteral("当前歌词翻译使用非思考模式") : QStringLiteral("未提供思考强度")
                       : QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / ")));

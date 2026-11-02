@@ -310,17 +310,24 @@ private slots:
         QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTest::qWait(300);
         auto *models=visual(root,"aiDefaultModel"); QVERIFY(models); QCOMPARE(models->property("count").toInt(),6);
         QCOMPARE(models->property("currentValue").toString(),QString("qwen3.8-max"));
-        QVERIFY(bridge->defaultModelCapabilities().contains("当前歌词翻译使用非思考模式"));
+        QVERIFY(bridge->defaultModelCapabilities().contains("支持开启或关闭思考"));
         shot(w,"qwen-recommended-models");
         QVERIFY(click(w,models)); QTest::qWait(280); shot(w,"qwen-recommended-dropdown");
         auto *popup=qvariant_cast<QObject *>(models->property("popup")); QVERIFY(popup);
         QVERIFY(QMetaObject::invokeMethod(popup,"close")); QTest::qWait(180);
+        auto *thinking=visual(root,"aiDefaultThinking"); QVERIFY(thinking); QVERIFY(thinking->isEnabled());
+        QCOMPARE(thinking->property("count").toInt(),2); QCOMPARE(thinking->property("currentValue").toString(),QString("off"));
+        QVERIFY(click(w,thinking)); QTest::qWait(280); QTest::keyClick(w,Qt::Key_Down); QTest::keyClick(w,Qt::Key_Return);
+        QTRY_COMPARE(f.runtime->configuration().defaults.reasoningEffort,QString("default"));
+        QVERIFY(f.runtime->configuration().defaults.thinkingEnabled); QTest::qWait(180); shot(w,"qwen-thinking-enabled");
         auto *translation=f.shell->translationBridge(); QVERIFY(translation->setTargetTrack(QString::number(f.a.id))); QVERIFY(translation->classify(1));
         for (const auto &id:qwen_fixture::CurrentModels) {
             QVERIFY(bridge->edit("modelId",id)); QVERIFY(bridge->save());
+            QVERIFY(f.runtime->validateConfiguration(f.runtime->configuration().defaults).isEmpty());
             const auto task=translation->prepareAi(); QVERIFY2(!task.isEmpty(),qPrintable(translation->status()));
             translation->declineConsent();
         }
+        QVERIFY(bridge->setThinkingEffort(false,"off")); QVERIFY(!f.runtime->configuration().defaults.thinkingEnabled);
         QCOMPARE(f.http.requestCount(),0);
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }

@@ -95,6 +95,11 @@ class AiSettingsWidgetsTests final : public QObject {
         for (const auto &id:qwen_fixture::CurrentModels) { QVERIFY(global->findData(id)>0); QVERIFY(translation->findData(id)>0); }
         QVERIFY(global->findData("qwen-plus")<0); QVERIFY(translation->findData("qwen-mt-plus")<0);
         QCOMPARE(runtime.configuration().translationOverride.modelId,QString("qwen-mt-plus"));
+        auto *thinking=page.findChild<QComboBox *>("aiDefaultThinking"); QVERIFY(thinking); QVERIFY(thinking->isEnabled());
+        QCOMPARE(thinking->count(),2); QVERIFY(thinking->findData("default")>=0); QVERIFY(thinking->findData("high")<0);
+        QVERIFY(!runtime.configuration().defaults.thinkingEnabled);
+        thinking->setCurrentIndex(thinking->findData("default"));
+        QVERIFY(runtime.configuration().defaults.thinkingEnabled); QCOMPARE(runtime.configuration().defaults.reasoningEffort,QString("default"));
     }
     void kimiK3OffersReasoningStrengthsWithoutAnOffChoice() {
         QTemporaryDir directory; Library library(directory.filePath("data")); QVERIFY(library.open());

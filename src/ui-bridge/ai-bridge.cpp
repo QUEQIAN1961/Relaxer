@@ -156,7 +156,7 @@ QVariantList AiBridge::thinkingChoices(bool translation) const {
                                   {"label", QString("需重新选择（%1）").arg(selected.reasoningEffort)}});
     if (!required) result.append(QVariantMap{{"id", "off"}, {"label", "关闭思考"}});
     for (const auto &effort : supported)
-        result.append(QVariantMap{{"id", effort}, {"label", effort.toUpper()}});
+        result.append(QVariantMap{{"id", effort}, {"label", effort == "default" ? QStringLiteral("开启思考（模型默认）") : effort.toUpper()}});
     return result;
 }
 
@@ -172,8 +172,10 @@ QString AiBridge::defaultModelCapabilities() const {
         parts << QString("上下文 %1 tokens").arg(model->capabilities.contextWindow);
     if (model->capabilities.maxOutputTokens > 0)
         parts << QString("输出上限 %1 tokens").arg(model->capabilities.maxOutputTokens);
-    parts << (model->providerId == ai::QwenProviderId && model->capabilities.reasoningMetadataKnown && model->capabilities.reasoningEfforts.isEmpty()
-                  ? QStringLiteral("当前歌词翻译使用非思考模式")
+    parts << (model->providerId == ai::QwenProviderId && model->capabilities.reasoningEfforts.contains("default")
+                  ? QStringLiteral("支持开启或关闭思考（模型默认预算）")
+                  : model->providerId == ai::QwenProviderId
+                      ? QStringLiteral("未提供可用的思考选项")
                   : model->capabilities.reasoningMetadataKnown
                       ? QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / "))
                       : QStringLiteral("思考能力未知"));

@@ -240,6 +240,29 @@ private slots:
         QCOMPARE(f.credentials->reads,reads); QCOMPARE(f.http.requestCount(),0);
     }
 
+    void qwenThinkingUsesAnExplicitProviderDefaultToggle() {
+        Fixture f; QVERIFY(f.ok); QVERIFY(f.bridge->edit("providerId","qwen")); QVERIFY(f.bridge->save());
+        const auto catalog=parseCompatibleModelCatalog(qwen_fixture::catalog(qwen_fixture::CurrentModels),"qwen");
+        QVERIFY(catalog.ok); QVERIFY(f.runtime->acceptModelCatalog("qwen",catalog.models));
+        QVERIFY(!f.runtime->configuration().defaults.thinkingEnabled);
+        QVERIFY(f.bridge->defaultThinkingEditable()); QCOMPARE(f.bridge->defaultThinkingChoices().size(),2);
+        QVERIFY(hasChoice(f.bridge->defaultThinkingChoices(),"off"));
+        QVERIFY(hasChoice(f.bridge->defaultThinkingChoices(),"default","开启思考"));
+        QVERIFY(!hasChoice(f.bridge->defaultThinkingChoices(),"high"));
+        QVERIFY(f.bridge->setThinkingEffort(false,"default"));
+        QVERIFY(f.runtime->configuration().defaults.thinkingEnabled);
+        QCOMPARE(f.runtime->configuration().defaults.reasoningEffort,QString("default"));
+        QVERIFY(f.bridge->activeTranslationStatus().contains("开启思考（模型默认）"));
+        QVERIFY(!f.bridge->setThinkingEffort(false,"high"));
+        QVERIFY(f.bridge->edit("translationUsesDefaults",false)); QVERIFY(f.bridge->save());
+        QVERIFY(f.bridge->setThinkingEffort(true,"off"));
+        QVERIFY(!f.runtime->configuration().translationOverride.thinkingEnabled);
+        QVERIFY(f.runtime->configuration().defaults.thinkingEnabled);
+        QVERIFY(f.bridge->setThinkingEffort(true,"default"));
+        QCOMPARE(f.runtime->configuration().translationOverride.reasoningEffort,QString("default"));
+        QCOMPARE(f.credentials->reads,0); QCOMPARE(f.http.requestCount(),0);
+    }
+
     void qwenChoicesHideOtherModelsAndDoNotRewriteSelections() {
         Fixture f; QVERIFY(f.ok);
         auto ids=qwen_fixture::CurrentModels; ids << "qwen3.6-plus" << "qwen-plus" << "qwen-mt-plus" << "qwen3.8-omni-flash";
