@@ -91,9 +91,12 @@ Item {
                 property real rowSize:Number(fileSize)
                 property string rowAdded:importedAt
                 width:list.width;height:66;radius:8
-                color:table.checkedKeys.indexOf(trackKey)>=0||table.selectedKey===trackKey?Theme.selected:hover.containsMouse?Theme.hover:"transparent"
+                color:table.checkedKeys.indexOf(trackKey)>=0||table.selectedKey===trackKey?Theme.selected:rowHover.hovered?Theme.hover:"transparent"
+                // A passive handler keeps row hover when a child button takes
+                // the pointer; revealing that button must not hide it again.
+                HoverHandler { id:rowHover }
                 MouseArea{
-                    id:hover;anchors.fill:parent;hoverEnabled:true;acceptedButtons:Qt.LeftButton|Qt.RightButton
+                    anchors.fill:parent;acceptedButtons:Qt.LeftButton|Qt.RightButton
                     onPressed:table.forceActiveFocus()
                     onClicked:mouse=>{
                         if(mouse.button===Qt.RightButton){if(table.checkedKeys.indexOf(row.trackKey)<0){table.selected(row.trackKey);if(!table.bulkMode)table.checkedKeys=[]}context.keys=table.bulkMode?table.selectedKeys():[row.trackKey];context.targetKey=row.trackKey;const p=row.mapToItem(context.parent,mouse.x,mouse.y);context.popup(p.x,p.y)}
@@ -107,8 +110,8 @@ Item {
                     Item{
                         width:table.columnWidths[0];height:parent.height
                         CheckBox{visible:table.bulkMode;anchors.centerIn:parent;checked:table.checkedKeys.indexOf(row.trackKey)>=0;onClicked:table.toggleKey(row.trackKey)}
-                        UiText { fontRegion: "songs";visible:!table.bulkMode&&!hover.containsMouse&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
-                        IconButton{objectName:"trackPlayback-"+row.trackKey;visible:!table.bulkMode&&(hover.containsMouse||table.currentKey===row.trackKey);anchors.centerIn:parent;width:30;height:30;padding:3;horizontalPadding:3;verticalPadding:3;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"pause":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:if(table.currentKey===row.trackKey)playbackBridge.toggle();else table.playRequested(row.trackKey)}
+                        UiText { objectName:"trackNumber-"+row.trackKey;fontRegion: "songs";visible:!table.bulkMode&&!rowHover.hovered&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
+                        IconButton{objectName:"trackPlayback-"+row.trackKey;visible:!table.bulkMode&&(rowHover.hovered||table.currentKey===row.trackKey);anchors.centerIn:parent;width:30;height:30;padding:3;horizontalPadding:3;verticalPadding:3;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"pause":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:if(table.currentKey===row.trackKey)playbackBridge.toggle();else table.playRequested(row.trackKey)}
                     }
                     Item{width:table.columnWidths[1];height:parent.height;IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;width:30;height:30;padding:3;symbol:row.favorite?"liked":"heart";tint:row.favorite?Theme.accent:Theme.secondary;onClicked:if(!table.bulkMode)table.favoriteRequested(row.trackKey)}}
                     Item{

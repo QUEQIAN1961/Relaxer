@@ -102,6 +102,43 @@ private slots:
         shot(w,"background-restored");
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
+    void nonCurrentTrackHoverStaysStableOverPlaybackButton() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
+        const auto original=f.shell->facade()->current().id;
+        const auto key=QString::number(f.b.id); QVERIFY(f.b.id!=original);
+        auto *button=visual(root,"trackPlayback-"+key), *number=visual(root,"trackNumber-"+key);
+        auto *favorite=visual(root,"trackFavorite-"+key); QVERIFY(button); QVERIFY(number); QVERIFY(favorite);
+        auto *row=button->parentItem();
+        while(row && row->objectName()!="trackDelegate") row=row->parentItem();
+        QVERIFY(row);
+        QTest::mouseMove(w,QPoint(15,50)); QTest::qWait(80);
+        QVERIFY(!button->isVisible()); QVERIFY(number->isVisible());
+        const auto position=bounds(button).center().toPoint();
+        QTest::mouseMove(w,position); QTest::qWait(80);
+        const auto hoverColor=w->property("designTokens").value<QObject *>()->property("hover").value<QColor>();
+        // Keep the pointer stationary across frames, then move within the
+        // interactive child. Revealing that child must not cancel row hover.
+        for(int sample=0;sample<24;++sample) {
+            if(sample%6==0) QTest::mouseMove(w,position+QPoint(sample%3-1,0));
+            QTest::qWait(15);
+            QVERIFY2(button->isVisible(),"Hovering the sequence cell hid its own playback button");
+            QVERIFY(!number->isVisible()); QCOMPARE(row->property("color").value<QColor>(),hoverColor);
+            QCOMPARE(f.shell->facade()->current().id,original);
+        }
+        QTest::mouseMove(w,bounds(favorite).center().toPoint()); QTest::qWait(80);
+        QVERIFY(button->isVisible()); QCOMPARE(row->property("color").value<QColor>(),hoverColor);
+        QTest::mouseMove(w,QPoint(15,50)); QTest::qWait(80);
+        QVERIFY(!button->isVisible()); QVERIFY(number->isVisible());
+        QTest::mouseMove(w,position); QTest::qWait(80);
+        QTest::mousePress(w,Qt::LeftButton,Qt::NoModifier,position); QTest::qWait(40);
+        QVERIFY(button->isVisible()); QCOMPARE(f.shell->facade()->current().id,original);
+        QTest::mouseRelease(w,Qt::LeftButton,Qt::NoModifier,position);
+        QTRY_COMPARE(f.shell->facade()->current().id,f.b.id);
+        QTRY_VERIFY(f.shell->facade()->playing());
+        QTest::mouseMove(w,QPoint(15,50)); QTest::qWait(80);
+        QVERIFY(button->isVisible()); QVERIFY(!number->isVisible());
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void songRowPlaybackIconsAreLargerAndFollowTransportState() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem(); auto *player=f.shell->facade();
         const auto key=QString::number(f.a.id);
