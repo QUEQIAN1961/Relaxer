@@ -177,7 +177,16 @@ private slots:
         QVERIFY(body->opacity()>0 && body->opacity()<1); QVERIFY(bounds(body).top()>firstTop);
         const auto mask=w->grabWindow(); QVERIFY(!mask.isNull());
         auto *tokens=w->property("designTokens").value<QObject *>(); QVERIFY(tokens);
-        QCOMPARE(mask.pixelColor(5,mask.height()/2),tokens->property("background").value<QColor>());
+        const auto actualMask=mask.pixelColor(5,mask.height()/2);
+        const auto expectedMask=tokens->property("background").value<QColor>();
+        // Keep testing the mask during entry: frame compositing can round an
+        // RGB channel by one level. Alpha must still be fully opaque.
+        QCOMPARE(actualMask.alpha(),255);QCOMPARE(actualMask.alpha(),expectedMask.alpha());
+        QVERIFY2(qAbs(actualMask.red()-expectedMask.red())<=1
+                 &&qAbs(actualMask.green()-expectedMask.green())<=1
+                 &&qAbs(actualMask.blue()-expectedMask.blue())<=1,
+                 qPrintable(QString("Entry mask %1 differs from background %2")
+                            .arg(actualMask.name(QColor::HexArgb),expectedMask.name(QColor::HexArgb))));
         shot(w,"lyrics-entry-middle"); QTRY_VERIFY(body->opacity()>.999);
         QCOMPARE(f.shell->lyricsSearchBridge()->targetTrackKey(),QString::number(missing.id));
         QVERIFY(f.shell->lyricsSearchBridge()->setTargetTracks({QString::number(f.a.id),QString::number(f.b.id)},false,true));

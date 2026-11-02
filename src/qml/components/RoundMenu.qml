@@ -5,6 +5,19 @@ Controls.Menu {
     id: menu
     popupType: Controls.Popup.Item
     property real expansion: 1
+    // A growing viewport changes ListView's estimate for off-screen items.
+    // Size from the actual menu items, including zero-height hidden actions,
+    // so expansion cannot feed that estimate back into the viewport height.
+    implicitHeight: {
+        let itemsHeight = 0
+        for (let index = 0; index < count; ++index) {
+            const item = itemAt(index)
+            if (item) itemsHeight += item.height
+        }
+        return Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                        itemsHeight + Math.max(0, count - 1) * spacing
+                        + topPadding + bottomPadding)
+    }
     readonly property real expandedHeight: implicitHeight
     height: expandedHeight * expansion
     clip: true

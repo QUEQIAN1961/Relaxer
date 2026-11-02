@@ -234,7 +234,13 @@ private slots:
         QTest::keyClick(w,Qt::Key_5);QTest::keyClick(w,Qt::Key_0);QTest::keyClick(w,Qt::Key_0);QTest::keyClick(w,Qt::Key_Return);
         QTRY_COMPARE(bridge->fileOffset()["requestedMs"].toInt(),500);QVERIFY(shot(shell,"ui-offset-preview"));
         QVERIFY(click(w,visual(w->contentItem(),"lyricsFileOffsetSave")));QTRY_VERIFY(!dialog->property("visible").toBool());QCOMPARE(read(l,t.id),QByteArray("[offset:500]\n")+bilingual());
-        QVERIFY(click(w,visual(w->contentItem(),"lyricsMultiSelect")));QVERIFY(click(w,visual(w->contentItem(),"lyricsSelectAll")));QVERIFY(click(w,visual(w->contentItem(),"lyricsBatchInstrumental")));
+        QVERIFY(click(w,visual(w->contentItem(),"lyricsMultiSelect")));
+        auto *filters=visual(w->contentItem(),"lyricsFilterRow");QVERIFY(filters);
+        auto *batchReveal=visual(w->contentItem(),"lyricsBatchReveal");QVERIFY(batchReveal);
+        // Wait until both controls have finished moving into their hit regions.
+        QTRY_COMPARE(filters->property("selectionReveal").toReal(),1.);
+        QTRY_COMPARE(batchReveal->property("progress").toReal(),1.);
+        QVERIFY(click(w,visual(w->contentItem(),"lyricsSelectAll")));QVERIFY(click(w,visual(w->contentItem(),"lyricsBatchInstrumental")));
         auto *batch=w->findChild<QObject *>("batchInstrumentalDialog");QVERIFY(batch);QTRY_VERIFY(batch->property("opened").toBool());QCOMPARE(bridge->batchOverview()["total"].toInt(),1);
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!batch->property("visible").toBool());QVERIFY(ws->isVisible());QVERIFY(!l.isInstrumental(t.id));QCOMPARE(read(l,t.id),QByteArray("[offset:500]\n")+bilingual());QVERIFY(shell.warnings().isEmpty());
     }
@@ -267,6 +273,10 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(shell.lyricsSearchBridge()->batchResult()["pending"].toInt()==0,5000);
         QCOMPARE(l.isInstrumental(a.id),!deny);QVERIFY(l.isInstrumental(c.id));QCOMPARE(l.isInstrumental(b.id),authorize);if(!authorize)QCOMPARE(read(l,b.id),bilingual());QVERIFY(shell.feedbackBridge()->visible());
         QCOMPARE(shell.lyricsSearchBridge()->batchResult()["failed"].toInt(),deny?1:0);QCOMPARE(shell.feedbackBridge()->current()["category"].toString(),deny?QString("Warning"):QString("Information"));
+        // The result closes the modal asynchronously. Escape must reach the main
+        // window only after that popup has completely left the overlay.
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QTRY_VERIFY(!w->property("popupOpen").toBool());
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());QVERIFY(click(w,visual(root,"playbackExpandButton")));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
         QTest::keyClick(w,Qt::Key_Escape);QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);QVERIFY(shell.feedbackBridge()->visible());QVERIFY(!w->property("popupOpen").toBool());QVERIFY(shot(shell,"ui-batch-result-notification"));QVERIFY(shell.warnings().isEmpty());
     }

@@ -194,7 +194,10 @@ private slots:
         auto *cancel=visual(root,"appearanceLeaveCancel"),*discard=visual(root,"appearanceLeaveDiscard"),*save=visual(root,"appearanceLeaveSave");
         QVERIFY(cancel && discard && save); QCOMPARE(cancel->height(),save->height()); QCOMPARE(bounds(cancel).top(),bounds(discard).top());
         QVERIFY(bounds(cancel).right()+6<bounds(discard).left()); QVERIFY(bounds(discard).right()+6<bounds(save).left());
-        shot(w,"appearance-unsaved"); QVERIFY(click(w,cancel)); QTRY_VERIFY(!dialog->property("opened").toBool()); QVERIFY(s->appearanceDirty());
+        shot(w,"appearance-unsaved"); QVERIFY(click(w,cancel));
+        // opened becomes false at the start of the exit transition; the modal
+        // still intercepts the next click until visible becomes false.
+        QTRY_VERIFY(!dialog->property("visible").toBool()); QVERIFY(s->appearanceDirty());
         QVERIFY(click(w,visual(root,"appearanceBack"))); QTRY_VERIFY(dialog->property("opened").toBool());
         QVERIFY(click(w,discard)); QTRY_VERIFY(!s->appearanceDirty());
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));

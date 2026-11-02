@@ -115,8 +115,15 @@ private slots:
             QTRY_VERIFY(w->property("bulkActive").toBool()); QVERIFY(click(w,visual(root,"bulkNewPlaylist")));
         } else {
             auto *table=visual(root,"libraryListContainer"); QVERIFY(table);
-            QTest::mouseClick(w,Qt::RightButton,Qt::NoModifier,table->mapToScene(QPointF(180,65)).toPoint()); QTest::qWait(80);
-            auto *add=textButton(root,"加入歌单");QVERIFY(add);QVERIFY(click(w,add));
+            QTest::mouseClick(w,Qt::RightButton,Qt::NoModifier,table->mapToScene(QPointF(180,65)).toPoint());
+            auto *add=textButton(root,"加入歌单");QVERIFY(add);
+            // Menu items exist at their final positions before the height reveal
+            // reaches them. Wait for the parent menu, not a fixed frame delay.
+            auto *menu=qvariant_cast<QObject *>(add->property("menu"));QVERIFY(menu);
+            QTRY_VERIFY(menu->property("opened").toBool());
+            QSignalSpy activated(add,SIGNAL(triggered()));QVERIFY(activated.isValid());
+            QVERIFY(click(w,add));
+            QTRY_COMPARE(activated.count(),1);
             auto *submenu=qvariant_cast<QObject *>(add->property("subMenu"));QVERIFY(submenu);
             QTRY_VERIFY(submenu->property("opened").toBool());
             QTRY_VERIFY(textButton(root,"创建新歌单并加入…"));
