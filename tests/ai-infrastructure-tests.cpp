@@ -921,10 +921,18 @@ void AiInfrastructureTests::qwenCatalogSelectsCurrentAndFutureGeneralModels() {
         QVERIFY(validateModelSelection(&model,"qwen",model.id,false,{}).isEmpty());
         QCOMPARE(model.capabilities.contextWindow,qint64(1000000)); QCOMPARE(model.capabilities.maxOutputTokens,qint64(131072));
         QCOMPARE(modelFromJson(modelToJson(model)).publishedTime,model.publishedTime);
-        QCOMPARE(modelFromJson(modelToJson(model)).capabilities.reasoningEfforts,QStringList{"default"});
+        QCOMPARE(modelFromJson(modelToJson(model)).capabilities.reasoningEfforts,model.capabilities.reasoningEfforts);
         QCOMPARE(modelFromJson(modelToJson(model)).capabilities.defaultReasoningEffort,QString("default"));
         QVERIFY(validateModelSelection(&model,"qwen",model.id,true,"default").isEmpty());
         QVERIFY(!validateModelSelection(&model,"qwen",model.id,true,"high").isEmpty());
+        if (model.id.startsWith("qwen3.8-")) {
+            QCOMPARE(model.capabilities.reasoningEfforts,QStringList({"default","low","medium","xhigh"}));
+            for (const auto &level:{QString("low"),QString("medium"),QString("xhigh")})
+                QVERIFY(validateModelSelection(&model,"qwen",model.id,true,level).isEmpty());
+        } else {
+            QCOMPARE(model.capabilities.reasoningEfforts,QStringList{"default"});
+            QVERIFY(!validateModelSelection(&model,"qwen",model.id,true,"low").isEmpty());
+        }
     }
     auto restrictedRoot=QJsonDocument::fromJson(qwen_fixture::catalog({"qwen3.6-plus","qwen3.8-flash"})).object();
     auto restrictedOutput=restrictedRoot["output"].toObject(); auto restrictedEntries=restrictedOutput["models"].toArray();
@@ -959,9 +967,12 @@ void AiInfrastructureTests::qwenCatalogPaginationAndStructuredTranslation() {
     QVERIFY(server.request(0).contains("features=structured-outputs")); QVERIFY(server.request(1).contains("page_no=2"));
     models.applyLiveCatalog("qwen",live);
     QSignalSpy completions(&coordinator,&AiRequestCoordinator::completionFinished);
-    for (const auto &id:ids) for (const bool thinking:{false,true}) {
+    for (const auto &model:live) {
+      QStringList modes{"off"}; modes.append(model.capabilities.reasoningEfforts);
+      for (const auto &mode:modes) {
+        const auto id=model.id; const bool thinking=mode!="off";
         server.enqueue(200,R"({"choices":[{"finish_reason":"stop","message":{"reasoning_content":"private-reasoning-sentinel","content":"{}"}}]})");
-        QVERIFY(coordinator.complete("qwen",{id,QJsonArray{QJsonObject{{"role","user"},{"content","Return JSON"}}},thinking,thinking?QString("default"):QString(),4096}));
+        QVERIFY(coordinator.complete("qwen",{id,QJsonArray{QJsonObject{{"role","user"},{"content","Return JSON"}}},thinking,thinking?mode:QString(),4096}));
         QTRY_COMPARE(completions.size(),1); const auto result=qvariant_cast<ChatCompletionResult>(completions.takeFirst()[2]);
         QVERIFY(result.ok()); QCOMPARE(result.content,QString("{}"));
         const auto wire=server.request(server.requestCount()-1); QVERIFY(wire.startsWith("POST /chat/completions"));
@@ -969,8 +980,11 @@ void AiInfrastructureTests::qwenCatalogPaginationAndStructuredTranslation() {
         QCOMPARE(payload["model"].toString(),id); QCOMPARE(payload["response_format"].toObject()["type"].toString(),QString("json_object"));
         QCOMPARE(payload["enable_thinking"].toBool(!thinking),thinking); QCOMPARE(payload["max_tokens"].toInt(),4096);
         QCOMPARE(payload["stream"].toBool(true),false);
-        QVERIFY(!payload.contains("thinking")); QVERIFY(!payload.contains("reasoning_effort"));
+        QVERIFY(!payload.contains("thinking"));
+        if (thinking && mode!="default") QCOMPARE(payload["reasoning_effort"].toString(),mode);
+        else QVERIFY(!payload.contains("reasoning_effort"));
         QVERIFY(!payload.contains("thinking_budget"));
+      }
     }
     catalogs.clear(); server.enqueue(200,qwen_fixture::catalog(ids.mid(0,3),1,3,5)); server.enqueue(500,"{}");
     QVERIFY(coordinator.fetchModels("qwen")); QTRY_COMPARE(catalogs.size(),1);

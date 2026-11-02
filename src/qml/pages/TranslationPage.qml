@@ -56,7 +56,7 @@ ScrollView {
     ConfirmDialog {
         id: consent; parent: page.Overlay.overlay; objectName: "translationConsent"; property string exactTask: ""; property bool browser: false
         anchors.centerIn: parent; width: Math.max(300, Math.min(480, page.width - 20)); modal: true
-        title: browser ? "使用既有浏览器翻译流程" : "发送整首歌词至 DeepSeek"
+        title: browser ? "使用既有浏览器翻译流程" : "发送整首歌词至 AI 供应商"
         footer: DialogButtonBox {
             background: null
             ShellButton { objectName: "consentDeclineButton"; text: "不发送"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
@@ -64,7 +64,7 @@ ScrollView {
             onAccepted: consent.accept()
             onRejected: consent.reject()
         }
-        contentItem: Label { wrapMode: Text.Wrap; text: consent.browser ? "将打开专用浏览器资料，向所选来源提交歌词。遇到登录或验证时请自行操作，不会绕过网站限制。返回结果仅为未保存预览。" : "将把歌词文本、目标语言和风格提示发往 DeepSeek 官方服务，可能产生费用。不会上传音频、封面或本地路径；不会自动拆分、重试或切换模型。取消不能撤销服务端已经收到的请求。译文仅在点击保存后写入。是否发送这一次？" }
+        contentItem: Label { wrapMode: Text.Wrap; text: consent.browser ? "将打开专用浏览器资料，向所选来源提交歌词。遇到登录或验证时请自行操作，不会绕过网站限制。返回结果仅为未保存预览。" : aiBridge.activeTranslationStatus + "\n将把歌词文本、目标语言和风格提示发往所选供应商官方服务，可能产生费用。不会上传音频、封面或本地路径；不会自动拆分、重试或切换模型。取消不能撤销服务端已经收到的请求。译文仅在点击保存后写入。是否发送这一次？" }
         onAccepted: translationBridge.start(exactTask)
         onClosed: translationBridge.declineConsent()
     }

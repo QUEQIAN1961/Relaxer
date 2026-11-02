@@ -60,7 +60,7 @@ QString translationConfigurationLabel(const AiServiceConfiguration &configuratio
     else if (provider == DeepSeekProviderId) provider = "DeepSeek";
     else if (provider == QwenProviderId) provider = "Qwen";
     if (provider.isEmpty()) provider = QStringLiteral("未选择供应商");
-    const auto model = task.modelId.isEmpty() ? QStringLiteral("未选择模型") : task.modelId;
+    const auto model = task.modelId.isEmpty() ? QStringLiteral("未选择模型") : modelDisplayName(task.modelId);
     auto label = QString("歌词翻译（%1）：%2 / %3")
         .arg(configuration.translationUsesDefaults ? QStringLiteral("全局默认配置") : QStringLiteral("独立配置"), provider, model);
     if (task.thinkingEnabled && !task.reasoningEffort.isEmpty())

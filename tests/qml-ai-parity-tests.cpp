@@ -225,16 +225,16 @@ private slots:
         QVERIFY(f.runtime->acceptModelCatalog("deepseek",{}));
         const auto saved=f.configurationBytes(); const auto reads=f.credentials->reads;
         QVERIFY(f.bridge->configurationStatus().contains("独立配置"));
-        QVERIFY(f.bridge->configurationStatus().contains("DeepSeek / deepseek-flash"));
+        QVERIFY(f.bridge->configurationStatus().contains("DeepSeek / DeepSeek-Flash"));
         QVERIFY(f.bridge->configurationStatus().contains("刷新模型列表"));
         QCOMPARE(f.bridge->configurationStatus(),f.bridge->activeTranslationStatus());
         QVERIFY(f.bridge->edit("translationUsesDefaults",true));
         QVERIFY(f.bridge->configurationStatus().contains("全局默认配置"));
-        QVERIFY(f.bridge->configurationStatus().contains("KIMI / kimi-k3 · LOW"));
+        QVERIFY(f.bridge->configurationStatus().contains("KIMI / KIMI-K3 · LOW"));
         QVERIFY(f.bridge->activeTranslationStatus().contains("独立配置"));
         QCOMPARE(f.configurationBytes(),saved); QCOMPARE(f.credentials->reads,reads);
         QVERIFY(f.bridge->save());
-        QVERIFY(f.bridge->activeTranslationStatus().contains("KIMI / kimi-k3 · LOW"));
+        QVERIFY(f.bridge->activeTranslationStatus().contains("KIMI / KIMI-K3 · LOW"));
         QCOMPARE(f.runtime->configuration().translationOverride.providerId,QString("deepseek"));
         QCOMPARE(f.runtime->configuration().translationOverride.modelId,QString("deepseek-flash"));
         QCOMPARE(f.credentials->reads,reads); QCOMPARE(f.http.requestCount(),0);
@@ -245,7 +245,7 @@ private slots:
         const auto catalog=parseCompatibleModelCatalog(qwen_fixture::catalog(qwen_fixture::CurrentModels),"qwen");
         QVERIFY(catalog.ok); QVERIFY(f.runtime->acceptModelCatalog("qwen",catalog.models));
         QVERIFY(!f.runtime->configuration().defaults.thinkingEnabled);
-        QVERIFY(f.bridge->defaultThinkingEditable()); QCOMPARE(f.bridge->defaultThinkingChoices().size(),2);
+        QVERIFY(f.bridge->defaultThinkingEditable()); QCOMPARE(f.bridge->defaultThinkingChoices().size(),5);
         QVERIFY(hasChoice(f.bridge->defaultThinkingChoices(),"off"));
         QVERIFY(hasChoice(f.bridge->defaultThinkingChoices(),"default","开启思考"));
         QVERIFY(!hasChoice(f.bridge->defaultThinkingChoices(),"high"));
@@ -254,6 +254,15 @@ private slots:
         QCOMPARE(f.runtime->configuration().defaults.reasoningEffort,QString("default"));
         QVERIFY(f.bridge->activeTranslationStatus().contains("开启思考（模型默认）"));
         QVERIFY(!f.bridge->setThinkingEffort(false,"high"));
+        for (const auto &level:{QString("low"),QString("medium"),QString("xhigh")}) {
+            QVERIFY(hasChoice(f.bridge->defaultThinkingChoices(),level,level.toUpper()));
+            QVERIFY(f.bridge->setThinkingEffort(false,level));
+            QCOMPARE(f.runtime->configuration().defaults.reasoningEffort,level);
+        }
+        QVERIFY(f.bridge->edit("modelId","qwen3.7-plus")); QVERIFY(f.bridge->save());
+        QCOMPARE(f.bridge->defaultThinkingChoices().size(),3); // Retain an explicit invalid saved XHIGH choice.
+        QVERIFY(!hasChoice(f.bridge->defaultThinkingChoices(),"low")); QVERIFY(!f.bridge->setThinkingEffort(false,"low"));
+        QVERIFY(f.bridge->setThinkingEffort(false,"default")); QCOMPARE(f.bridge->defaultThinkingChoices().size(),2);
         QVERIFY(f.bridge->edit("translationUsesDefaults",false)); QVERIFY(f.bridge->save());
         QVERIFY(f.bridge->setThinkingEffort(true,"off"));
         QVERIFY(!f.runtime->configuration().translationOverride.thinkingEnabled);
@@ -273,6 +282,8 @@ private slots:
         QVERIFY(f.runtime->saveConfiguration(configuration)); const auto saved=f.configurationBytes();
         QCOMPARE(f.bridge->defaultModels().size(),6); QCOMPARE(f.bridge->translationModels().size(),6);
         for (const auto &id:qwen_fixture::CurrentModels) QVERIFY(hasChoice(f.bridge->defaultModels(),id));
+        QVERIFY(hasChoice(f.bridge->defaultModels(),"qwen3.8-max","Qwen3.8-Max"));
+        QVERIFY(hasChoice(f.bridge->defaultModels(),"qwen3.7-plus","Qwen3.7-Plus"));
         for (const auto &id:{QString("qwen-plus"),QString("qwen-mt-plus"),QString("qwen3.6-plus"),QString("qwen3.8-omni-flash")}) {
             QVERIFY(!hasChoice(f.bridge->defaultModels(),id)); QVERIFY(!hasChoice(f.bridge->translationModels(),id));
         }

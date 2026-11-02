@@ -66,6 +66,8 @@ QString effortLabel(const QString &effort) {
     if (effort == "low") return "Low";
     if (effort == "high") return "High";
     if (effort == "max") return "Max";
+    if (effort == "medium") return "MEDIUM";
+    if (effort == "xhigh") return "XHIGH";
     return effort;
 }
 
@@ -104,7 +106,7 @@ QWidget *makeHeader(const QString &title, const QString &backText, const QString
 }
 
 QString modelDisplay(const ModelInfo &model) {
-    QString text = model.displayName;
+    QString text = modelDisplayName(model.id, model.displayName);
     if (model.availability == ModelAvailability::Unverified)
         text += "（尚未验证）";
     else if (model.availability == ModelAvailability::Unavailable)
@@ -554,11 +556,11 @@ void AiSettingsPage::updateModels() {
         for (const auto &model : choices) {
             combo->addItem(modelDisplay(model), model.id);
             const auto index = combo->count() - 1;
-            combo->setItemData(index, QString("%1\n请求 ID: %2").arg(model.displayName, model.id), Qt::ToolTipRole);
+            combo->setItemData(index, QString("%1\n请求 ID: %2").arg(modelDisplayName(model.id, model.displayName), model.id), Qt::ToolTipRole);
         }
         auto index = combo->findData(selectedId);
         if (!selectedId.isEmpty() && index < 0 && providerId != QwenProviderId) {
-            combo->addItem(selectedId + "（尚未验证）", selectedId);
+            combo->addItem(modelDisplayName(selectedId) + "（尚未验证）", selectedId);
             index = combo->count() - 1;
         }
         if (!selectedId.isEmpty() && index < 0 && providerId == QwenProviderId)
@@ -626,8 +628,11 @@ void AiSettingsPage::updateCapabilityText() {
         parts << QString("上下文 %1 tokens").arg(model->capabilities.contextWindow);
     if (model->capabilities.maxOutputTokens > 0)
         parts << QString("输出上限 %1 tokens").arg(model->capabilities.maxOutputTokens);
-    if (model->providerId == QwenProviderId && model->capabilities.reasoningEfforts.contains("default"))
-        parts << QStringLiteral("支持开启或关闭思考（模型默认预算）");
+    if (model->providerId == QwenProviderId && model->capabilities.reasoningEfforts.contains("default")) {
+        auto strengths = model->capabilities.reasoningEfforts; strengths.removeAll("default");
+        parts << (strengths.isEmpty() ? QStringLiteral("支持开启或关闭思考（模型默认预算）")
+                  : QString("思考强度 %1 / 模型默认").arg(strengths.join(" / ").toUpper()));
+    }
     else if (model->capabilities.reasoningMetadataKnown)
         parts << (model->capabilities.reasoningEfforts.isEmpty()
                       ? model->providerId == QwenProviderId ? QStringLiteral("当前歌词翻译使用非思考模式") : QStringLiteral("未提供思考强度")
@@ -640,7 +645,7 @@ void AiSettingsPage::updateCapabilityText() {
                   : QStringLiteral("请求协议未确认，暂不可调用"));
     m_modelCapabilities->setText(parts.join(" · "));
     m_modelCapabilities->setToolTip(model->id);
-    m_model->setToolTip(QString("%1\n请求 ID：%2").arg(model->displayName, model->id));
+    m_model->setToolTip(QString("%1\n请求 ID：%2").arg(modelDisplayName(model->id, model->displayName), model->id));
 }
 
 void AiSettingsPage::saveConfiguration(const AiServiceConfiguration &configuration, QLabel *status) {

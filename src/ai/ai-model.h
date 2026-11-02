@@ -12,6 +12,7 @@ inline constexpr const char *KimiProviderId = "kimi";
 inline constexpr const char *QwenProviderId = "qwen";
 bool isSupportedProvider(const QString &providerId);
 QString defaultModelId(const QString &providerId);
+QString modelDisplayName(const QString &modelId, const QString &advertisedName = {});
 bool usesKimiK3Protocol(const QString &modelId);
 
 enum class ModelAvailability { Unverified, Available, Unavailable };

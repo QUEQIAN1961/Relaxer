@@ -4,7 +4,7 @@ namespace relaxer {
 namespace {
 QVariantMap modelChoice(const ai::ModelInfo &model) {
     return {{"id", model.id}, {"providerId", model.providerId},
-            {"label", model.displayName + " · " + ai::modelAvailabilityText(model.availability)},
+            {"label", ai::modelDisplayName(model.id, model.displayName) + " · " + ai::modelAvailabilityText(model.availability)},
             {"availability", int(model.availability)},
             {"reasoningEfforts", model.capabilities.reasoningEfforts}};
 }
@@ -108,7 +108,7 @@ QVariantList AiBridge::modelChoices(bool translation) const {
     }
     if (!containsSelected && selected.providerId != ai::QwenProviderId)
         result.append(QVariantMap{{"id", selected.modelId}, {"providerId", selected.providerId},
-                                  {"label", selected.modelId + " · 尚未验证"},
+                                  {"label", ai::modelDisplayName(selected.modelId) + " · 尚未验证"},
                                   {"availability", int(ai::ModelAvailability::Unverified)}});
     if (!containsSelected && selected.providerId == ai::QwenProviderId) {
         auto placeholder = result.first().toMap();
@@ -172,13 +172,14 @@ QString AiBridge::defaultModelCapabilities() const {
         parts << QString("上下文 %1 tokens").arg(model->capabilities.contextWindow);
     if (model->capabilities.maxOutputTokens > 0)
         parts << QString("输出上限 %1 tokens").arg(model->capabilities.maxOutputTokens);
-    parts << (model->providerId == ai::QwenProviderId && model->capabilities.reasoningEfforts.contains("default")
-                  ? QStringLiteral("支持开启或关闭思考（模型默认预算）")
-                  : model->providerId == ai::QwenProviderId
-                      ? QStringLiteral("未提供可用的思考选项")
-                  : model->capabilities.reasoningMetadataKnown
-                      ? QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / "))
-                      : QStringLiteral("思考能力未知"));
+    if (model->providerId == ai::QwenProviderId) {
+        auto strengths = model->capabilities.reasoningEfforts; strengths.removeAll("default");
+        parts << (!strengths.isEmpty() ? QString("思考强度 %1 / 模型默认").arg(strengths.join(" / ").toUpper())
+                  : model->capabilities.reasoningEfforts.contains("default") ? QStringLiteral("支持开启或关闭思考（模型默认预算）")
+                  : QStringLiteral("未提供可用的思考选项"));
+    } else parts << (model->capabilities.reasoningMetadataKnown
+                         ? QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / "))
+                         : QStringLiteral("思考能力未知"));
     if (model->capabilities.thinkingRequired) parts << QStringLiteral("始终开启思考");
     parts << (model->protocol.supportsStructuredChat()
                   ? QStringLiteral("请求协议已确认") : QStringLiteral("请求协议未确认，暂不可调用"));

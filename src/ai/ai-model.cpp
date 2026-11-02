@@ -28,12 +28,12 @@ QStringList strings(const QJsonValue &value) {
     return result;
 }
 
-QStringList supportedEfforts(const QJsonValue &value, bool allowDefault = false) {
+QStringList supportedEfforts(const QJsonValue &value, bool allowQwen = false) {
     static const QSet<QString> supported{"low", "high", "max"};
     QStringList result;
     for (const auto &effort : strings(value)) {
         const auto normalized = effort.trimmed().toLower();
-        if ((supported.contains(normalized) || (allowDefault && normalized == "default")) && !result.contains(normalized))
+        if ((supported.contains(normalized) || (allowQwen && (normalized == "default" || normalized == "medium" || normalized == "xhigh"))) && !result.contains(normalized))
             result.append(normalized);
     }
     return result;
@@ -67,6 +67,27 @@ QString defaultModelId(const QString &id) {
     if (id == KimiProviderId) return QStringLiteral("kimi-k3");
     if (id == QwenProviderId) return QStringLiteral("qwen3.8-max");
     return {};
+}
+
+QString modelDisplayName(const QString &modelId, const QString &advertisedName) {
+    auto text = advertisedName.trimmed();
+    if (text.isEmpty() || text.compare(modelId, Qt::CaseInsensitive) == 0) {
+        auto parts = modelId.split('-');
+        static const QHash<QString, QString> words{{"flash","Flash"},{"max","Max"},{"plus","Plus"},
+            {"pro","Pro"},{"turbo","Turbo"},{"preview","Preview"},{"latest","Latest"},
+            {"code","Code"},{"coder","Coder"},{"chat","Chat"},{"math","Math"},
+            {"reasoner","Reasoner"},{"highspeed","Highspeed"},{"omni","Omni"},{"vl","VL"},{"mt","MT"}};
+        static const QRegularExpression versionOrSize(QStringLiteral("^(?:[kv][0-9].*|[0-9]+[kbt])$"));
+        for (auto &part : parts) {
+            const auto lower = part.toLower();
+            if (words.contains(lower)) part = words.value(lower);
+            else if (versionOrSize.match(lower).hasMatch()) part = part.toUpper();
+        }
+        text = parts.join('-');
+    }
+    for (const auto &brand : {QStringLiteral("DeepSeek"), QStringLiteral("KIMI"), QStringLiteral("Qwen"), QStringLiteral("Moonshot")})
+        text.replace(QRegularExpression("\\b" + brand, QRegularExpression::CaseInsensitiveOption), brand);
+    return text;
 }
 
 qint64 nonNegativeJsonInteger(const QJsonValue &value, bool *valid) {
@@ -182,6 +203,9 @@ ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QSt
                         QVersionNumber::compare(QVersionNumber::fromString(family.captured(1)), QVersionNumber(3, 7)) >= 0) {
                         model.capabilities.reasoningEfforts = {"default"};
                         model.capabilities.defaultReasoningEffort = "default";
+                        if (QVersionNumber::fromString(family.captured(1)) == QVersionNumber(3, 8) &&
+                            (family.captured(2) == "max" || family.captured(2) == "flash"))
+                            model.capabilities.reasoningEfforts << "low" << "medium" << "xhigh";
                     }
                 }
                 catalog.models.append(model);
@@ -406,7 +430,8 @@ QString validateModelSelection(const ModelInfo *selected, const QString &provide
         return QStringLiteral("此模型始终开启思考，请选择 LOW、HIGH 或 MAX 思考强度");
     if (thinkingEnabled && (!selected->capabilities.reasoningMetadataKnown ||
         !selected->capabilities.reasoningEfforts.contains(effort) ||
-        (effort != "low" && effort != "high" && effort != "max" && !(providerId == QwenProviderId && effort == "default"))))
+        (effort != "low" && effort != "high" && effort != "max" &&
+         !(providerId == QwenProviderId && (effort == "default" || effort == "medium" || effort == "xhigh")))))
         return QStringLiteral("当前模型不支持所选思考强度，请重新选择");
     return {};
 }

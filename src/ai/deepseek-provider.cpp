@@ -194,17 +194,18 @@ quint64 DeepSeekProvider::complete(const QString &apiKey, const ChatCompletionRe
     }
     auto payload = deepSeekChatPayload(wireRequest, &payloadError);
     if (m_providerId == QwenProviderId && !payload.isEmpty()) {
-        if (chat.thinkingEnabled && chat.reasoningEffort != "default") {
-            payloadError = QStringLiteral("Qwen 思考模式请使用模型默认预算");
+        if (chat.thinkingEnabled && !QStringList{"default", "low", "medium", "xhigh"}.contains(chat.reasoningEffort)) {
+            payloadError = QStringLiteral("Qwen 思考强度无效，请重新选择");
             payload = {};
         } else {
             payload.remove("thinking");
             payload.remove("reasoning_effort");
+            if (chat.thinkingEnabled && chat.reasoningEffort != "default") payload["reasoning_effort"] = chat.reasoningEffort;
             if (chat.modelId != "qwen-max") payload["enable_thinking"] = chat.thinkingEnabled;
         }
     } else if (m_providerId == KimiProviderId && usesKimiK3Protocol(chat.modelId) && !payload.isEmpty()) {
         if (!chat.thinkingEnabled) {
-            payloadError = QStringLiteral("Kimi K3 始终开启思考，请选择思考强度");
+            payloadError = QStringLiteral("KIMI K3 始终开启思考，请选择思考强度");
             payload = {};
         } else {
             payload.remove("thinking");

@@ -28,6 +28,30 @@ void shot(QQuickWindow *w, const QString &name) {
 class PhaseEUiTests final : public QObject {
     Q_OBJECT
 private slots:
+    void songRowPlaybackIconsAreLargerAndFollowTransportState() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem(); auto *player=f.shell->facade();
+        const auto key=QString::number(f.a.id);
+        auto *button=visual(root,"trackPlayback-"+key), *favorite=visual(root,"trackFavorite-"+key); QVERIFY(button); QVERIFY(favorite);
+        QTRY_VERIFY(player->seekable()); player->seek(3000); QTRY_VERIFY(player->position()>=3000);
+        for (const QSize size:{QSize(1000,660),QSize(1240,790)}) {
+            w->resize(size); QTest::qWait(80); f.shell->playbackBridge()->pause();
+            QTRY_COMPARE(button->property("symbol").toString(),QString("play")); QVERIFY(button->isVisible());
+            auto *icon=qvariant_cast<QQuickItem *>(button->property("contentItem")); QVERIFY(icon); QVERIFY(icon->width()>=24); QVERIFY(icon->height()>=24);
+            QVERIFY(bounds(button).right()<=bounds(favorite).left());
+            shot(w,size.width()==1000?"track-play-icon-compact":"track-play-icon-wide");
+            const auto position=player->position();
+            QVERIFY(click(w,button)); QTRY_VERIFY(player->playing()); QTRY_COMPARE(button->property("symbol").toString(),QString("pause"));
+            QVERIFY(player->position()>=position-100);
+            shot(w,size.width()==1000?"track-pause-icon-compact":"track-pause-icon-wide");
+            QVERIFY(click(w,button)); QTRY_VERIFY(!player->playing()); QTRY_COMPARE(button->property("symbol").toString(),QString("play"));
+            QVERIFY(player->position()>=position-100);
+        }
+        auto *other=visual(root,"trackPlayback-"+QString::number(f.b.id)); QVERIFY(other);
+        QTest::mouseMove(w,bounds(other).center().toPoint()); QTRY_VERIFY(other->isVisible());
+        QCOMPARE(other->property("symbol").toString(),QString("play")); QVERIFY(click(w,other));
+        QTRY_COMPARE(player->current().id,f.b.id);
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void lyricsWorkspaceAnimatesAndTogglesPreserveSelection() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         const auto missing=seed(f.library,"Missing lyrics","phase-e-missing"); QVERIFY(missing.id);
@@ -310,17 +334,29 @@ private slots:
         QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTest::qWait(300);
         auto *models=visual(root,"aiDefaultModel"); QVERIFY(models); QCOMPARE(models->property("count").toInt(),6);
         QCOMPARE(models->property("currentValue").toString(),QString("qwen3.8-max"));
-        QVERIFY(bridge->defaultModelCapabilities().contains("支持开启或关闭思考"));
+        QVERIFY(bridge->defaultModelCapabilities().contains("LOW / MEDIUM / XHIGH"));
         shot(w,"qwen-recommended-models");
         QVERIFY(click(w,models)); QTest::qWait(280); shot(w,"qwen-recommended-dropdown");
         auto *popup=qvariant_cast<QObject *>(models->property("popup")); QVERIFY(popup);
         QVERIFY(QMetaObject::invokeMethod(popup,"close")); QTest::qWait(180);
         auto *thinking=visual(root,"aiDefaultThinking"); QVERIFY(thinking); QVERIFY(thinking->isEnabled());
-        QCOMPARE(thinking->property("count").toInt(),2); QCOMPARE(thinking->property("currentValue").toString(),QString("off"));
-        QVERIFY(click(w,thinking)); QTest::qWait(280); QTest::keyClick(w,Qt::Key_Down); QTest::keyClick(w,Qt::Key_Return);
+        QCOMPARE(thinking->property("count").toInt(),5); QCOMPARE(thinking->property("currentValue").toString(),QString("off"));
+        QVERIFY(click(w,thinking)); QTest::qWait(280);
+        auto *thinkingPopup=qvariant_cast<QObject *>(thinking->property("popup")); QVERIFY(thinkingPopup);
+        auto *choices=qvariant_cast<QQuickItem *>(thinkingPopup->property("contentItem")); QVERIFY(choices);
+        auto *choiceContent=qvariant_cast<QQuickItem *>(choices->property("contentItem")); QVERIFY(choiceContent);
+        QQuickItem *enableChoice=nullptr;
+        for (auto *item:choiceContent->childItems()) if (item->property("text").toString()=="开启思考（模型默认）") enableChoice=item;
+        QVERIFY(click(w,enableChoice));
         QTRY_COMPARE(f.runtime->configuration().defaults.reasoningEffort,QString("default"));
         QVERIFY(f.runtime->configuration().defaults.thinkingEnabled); QTest::qWait(180); shot(w,"qwen-thinking-enabled");
+        QVERIFY(click(w,thinking)); QTest::qWait(280); shot(w,"qwen-strength-options");
+        QQuickItem *mediumChoice=nullptr;
+        for (auto *item:choiceContent->childItems()) if (item->property("text").toString()=="MEDIUM") mediumChoice=item;
+        QVERIFY(click(w,mediumChoice)); QTRY_COMPARE(f.runtime->configuration().defaults.reasoningEffort,QString("medium"));
         auto *translation=f.shell->translationBridge(); QVERIFY(translation->setTargetTrack(QString::number(f.a.id))); QVERIFY(translation->classify(1));
+        const auto mediumTask=translation->prepareAi(); QVERIFY2(!mediumTask.isEmpty(),qPrintable(translation->status())); translation->declineConsent();
+        QVERIFY(bridge->setThinkingEffort(false,"default"));
         for (const auto &id:qwen_fixture::CurrentModels) {
             QVERIFY(bridge->edit("modelId",id)); QVERIFY(bridge->save());
             QVERIFY(f.runtime->validateConfiguration(f.runtime->configuration().defaults).isEmpty());
@@ -349,7 +385,7 @@ private slots:
         QVERIFY(f.runtime->saveConfiguration(configuration)); QVERIFY(f.runtime->acceptModelCatalog("deepseek",{}));
         auto *effective=visual(root,"aiEffectiveTranslationStatus"); QVERIFY(effective);
         QVERIFY(effective->property("text").toString().contains("独立配置"));
-        QVERIFY(effective->property("text").toString().contains("DeepSeek / deepseek-flash"));
+        QVERIFY(effective->property("text").toString().contains("DeepSeek / DeepSeek-Flash"));
         QVERIFY(click(w,visual(root,"aiSettingsBack"))); QTest::qWait(300);
         QVERIFY(click(w,visual(root,"navigation0"))); QTRY_COMPARE(f.shell->appBridge()->page(),0); QTest::qWait(280);
         QVERIFY(click(w,visual(root,"findMissingLyrics"))); QTest::qWait(300);
@@ -359,13 +395,13 @@ private slots:
         auto *button=visual(root,"translateAiButton"), *hint=visual(root,"lyricsAiConfigurationStatus"); QVERIFY(button); QVERIFY(hint);
         QVERIFY(!button->isEnabled()); QVERIFY(hint->property("text").toString().contains("请先选择“需要翻译”"));
         QVERIFY(translation->classify(1)); QVERIFY(button->isEnabled());
-        QVERIFY(hint->property("text").toString().contains("DeepSeek / deepseek-flash"));
+        QVERIFY(hint->property("text").toString().contains("DeepSeek / DeepSeek-Flash"));
         QVERIFY(translation->prepareAi().isEmpty()); QVERIFY(translation->status().contains("独立配置"));
-        QVERIFY(translation->status().contains("deepseek-flash")); QCOMPARE(f.http.requestCount(),0);
+        QVERIFY(translation->status().contains("DeepSeek-Flash")); QCOMPARE(f.http.requestCount(),0);
         shot(w,"kimi-translation-override-status");
         QVERIFY(bridge->edit("translationUsesDefaults",true)); QVERIFY(bridge->save());
         QVERIFY(hint->property("text").toString().contains("全局默认配置"));
-        QVERIFY(hint->property("text").toString().contains("KIMI / kimi-k3 · LOW"));
+        QVERIFY(hint->property("text").toString().contains("KIMI / KIMI-K3 · LOW"));
         const auto task=translation->prepareAi(); QVERIFY2(!task.isEmpty(),qPrintable(translation->status()));
         QCOMPARE(f.http.requestCount(),0); translation->declineConsent();
         shot(w,"kimi-translation-ready");

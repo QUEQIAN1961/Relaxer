@@ -108,7 +108,7 @@ Item {
                         width:table.columnWidths[0];height:parent.height
                         CheckBox{visible:table.bulkMode;anchors.centerIn:parent;checked:table.checkedKeys.indexOf(row.trackKey)>=0;onClicked:table.toggleKey(row.trackKey)}
                         UiText { fontRegion: "songs";visible:!table.bulkMode&&!hover.containsMouse&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
-                        IconButton{visible:!table.bulkMode&&(hover.containsMouse||table.currentKey===row.trackKey);anchors.centerIn:parent;width:28;height:28;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"volumeMedium":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:table.playRequested(row.trackKey)}
+                        IconButton{objectName:"trackPlayback-"+row.trackKey;visible:!table.bulkMode&&(hover.containsMouse||table.currentKey===row.trackKey);anchors.centerIn:parent;width:30;height:30;padding:3;horizontalPadding:3;verticalPadding:3;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"pause":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:if(table.currentKey===row.trackKey)playbackBridge.toggle();else table.playRequested(row.trackKey)}
                     }
                     Item{width:table.columnWidths[1];height:parent.height;IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;width:30;height:30;padding:3;symbol:row.favorite?"liked":"heart";tint:row.favorite?Theme.accent:Theme.secondary;onClicked:if(!table.bulkMode)table.favoriteRequested(row.trackKey)}}
                     Item{
