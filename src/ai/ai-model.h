@@ -42,6 +42,7 @@ struct ModelInfo {
     QString providerId;
     QString id;
     QString displayName;
+    QString publishedTime;
     ModelCapabilities capabilities;
     ModelProtocolCapabilities protocol;
     ModelAvailability availability = ModelAvailability::Unverified;
@@ -51,6 +52,7 @@ struct ModelCatalogResult {
     QList<ModelInfo> models;
     QString error;
     bool ok = false;
+    int nextPage = 0;
 };
 
 class ModelRegistry final {
@@ -71,6 +73,7 @@ qint64 nonNegativeJsonInteger(const QJsonValue &value, bool *valid = nullptr);
 
 ModelCatalogResult parseDeepSeekModelCatalog(const QByteArray &body);
 ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QString &providerId);
+QList<ModelInfo> recommendedQwenModels(const QList<ModelInfo> &models);
 QJsonObject modelToJson(const ModelInfo &model);
 ModelInfo modelFromJson(const QJsonObject &object);
 QString modelAvailabilityText(ModelAvailability availability);

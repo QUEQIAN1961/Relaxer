@@ -192,7 +192,15 @@ const ModelInfo *AiRuntime::model(const QString &providerId, const QString &mode
     return m_models.find(providerId, modelId);
 }
 
-QList<ModelInfo> AiRuntime::models(const QString &providerId) const { return m_models.models(providerId); }
+QList<ModelInfo> AiRuntime::models(const QString &providerId) const {
+    auto all = m_models.models(providerId);
+    if (providerId == QwenProviderId) return recommendedQwenModels(all);
+    if (providerId.isEmpty()) {
+        all.removeIf([](const ModelInfo &model) { return model.providerId == QwenProviderId; });
+        all.append(recommendedQwenModels(m_models.models(QString::fromLatin1(QwenProviderId))));
+    }
+    return all;
+}
 
 bool AiRuntime::hasCredential(const QString &providerId, QString *error) const {
     if (!m_credentials || (m_deepSeek && m_deepSeek->usesMockEndpoint() && !m_credentials->allowsMockRequests())) {

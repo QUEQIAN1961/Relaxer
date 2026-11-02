@@ -1,5 +1,6 @@
 #include "ai/ai-settings-page.h"
 #include "library.h"
+#include "qwen-model-fixture.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -80,6 +81,21 @@ ModelInfo liveModel(QString id, QString name, bool reasoning = true) {
 class AiSettingsWidgetsTests final : public QObject {
     Q_OBJECT
   private slots:
+    void qwenModelDropdownsOnlyShowRecommendedModels() {
+        QTemporaryDir directory; Library library(directory.filePath("data")); QVERIFY(library.open());
+        AiRuntime runtime(&library,std::make_unique<MemoryCredentials>());
+        auto ids=qwen_fixture::CurrentModels; ids << "qwen-plus" << "qwen-mt-plus" << "qwen3.8-omni-flash";
+        const auto catalog=parseCompatibleModelCatalog(qwen_fixture::catalog(ids),"qwen"); QVERIFY(catalog.ok);
+        QVERIFY(runtime.acceptModelCatalog("qwen",catalog.models));
+        auto configuration=runtime.configuration(); configuration.defaults={"qwen","qwen3.8-max",false,{}};
+        configuration.translationUsesDefaults=false; configuration.translationOverride={"qwen","qwen-mt-plus",false,{}};
+        QVERIFY(runtime.saveConfiguration(configuration)); AiSettingsPage page(&runtime);
+        auto *global=page.findChild<QComboBox *>("aiDefaultModel"), *translation=page.findChild<QComboBox *>("aiTranslationModel"); QVERIFY(global); QVERIFY(translation);
+        QCOMPARE(global->count(),6); QCOMPARE(translation->count(),6); QCOMPARE(translation->currentIndex(),0);
+        for (const auto &id:qwen_fixture::CurrentModels) { QVERIFY(global->findData(id)>0); QVERIFY(translation->findData(id)>0); }
+        QVERIFY(global->findData("qwen-plus")<0); QVERIFY(translation->findData("qwen-mt-plus")<0);
+        QCOMPARE(runtime.configuration().translationOverride.modelId,QString("qwen-mt-plus"));
+    }
     void kimiK3OffersReasoningStrengthsWithoutAnOffChoice() {
         QTemporaryDir directory; Library library(directory.filePath("data")); QVERIFY(library.open());
         AiRuntime runtime(&library,std::make_unique<MemoryCredentials>());

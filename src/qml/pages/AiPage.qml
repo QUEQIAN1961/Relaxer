@@ -139,7 +139,9 @@ ColumnLayout {
                 }
                 UiText {
                     Layout.fillWidth: true
-                    text: "连接验证只读取模型列表，不会请求翻译。"
+                    text: aiBridge.draft.providerId === "qwen"
+                        ? "刷新时读取百炼官方能力目录，自动精选最新 Max、其快照、上一代 Max，以及最新 Plus 和 Flash；不调用 AI，不自动切换已选模型。"
+                        : "连接验证只读取模型列表，不会请求翻译。"
                     wrapMode: Text.Wrap
                     color: Theme.secondary
                     font.pixelSize: 14
@@ -167,7 +169,7 @@ ColumnLayout {
                         model: aiBridge.defaultModels
                         textRole: "label"
                         valueRole: "id"
-                        currentIndex: indexOfValue(aiBridge.draft.modelId)
+                        currentIndex: Math.max(0, indexOfValue(aiBridge.draft.modelId))
                         enabled: aiBridge.draft.providerId.length > 0
                         onActivated: page.saveField("modelId", currentValue)
 
@@ -266,7 +268,7 @@ ColumnLayout {
                         model: aiBridge.translationModels
                         textRole: "label"
                         valueRole: "id"
-                        currentIndex: indexOfValue(aiBridge.draft.translationModelId)
+                        currentIndex: Math.max(0, indexOfValue(aiBridge.draft.translationModelId))
                         enabled: !aiBridge.draft.translationUsesDefaults && aiBridge.draft.translationProviderId.length > 0
                         onActivated: page.saveField("translationModelId", currentValue)
                     }

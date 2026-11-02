@@ -4,6 +4,8 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QSet>
+#include <QRegularExpression>
+#include <QVersionNumber>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -58,7 +60,7 @@ bool isSupportedProvider(const QString &id) {
 QString defaultModelId(const QString &id) {
     if (id == DeepSeekProviderId) return QStringLiteral("deepseek-flash");
     if (id == KimiProviderId) return QStringLiteral("kimi-k3");
-    if (id == QwenProviderId) return QStringLiteral("qwen-plus");
+    if (id == QwenProviderId) return QStringLiteral("qwen3.8-max");
     return {};
 }
 
@@ -131,6 +133,51 @@ ModelCatalogResult parseDeepSeekModelCatalog(const QByteArray &body) {
 }
 
 ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QString &providerId) {
+    if (providerId == QwenProviderId) {
+        const auto root = QJsonDocument::fromJson(body).object();
+        if (root.contains("output") || root.contains("success")) {
+            ModelCatalogResult catalog;
+            const auto output = root.value("output").toObject();
+            const auto entries = output.value("models").toArray();
+            bool validTotal = false;
+            const auto total = nonNegativeJsonInteger(output.value("total"), &validTotal);
+            const auto page = nonNegativeJsonInteger(output.value("page_no"));
+            const auto size = nonNegativeJsonInteger(output.value("page_size"));
+            if (!root.value("success").toBool() || !output.value("models").isArray() ||
+                !validTotal || page < 1 || size < 1 || page > 100000 || size > 1000 ||
+                total < (page - 1) * size || entries.size() != qMin(size, total - (page - 1) * size)) {
+                catalog.error = QStringLiteral("百炼模型能力目录响应不完整");
+                return catalog;
+            }
+            for (const auto &entry : entries) {
+                const auto item = entry.toObject();
+                if (item.value("provider").toString() != "qwen") continue;
+                ModelInfo model;
+                model.providerId = providerId;
+                model.id = item.value("model").toString().trimmed();
+                if (model.id.isEmpty()) continue;
+                // Keep API IDs visible; translated marketing names are often identical across snapshots.
+                model.displayName = model.id;
+                model.publishedTime = item.value("published_time").toString();
+                model.availability = ModelAvailability::Available;
+                const auto modality = item.value("inference_metadata").toObject();
+                for (const auto &value : strings(modality.value("request_modality"))) model.capabilities.inputModalities << value.toLower();
+                for (const auto &value : strings(modality.value("response_modality"))) model.capabilities.outputModalities << value.toLower();
+                const auto limits = item.value("model_info").toObject();
+                model.capabilities.contextWindow = nonNegativeJsonInteger(limits.value("context_window"));
+                model.capabilities.maxOutputTokens = nonNegativeJsonInteger(limits.value("max_output_tokens"));
+                if (strings(item.value("capabilities")).contains("TG") &&
+                    strings(item.value("features")).contains("structured-outputs")) {
+                    model.protocol = {true, true, true, true};
+                    model.capabilities.reasoningMetadataKnown = true;
+                }
+                catalog.models.append(model);
+            }
+            catalog.nextPage = page * size < total ? int(page + 1) : 0;
+            catalog.ok = true;
+            return catalog;
+        }
+    }
     auto result = parseDeepSeekModelCatalog(body);
     for (auto &model : result.models) {
         model.providerId = providerId;
@@ -176,11 +223,54 @@ ModelCatalogResult parseCompatibleModelCatalog(const QByteArray &body, const QSt
     return result;
 }
 
+QList<ModelInfo> recommendedQwenModels(const QList<ModelInfo> &models) {
+    static const QRegularExpression family(QStringLiteral("^qwen([1-9][0-9]*(?:\\.[0-9]+)*)-(max|plus|flash)(?:-([0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2}))?$"));
+    QList<ModelInfo> aliases, snapshots;
+    for (const auto &model : models) {
+        if (model.providerId != QwenProviderId || model.availability == ModelAvailability::Unavailable ||
+            !model.protocol.supportsStructuredChat() || !model.capabilities.inputModalities.contains("text") ||
+            !model.capabilities.outputModalities.contains("text") || model.capabilities.contextWindow <= 0 ||
+            model.capabilities.maxOutputTokens <= 0) continue;
+        const auto match = family.match(model.id);
+        if (!match.hasMatch()) continue;
+        (match.captured(3).isEmpty() ? aliases : snapshots).append(model);
+    }
+    std::sort(aliases.begin(), aliases.end(), [&](const ModelInfo &a, const ModelInfo &b) {
+        return QVersionNumber::compare(QVersionNumber::fromString(family.match(a.id).captured(1)),
+                                       QVersionNumber::fromString(family.match(b.id).captured(1))) > 0;
+    });
+    QList<ModelInfo> result;
+    QString maxVersion;
+    for (const auto &model : aliases) {
+        const auto match = family.match(model.id);
+        if (match.captured(2) == "max") {
+            if (maxVersion.isEmpty()) {
+                result.append(model); maxVersion = match.captured(1);
+                QList<ModelInfo> currentSnapshots;
+                for (const auto &snapshot : snapshots)
+                    if (snapshot.id.startsWith("qwen" + maxVersion + "-max-")) currentSnapshots.append(snapshot);
+                std::sort(currentSnapshots.begin(), currentSnapshots.end(), [](const ModelInfo &a, const ModelInfo &b) {
+                    if (a.publishedTime != b.publishedTime) return a.publishedTime > b.publishedTime;
+                    // Prefer the short API ID when the same snapshot has two aliases.
+                    if (a.id.size() != b.id.size()) return a.id.size() < b.id.size();
+                    return a.id > b.id;
+                });
+                if (!currentSnapshots.isEmpty()) result.append(currentSnapshots.first());
+            } else { result.append(model); break; }
+        }
+    }
+    for (const auto &tier : {QStringLiteral("plus"), QStringLiteral("flash")})
+        for (const auto &model : aliases)
+            if (family.match(model.id).captured(2) == tier) { result.append(model); break; }
+    return result;
+}
+
 QJsonObject modelToJson(const ModelInfo &model) {
     const auto &cap = model.capabilities;
     return {{"providerId", model.providerId},
             {"id", model.id},
             {"displayName", model.displayName},
+            {"publishedTime", model.publishedTime},
             {"inputModalities", toArray(cap.inputModalities)},
             {"outputModalities", toArray(cap.outputModalities)},
             {"reasoningEfforts", toArray(cap.reasoningEfforts)},
@@ -200,6 +290,7 @@ ModelInfo modelFromJson(const QJsonObject &object) {
     model.providerId = object.value("providerId").toString();
     model.id = object.value("id").toString();
     model.displayName = object.value("displayName").toString();
+    model.publishedTime = object.value("publishedTime").toString();
     if (model.displayName.isEmpty())
         model.displayName = model.id;
     model.capabilities.inputModalities = strings(object.value("inputModalities"));

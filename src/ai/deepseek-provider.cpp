@@ -8,6 +8,7 @@
 #include <QNetworkRequest>
 #include <QTimer>
 #include <QNetworkProxy>
+#include <QUrlQuery>
 #include <utility>
 
 namespace relaxer::ai {
@@ -153,8 +154,18 @@ QUrl DeepSeekProvider::endpoint(const QString &path) const {
     if (!suffix.startsWith('/'))
         suffix.prepend('/');
     url.setPath(m_baseUrl.path() + suffix);
-    url.setQuery({});
+    url.setQuery(QString());
     url.setFragment({});
+    if (m_providerId == QwenProviderId && suffix == "/models") {
+        url.setPath("/api/v1/models");
+        QUrlQuery query;
+        query.addQueryItem("providers", "qwen");
+        query.addQueryItem("features", "structured-outputs");
+        query.addQueryItem("capabilities", "TG");
+        query.addQueryItem("page_size", "100");
+        query.addQueryItem("page_no", "1");
+        url.setQuery(query);
+    }
     return url;
 }
 
@@ -234,11 +245,20 @@ quint64 DeepSeekProvider::send(Kind kind, const QString &apiKey, const QByteArra
     request.setTransferTimeout(0);
     if (kind == Kind::Completion)
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    auto *reply = kind == Kind::Models ? m_network.get(request) : m_network.post(request, body);
+    Pending pending;
+    pending.kind = kind;
+    pending.budget = timeoutBudget(kind == Kind::Models ? RequestOperation::Models : RequestOperation::Completion);
+    pending.elapsed.start();
+    startRequest(id, pending, request, body);
+    return id;
+}
+
+void DeepSeekProvider::startRequest(quint64 id, Pending pending, const QNetworkRequest &request, const QByteArray &body) {
+    auto *reply = pending.kind == Kind::Models ? m_network.get(request) : m_network.post(request, body);
     auto *timer = new QTimer(this);
     timer->setSingleShot(true);
-    Pending pending{kind, reply, timer, {}, timeoutBudget(kind == Kind::Models ? RequestOperation::Models : RequestOperation::Completion)};
-    pending.elapsed.start();
+    pending.reply = reply;
+    pending.timer = timer;
     m_pending.insert(id, pending);
     connect(timer, &QTimer::timeout, reply, [reply] {
         if (!reply->isFinished()) {
@@ -247,8 +267,7 @@ quint64 DeepSeekProvider::send(Kind kind, const QString &apiKey, const QByteArra
         }
     });
     connect(reply, &QNetworkReply::finished, this, [this, id] { finish(id); });
-    timer->start(pending.budget.providerMs);
-    return id;
+    timer->start(qMax<qint64>(0, pending.budget.providerMs - pending.elapsed.elapsed()));
 }
 
 bool DeepSeekProvider::cancel(quint64 requestId) {
@@ -318,10 +337,25 @@ void DeepSeekProvider::finish(quint64 requestId) {
 
     if (pending.kind == Kind::Models) {
         const auto parsed = m_providerId == DeepSeekProviderId ? parseDeepSeekModelCatalog(body) : parseCompatibleModelCatalog(body, m_providerId);
-        if (parsed.ok)
-            emit modelsFinished(requestId, parsed.models, {});
-        else
+        if (!parsed.ok) {
             emit modelsFinished(requestId, {}, invalidResponse(parsed.error));
+            return;
+        }
+        auto next = pending;
+        next.catalog.append(parsed.models);
+        if (parsed.nextPage) {
+            if (parsed.nextPage != pending.modelPage + 1) {
+                emit modelsFinished(requestId, {}, invalidResponse("百炼模型目录页码不连续"));
+                return;
+            }
+            auto request = reply->request();
+            auto url = request.url(); QUrlQuery query(url);
+            query.removeAllQueryItems("page_no"); query.addQueryItem("page_no", QString::number(parsed.nextPage));
+            url.setQuery(query); request.setUrl(url); next.modelPage = parsed.nextPage;
+            startRequest(requestId, next, request);
+            return;
+        }
+        emit modelsFinished(requestId, next.catalog, {});
         return;
     }
 

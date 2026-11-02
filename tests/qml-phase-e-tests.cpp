@@ -1,4 +1,5 @@
 #include "c4c5-ui-fixture.h"
+#include "qwen-model-fixture.h"
 #include <QApplication>
 #include <QDir>
 #include <QLineF>
@@ -297,6 +298,30 @@ private slots:
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(260);
         QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTest::qWait(300); shot(w,"ai-providers");
         auto *providers=visual(root,"aiProviderSelection"); QVERIFY(providers); QCOMPARE(providers->property("count").toInt(),4);
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void qwenRecommendedModelsCanPrepareLyricsTranslation() {
+        Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem(); auto *bridge=f.shell->aiBridge();
+        auto ids=qwen_fixture::CurrentModels; ids << "qwen-mt-plus" << "qwen-plus";
+        const auto catalog=ai::parseCompatibleModelCatalog(qwen_fixture::catalog(ids),"qwen"); QVERIFY(catalog.ok);
+        QVERIFY(f.runtime->acceptModelCatalog("qwen",catalog.models)); QVERIFY(f.runtime->credentials()->store("qwen","fake-qwen-ui-key",nullptr));
+        QVERIFY(bridge->edit("providerId","qwen")); QVERIFY(bridge->save());
+        QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
+        QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTest::qWait(300);
+        auto *models=visual(root,"aiDefaultModel"); QVERIFY(models); QCOMPARE(models->property("count").toInt(),6);
+        QCOMPARE(models->property("currentValue").toString(),QString("qwen3.8-max"));
+        QVERIFY(bridge->defaultModelCapabilities().contains("当前歌词翻译使用非思考模式"));
+        shot(w,"qwen-recommended-models");
+        QVERIFY(click(w,models)); QTest::qWait(280); shot(w,"qwen-recommended-dropdown");
+        auto *popup=qvariant_cast<QObject *>(models->property("popup")); QVERIFY(popup);
+        QVERIFY(QMetaObject::invokeMethod(popup,"close")); QTest::qWait(180);
+        auto *translation=f.shell->translationBridge(); QVERIFY(translation->setTargetTrack(QString::number(f.a.id))); QVERIFY(translation->classify(1));
+        for (const auto &id:qwen_fixture::CurrentModels) {
+            QVERIFY(bridge->edit("modelId",id)); QVERIFY(bridge->save());
+            const auto task=translation->prepareAi(); QVERIFY2(!task.isEmpty(),qPrintable(translation->status()));
+            translation->declineConsent();
+        }
+        QCOMPARE(f.http.requestCount(),0);
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void kimiK3SettingsCanPrepareLyricsTranslation() {

@@ -7,6 +7,7 @@
 #include <QPointer>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QNetworkRequest>
 
 namespace relaxer::ai {
 
@@ -37,6 +38,8 @@ class DeepSeekProvider final : public AiProvider {
         QPointer<QTimer> timer;
         QElapsedTimer elapsed;
         TimeoutBudget budget{0, 0};
+        QList<ModelInfo> catalog;
+        int modelPage = 1;
     };
     quint64 listModels(const QString &apiKey) override;
     quint64 complete(const QString &apiKey, const ChatCompletionRequest &request) override;
@@ -50,6 +53,7 @@ class DeepSeekProvider final : public AiProvider {
     int m_modelsTimeoutMs = 30000;
     int m_completionTimeoutMs = 180000;
     quint64 send(Kind kind, const QString &apiKey, const QByteArray &body = {});
+    void startRequest(quint64 id, Pending pending, const QNetworkRequest &request, const QByteArray &body = {});
     void finish(quint64 requestId);
 };
 

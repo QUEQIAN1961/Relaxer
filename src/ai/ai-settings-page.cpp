@@ -133,7 +133,7 @@ AiSettingsPage::AiSettingsPage(AiRuntime *runtime, QWidget *parent)
     if (m_runtime) {
     connect(m_runtime, &AiRuntime::configurationChanged, this, &AiSettingsPage::populate);
     connect(m_runtime, &AiRuntime::modelCatalogFinished, this,
-            [this](quint64 taskId, const QString &, const QList<ModelInfo> &models, const ProviderError &error) {
+            [this](quint64 taskId, const QString &providerId, const QList<ModelInfo> &models, const ProviderError &error) {
         if (taskId != m_pendingRefresh)
             return;
         m_pendingRefresh = 0;
@@ -146,6 +146,9 @@ AiSettingsPage::AiSettingsPage(AiRuntime *runtime, QWidget *parent)
         if (models.isEmpty()) {
             m_providerStatus->setText("连接成功，但供应商未返回可用模型");
             m_translationStatus->setText("模型列表为空，请检查供应商状态");
+        } else if (providerId == QwenProviderId) {
+            m_providerStatus->setText(QString("连接成功，已自查 %1 个模型，精选显示 %2 个").arg(models.size()).arg(m_runtime->models(providerId).size()));
+            m_translationStatus->setText("模型列表已更新，Qwen 按官方能力目录自动精选。");
         } else {
             m_providerStatus->setText(QString("连接成功，已读取 %1 个模型").arg(models.size()));
             m_translationStatus->setText(QString("模型列表已更新（%1 个）").arg(models.size()));
@@ -553,10 +556,12 @@ void AiSettingsPage::updateModels() {
             combo->setItemData(index, QString("%1\n请求 ID: %2").arg(model.displayName, model.id), Qt::ToolTipRole);
         }
         auto index = combo->findData(selectedId);
-        if (!selectedId.isEmpty() && index < 0) {
+        if (!selectedId.isEmpty() && index < 0 && providerId != QwenProviderId) {
             combo->addItem(selectedId + "（尚未验证）", selectedId);
             index = combo->count() - 1;
         }
+        if (!selectedId.isEmpty() && index < 0 && providerId == QwenProviderId)
+            combo->setItemText(0, "原选模型不在精选列表，请重新选择");
         combo->setCurrentIndex(index >= 0 ? index : 0);
         combo->setEnabled(!providerId.isEmpty());
         combo->view()->setTextElideMode(Qt::ElideRight);
@@ -622,7 +627,7 @@ void AiSettingsPage::updateCapabilityText() {
         parts << QString("输出上限 %1 tokens").arg(model->capabilities.maxOutputTokens);
     if (model->capabilities.reasoningMetadataKnown)
         parts << (model->capabilities.reasoningEfforts.isEmpty()
-                      ? QStringLiteral("未提供思考强度")
+                      ? model->providerId == QwenProviderId ? QStringLiteral("当前歌词翻译使用非思考模式") : QStringLiteral("未提供思考强度")
                       : QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / ")));
     else
         parts << "思考能力未知";

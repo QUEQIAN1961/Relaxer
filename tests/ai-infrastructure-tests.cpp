@@ -3,6 +3,7 @@
 #include "ai/ai-runtime.h"
 #include "ai/deepseek-provider.h"
 #include "library.h"
+#include "qwen-model-fixture.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -41,6 +42,8 @@ class AiInfrastructureTests final : public QObject {
     void completionTimeoutsAreSingleTerminalAndIdentifyTheirLayer();
     void compatibleProvidersKeepCredentialsAndPayloadsSeparate();
     void kimiK3UsesRequiredReasoningAndCompletionTokenBudget();
+    void qwenCatalogSelectsCurrentAndFutureGeneralModels();
+    void qwenCatalogPaginationAndStructuredTranslation();
 
 };
 
@@ -830,7 +833,7 @@ void AiInfrastructureTests::compatibleProvidersKeepCredentialsAndPayloadsSeparat
         DeepSeekProvider official(id);
         QCOMPARE(official.endpoint("models").toString(), id == "kimi"
                  ? QString("https://api.moonshot.cn/v1/models")
-                 : QString("https://dashscope.aliyuncs.com/compatible-mode/v1/models"));
+                 : QString("https://dashscope.aliyuncs.com/api/v1/models?providers=qwen&features=structured-outputs&capabilities=TG&page_size=100&page_no=1"));
         HttpMock server; QVERIFY(server.listen());
         DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl(), id});
         ProviderRegistry providers; QVERIFY(providers.add(&provider));
@@ -838,7 +841,7 @@ void AiInfrastructureTests::compatibleProvidersKeepCredentialsAndPayloadsSeparat
         AiRequestCoordinator coordinator(&providers, &credentials, &models);
         QSignalSpy catalogs(&coordinator, &AiRequestCoordinator::modelsFinished);
         // Keep the older K2.5 serializer covered as well as the K3 default below.
-        const auto modelId = id == "kimi" ? QStringLiteral("kimi-k2.5") : defaultModelId(id);
+        const auto modelId = id == "kimi" ? QStringLiteral("kimi-k2.5") : QStringLiteral("qwen-plus");
         const auto catalog = QByteArray("{\"object\":\"list\",\"data\":[{\"id\":\"") + modelId.toUtf8() + "\"}]}";
         server.enqueue(200, catalog);
         QVERIFY(coordinator.fetchModels(id));
@@ -906,6 +909,60 @@ void AiInfrastructureTests::kimiK3UsesRequiredReasoningAndCompletionTokenBudget(
             QVERIFY(!body.contains("thinking")); QVERIFY(!body.contains("max_tokens")); QVERIFY(!body.contains("temperature")); QVERIFY(!body.contains("enable_thinking"));
         }
     }
+}
+
+void AiInfrastructureTests::qwenCatalogSelectsCurrentAndFutureGeneralModels() {
+    auto ids=qwen_fixture::CurrentModels;
+    ids << "qwen3.6-plus" << "qwen3.7-max-preview" << "qwen3.8-27b" << "qwen3.8-omni-flash"
+        << "qwen-mt-plus" << "qwen-image-3.0-pro" << "qwen-plus" << "kimi-k3" << "vendor/qwen3.8-max";
+    const auto catalog=parseCompatibleModelCatalog(qwen_fixture::catalog(ids),"qwen"); QVERIFY(catalog.ok);
+    QCOMPARE(qwen_fixture::ids(recommendedQwenModels(catalog.models)),qwen_fixture::CurrentModels);
+    for (const auto &model:recommendedQwenModels(catalog.models)) {
+        QVERIFY(validateModelSelection(&model,"qwen",model.id,false,{}).isEmpty());
+        QCOMPARE(model.capabilities.contextWindow,qint64(1000000)); QCOMPARE(model.capabilities.maxOutputTokens,qint64(131072));
+        QCOMPARE(modelFromJson(modelToJson(model)).publishedTime,model.publishedTime);
+    }
+    ids << "qwen3.9-max" << "qwen3.10-max" << "qwen3.10-max-2027-01-02" << "qwen3.9-plus" << "qwen4.0-flash";
+    auto root=QJsonDocument::fromJson(qwen_fixture::catalog(ids)).object(); auto output=root["output"].toObject();
+    auto entries=output["models"].toArray(); auto unknown=qwen_fixture::model("qwen99-max"); unknown["features"]=QJsonArray{};
+    entries.append(unknown); output["models"]=entries; output["total"]=entries.size(); root["output"]=output;
+    const auto future=parseCompatibleModelCatalog(QJsonDocument(root).toJson(),"qwen"); QVERIFY(future.ok);
+    const QStringList expected{"qwen3.10-max","qwen3.10-max-2027-01-02","qwen3.9-max","qwen3.9-plus","qwen4.0-flash"};
+    QCOMPARE(qwen_fixture::ids(recommendedQwenModels(future.models)),expected);
+    root["success"]=false; QVERIFY(!parseCompatibleModelCatalog(QJsonDocument(root).toJson(),"qwen").ok);
+    QVERIFY(!parseCompatibleModelCatalog(qwen_fixture::catalog({"qwen3.8-max"},1,3,5),"qwen").ok);
+}
+
+void AiInfrastructureTests::qwenCatalogPaginationAndStructuredTranslation() {
+    HttpMock server; QVERIFY(server.listen());
+    DeepSeekProvider provider(DeepSeekProvider::MockEndpoint{server.baseUrl(),"qwen"});
+    FakeCredentials credentials; QVERIFY(credentials.store("qwen","fake-qwen-catalog-key",nullptr));
+    ProviderRegistry providers; QVERIFY(providers.add(&provider)); ModelRegistry models;
+    AiRequestCoordinator coordinator(&providers,&credentials,&models); QSignalSpy catalogs(&coordinator,&AiRequestCoordinator::modelsFinished);
+    const auto ids=qwen_fixture::CurrentModels;
+    server.enqueue(200,qwen_fixture::catalog(ids.mid(0,3),1,3,5));
+    server.enqueue(200,qwen_fixture::catalog(ids.mid(3),2,3,5));
+    QVERIFY(coordinator.fetchModels("qwen")); QTRY_COMPARE(catalogs.size(),1);
+    QVERIFY(qvariant_cast<ProviderError>(catalogs[0][3]).isEmpty());
+    const auto live=qvariant_cast<QList<ModelInfo>>(catalogs[0][2]); QCOMPARE(qwen_fixture::ids(live),ids);
+    QCOMPARE(server.requestCount(),2); QVERIFY(server.request(0).startsWith("GET /api/v1/models?"));
+    QVERIFY(server.request(0).contains("features=structured-outputs")); QVERIFY(server.request(1).contains("page_no=2"));
+    models.applyLiveCatalog("qwen",live);
+    QSignalSpy completions(&coordinator,&AiRequestCoordinator::completionFinished);
+    for (const auto &id:ids) {
+        server.enqueue(200,R"({"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]})");
+        QVERIFY(coordinator.complete("qwen",{id,QJsonArray{QJsonObject{{"role","user"},{"content","Return JSON"}}},false,{},4096}));
+        QTRY_COMPARE(completions.size(),1); QVERIFY(qvariant_cast<ChatCompletionResult>(completions.takeFirst()[2]).ok());
+        const auto wire=server.request(server.requestCount()-1); QVERIFY(wire.startsWith("POST /chat/completions"));
+        const auto payload=QJsonDocument::fromJson(wire.mid(wire.indexOf("\r\n\r\n")+4)).object();
+        QCOMPARE(payload["model"].toString(),id); QCOMPARE(payload["response_format"].toObject()["type"].toString(),QString("json_object"));
+        QCOMPARE(payload["enable_thinking"].toBool(true),false); QCOMPARE(payload["max_tokens"].toInt(),4096);
+        QVERIFY(!payload.contains("thinking")); QVERIFY(!payload.contains("reasoning_effort"));
+    }
+    catalogs.clear(); server.enqueue(200,qwen_fixture::catalog(ids.mid(0,3),1,3,5)); server.enqueue(500,"{}");
+    QVERIFY(coordinator.fetchModels("qwen")); QTRY_COMPARE(catalogs.size(),1);
+    QVERIFY(!qvariant_cast<ProviderError>(catalogs[0][3]).isEmpty()); QVERIFY(qvariant_cast<QList<ModelInfo>>(catalogs[0][2]).isEmpty());
+    QCOMPARE(qwen_fixture::ids(models.models("qwen")),ids);
 }
 
 QTEST_GUILESS_MAIN(AiInfrastructureTests)

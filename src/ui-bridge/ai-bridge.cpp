@@ -16,12 +16,16 @@ AiBridge::AiBridge(ai::AiRuntime *runtime, QObject *parent)
     if (!runtime) return;
     connect(runtime, &ai::AiRuntime::configurationChanged, this, &AiBridge::synchronizeConfiguration);
     connect(runtime, &ai::AiRuntime::modelCatalogFinished, this,
-            [this](quint64 task, const QString &, const QList<ai::ModelInfo> &models,
+            [this](quint64 task, const QString &providerId, const QList<ai::ModelInfo> &models,
                    const ai::ProviderError &error) {
         if (task != m_request) return;
         m_request = 0;
         if (!error.isEmpty()) {
             status(error.message);
+            return;
+        }
+        if (providerId == ai::QwenProviderId) {
+            status(QString("连接成功，已自查 %1 个模型，精选显示 %2 个").arg(models.size()).arg(m_runtime->models(providerId).size()));
             return;
         }
         status(models.isEmpty() ? QStringLiteral("连接成功，但供应商未返回可用模型")
@@ -102,10 +106,15 @@ QVariantList AiBridge::modelChoices(bool translation) const {
         result.append(modelChoice(model));
         containsSelected = containsSelected || model.id == selected.modelId;
     }
-    if (!containsSelected)
+    if (!containsSelected && selected.providerId != ai::QwenProviderId)
         result.append(QVariantMap{{"id", selected.modelId}, {"providerId", selected.providerId},
                                   {"label", selected.modelId + " · 尚未验证"},
                                   {"availability", int(ai::ModelAvailability::Unverified)}});
+    if (!containsSelected && selected.providerId == ai::QwenProviderId) {
+        auto placeholder = result.first().toMap();
+        placeholder["label"] = QStringLiteral("原选模型不在精选列表，请重新选择");
+        result[0] = placeholder;
+    }
     return result;
 }
 
@@ -163,9 +172,11 @@ QString AiBridge::defaultModelCapabilities() const {
         parts << QString("上下文 %1 tokens").arg(model->capabilities.contextWindow);
     if (model->capabilities.maxOutputTokens > 0)
         parts << QString("输出上限 %1 tokens").arg(model->capabilities.maxOutputTokens);
-    parts << (model->capabilities.reasoningMetadataKnown
-                  ? QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / "))
-                  : QStringLiteral("思考能力未知"));
+    parts << (model->providerId == ai::QwenProviderId && model->capabilities.reasoningMetadataKnown && model->capabilities.reasoningEfforts.isEmpty()
+                  ? QStringLiteral("当前歌词翻译使用非思考模式")
+                  : model->capabilities.reasoningMetadataKnown
+                      ? QString("思考强度 %1").arg(model->capabilities.reasoningEfforts.join(" / "))
+                      : QStringLiteral("思考能力未知"));
     if (model->capabilities.thinkingRequired) parts << QStringLiteral("始终开启思考");
     parts << (model->protocol.supportsStructuredChat()
                   ? QStringLiteral("请求协议已确认") : QStringLiteral("请求协议未确认，暂不可调用"));

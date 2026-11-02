@@ -1,5 +1,6 @@
 #include "ui-bridge/ai-bridge.h"
 #include "translation-fixture.h"
+#include "qwen-model-fixture.h"
 #include <QSignalSpy>
 
 namespace {
@@ -237,6 +238,30 @@ private slots:
         QCOMPARE(f.runtime->configuration().translationOverride.providerId,QString("deepseek"));
         QCOMPARE(f.runtime->configuration().translationOverride.modelId,QString("deepseek-flash"));
         QCOMPARE(f.credentials->reads,reads); QCOMPARE(f.http.requestCount(),0);
+    }
+
+    void qwenChoicesHideOtherModelsAndDoNotRewriteSelections() {
+        Fixture f; QVERIFY(f.ok);
+        auto ids=qwen_fixture::CurrentModels; ids << "qwen3.6-plus" << "qwen-plus" << "qwen-mt-plus" << "qwen3.8-omni-flash";
+        const auto catalog=parseCompatibleModelCatalog(qwen_fixture::catalog(ids),"qwen"); QVERIFY(catalog.ok);
+        QVERIFY(f.runtime->acceptModelCatalog("qwen",catalog.models));
+        auto configuration=f.runtime->configuration(); configuration.defaults={"qwen","qwen3.8-max",false,{}};
+        configuration.translationUsesDefaults=false; configuration.translationOverride={"qwen","qwen-mt-plus",false,{}};
+        QVERIFY(f.runtime->saveConfiguration(configuration)); const auto saved=f.configurationBytes();
+        QCOMPARE(f.bridge->defaultModels().size(),6); QCOMPARE(f.bridge->translationModels().size(),6);
+        for (const auto &id:qwen_fixture::CurrentModels) QVERIFY(hasChoice(f.bridge->defaultModels(),id));
+        for (const auto &id:{QString("qwen-plus"),QString("qwen-mt-plus"),QString("qwen3.6-plus"),QString("qwen3.8-omni-flash")}) {
+            QVERIFY(!hasChoice(f.bridge->defaultModels(),id)); QVERIFY(!hasChoice(f.bridge->translationModels(),id));
+        }
+        QVERIFY(hasChoice(f.bridge->translationModels(),{},"原选模型不在精选列表"));
+        QCOMPARE(f.configurationBytes(),saved);
+        ids << "qwen3.9-max" << "qwen3.9-max-2027-01-02";
+        const auto future=parseCompatibleModelCatalog(qwen_fixture::catalog(ids),"qwen");
+        QVERIFY(f.runtime->acceptModelCatalog("qwen",future.models));
+        QVERIFY(hasChoice(f.bridge->defaultModels(),"qwen3.9-max")); QVERIFY(!hasChoice(f.bridge->defaultModels(),"qwen3.7-max"));
+        QCOMPARE(f.runtime->configuration().defaults.modelId,QString("qwen3.8-max"));
+        QCOMPARE(f.runtime->configuration().translationOverride.modelId,QString("qwen-mt-plus"));
+        QCOMPARE(f.credentials->reads,0); QCOMPARE(f.http.requestCount(),0);
     }
 
     void replacingCredentialsCancelsCatalogAndRejectsLateResults() {
