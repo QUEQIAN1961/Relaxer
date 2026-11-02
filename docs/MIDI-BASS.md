@@ -1,6 +1,6 @@
-# MIDI 播放后端（本地开发与测试）
+# MIDI 播放后端
 
-开发版使用 BASS 2.4.18.3、BASSMIDI 2.4.16 和 GeneralUser GS 2.0.3 替代默认 Windows MCI sequencer。普通音频仍由原 Qt Multimedia / FFmpeg 路径播放。
+V0.2.3-GA 使用 BASS 2.4.18.3、BASSMIDI 2.4.16 和 GeneralUser GS 2.0.3 替代默认 Windows MCI sequencer。普通音频仍由原 Qt Multimedia / FFmpeg 路径播放。
 
 首次打开 MIDI 时才加载 DLL、初始化输出并预加载该曲需要的音色采样。SF2 使用内存映射；播放进度直接读取 BASS 通道位置。暂停时保留用户暂停位置，避免设备残余输出缓冲让进度继续移动。音量应用于本 MIDI 通道，不更改系统音量。
 
@@ -20,11 +20,11 @@ cmake --build <构建目录> --target Relaxer RelaxerPortable --parallel 6
 
 ## 许可与分发范围
 
-本地测试不更改 Relaxer 自有代码的 GPL-3.0-only 许可，也没有上传新的发行包。
+本次版本更新不更改 Relaxer 自有代码的 GPL-3.0-only 许可。
 
 BASS 是专有运行库，其免费使用条款限定非商业用途；BASSMIDI 随 BASS 使用。GeneralUser GS 另有作者自定许可。原文均随准备的文件保留，不能将这些文件标为 GPL/LGPL 开源组件。GeneralUser GS 的许可也保留了作者对部分早期采样来源的不确定性说明。
 
-当前集成用于个人本地非商业测试；公开分发前仍须解决 BASS 与现有 GPL 分发组合的许可兼容性。本文件不授予新的库许可、不增加 GPL 链接例外，也不代表公开分发获批。`package-rc.py` 仅保留本地候选包的未发布状态和相应标识。
+BASS 与现有 GPL 分发组合的许可兼容性仍未确认。本文件、版本号或发布行为不授予新的库许可、不增加 GPL 链接例外，也不能作为许可兼容性已经解决的证明。商业使用需另行核实 BASS 授权。`package-rc.py` 支持 RC/GA 组装，组装时的 published=false 表示尚未执行远程发布，远程状态以 GitHub Release 为准。
 
 来源：
 

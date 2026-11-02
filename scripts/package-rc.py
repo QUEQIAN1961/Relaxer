@@ -1,4 +1,4 @@
-"""Assemble a local RC from the published GA dependencies and a matching build."""
+"""Assemble an RC or GA from published dependencies and a matching build."""
 import argparse
 import hashlib
 import json
@@ -29,8 +29,9 @@ def assemble(source, build, baseline, destination):
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=source).strip():
         raise ValueError('Commit the source before packaging')
     version = re.search(r'Version\[\]\s*=\s*"([^"]+)"', (source / 'src/phase-c-version.h').read_text())[1]
-    if not re.fullmatch(r'\d+\.\d+\.\d+-RC\d*', version):
-        raise ValueError('This script only assembles release candidates')
+    if not re.fullmatch(r'\d+\.\d+\.\d+-(?:RC\d*|GA)', version):
+        raise ValueError('Expected an RC or GA version')
+    channel = 'GA' if version.endswith('-GA') else 'RC'
     frozen = identity(source)
     fingerprint = (build / 'relaxer-source-fingerprint.txt').read_text().strip()
     if fingerprint != frozen['sourceFingerprint']:
@@ -82,13 +83,13 @@ def assemble(source, build, baseline, destination):
         '# Relaxer ' + display + '\n\n完整解压后双击根目录 Relaxer.exe。兼容界面使用 Relaxer.exe --widgets。\n'
         '本包自带运行依赖，不需要 Qt、编译环境或源码准备工具；保留完整 runtime 和配套清单。\n'
         '默认资料位于同级 data/，也可用 --data 指定独立目录。升级前退出旧程序并备份资料，先用副本验证。\n'
-        '这是本地候选版，尚未发布 GitHub。更新与验证范围见 RELEASE-NOTES.md。\n'
-        'MIDI 使用 BASS/BASSMIDI 与 GeneralUser GS；当前仅用于本地非商业测试，分发许可说明见 MIDI-BASS.md。\n'
+        + ('正式版更新与验证范围见 RELEASE-NOTES.md。\n' if channel == 'GA' else '这是本地候选版，尚未发布 GitHub。更新与验证范围见 RELEASE-NOTES.md。\n') +
+        'MIDI 使用 BASS/BASSMIDI 与 GeneralUser GS；BASS 免费条款限非商业用途，GPL 兼容性尚未确认，原文及许可范围见 MIDI-BASS.md。\n'
         '应用源码附件：Relaxer-' + display + '-Source.zip；第三方源码沿用已有 V0.2.2-GA 附件。\n', encoding='utf-8')
 
     metadata = dict(sourceCommit=frozen['commit'], sourceTree=frozen['tree'], sourceFingerprint=fingerprint,
                     displayVersion=display, fileVersion=version.split('-')[0] + '.0', entry='Relaxer.exe',
-                    published=False, channel='RC', dependencyBaseline=baseline.name,
+                    published=False, channel=channel, dependencyBaseline=baseline.name,
                     dependencyBaselineSHA256=BASELINE_SHA256)
     metadata['midiDependencies'] = midi_runtime
     metadata['coreBinarySHA256'] = {'Relaxer.exe': core['RelaxerPortable.exe'],
@@ -99,7 +100,8 @@ def assemble(source, build, baseline, destination):
                userDataOverride='--data or RELAXER_DATA', sourcePreparationRequired=False, readyMarkerRequired=False,
                integrity=dict(manifest='PORTABLE-SHA256SUMS.txt', mode='full-sha256-every-launch', workers=4, cache=False)))
     components['displayVersion'] = display
-    components['publicReleaseApproved'] = False
+    components['publicReleaseApproved'] = channel == 'GA'
+    components['midiLicenseCompatibility'] = 'unresolved; see MIDI-BASS.md'
     components['sourceMaterials'] = 'Relaxer-' + display + '-Source.zip; Relaxer-V0.2.2-GA-Third-Party-Source.zip'
     components['midiDistributionScope'] = midi_runtime['distribution']
     for key, name, license_name in [('bass', 'BASS', 'LicenseRef-BASS-noncommercial'),
@@ -122,6 +124,7 @@ def assemble(source, build, baseline, destination):
 
     assets = destination / 'Assets'
     assets.mkdir()
+    shutil.copy2(notes / 'RELEASE-NOTES.md', assets / 'RELEASE-NOTES.md')
     portable_zip = assets / ('Relaxer-' + display + '-Win64.zip')
     with zipfile.ZipFile(portable_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for path in sorted(stage.rglob('*')):
