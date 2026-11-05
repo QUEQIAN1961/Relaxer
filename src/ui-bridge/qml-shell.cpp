@@ -23,6 +23,10 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
       m_translation(library,m_ai,this,std::move(browser)),m_translationBridge(library,&m_facade,&m_translation,&m_lyrics,this),
       m_importBridge(library,&m_import,this),m_search(library,this,QUrl("https://lrclib.net/api"),{},searchTransport,std::move(searchSources)),m_searchBridge(library,&m_facade,&m_search,this) {
     initializeQmlResources();
+    // Embed the standard controls' Chinese strings so portable builds do not
+    // depend on a Qt translation package installed on the user's computer.
+    if(m_controlsTranslator.load(":/qml/translations/controls_zh_CN.qm"))
+        QCoreApplication::installTranslator(&m_controlsTranslator);
     m_searchBridge.setTranslationCoordinator(&m_translation);
     setObjectName("qmlShell");
     // A fixed official style makes custom control backgrounds portable on Windows.
@@ -125,6 +129,18 @@ QQuickWindow *QmlShell::window() const {
 }
 bool QmlShell::shutdown() {m_feedback.setClosing(true);m_searchBridge.cancelInstrumentalBatch();m_search.shutdown();m_translation.shutdown();m_import.shutdown();return m_facade.shutdown(true);}
 bool QmlShell::eventFilter(QObject *object,QEvent *event){
+    if(event->type()==QEvent::Show||event->type()==QEvent::Hide){
+        if(auto *view=qobject_cast<QQuickWindow *>(object);view&&view!=window()){
+            auto *owner=view->transientParent();
+            while(owner&&owner!=window())owner=owner->transientParent();
+            if(owner&&owner==window()){
+                // Queue, volume and tooltip windows must release their own
+                // scene graphs too; releasing only the main window misses them.
+                view->setPersistentGraphics(false);view->setPersistentSceneGraph(false);
+                if(event->type()==QEvent::Hide)QTimer::singleShot(300,view,[view]{if(!view->isExposed())view->releaseResources();});
+            }
+        }
+    }
     if(event->type()==QEvent::MouseButtonPress && object==window()) {
         const auto point=static_cast<QMouseEvent *>(event)->position();
         QMetaObject::invokeMethod(window(),"feedbackPointerPressed",Q_ARG(QVariant,point.x()),Q_ARG(QVariant,point.y()));

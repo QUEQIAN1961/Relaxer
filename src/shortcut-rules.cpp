@@ -14,13 +14,37 @@ QJsonObject ShortcutRules::defaults() {
                                 {"previous", "Ctrl+Left"},
                                 {"next", "Ctrl+Right"},
                                 {"volumeUp", "Ctrl+Up"},
-                                {"volumeDown", "Ctrl+Down"}}},
+                                {"volumeDown", "Ctrl+Down"},
+                                {"miniPlayer", "Ctrl+Shift+M"}}},
             {"global", QJsonObject{{"toggle", "Ctrl+Alt+Space"},
                                    {"previous", "Ctrl+Alt+Left"},
                                    {"next", "Ctrl+Alt+Right"},
                                    {"volumeUp", "Ctrl+Alt+Up"},
-                                   {"volumeDown", "Ctrl+Alt+Down"}}},
+                                   {"volumeDown", "Ctrl+Alt+Down"},
+                                   {"miniPlayer", "Ctrl+Alt+M"}}},
             {"globalEnabled", false}};
+}
+QJsonObject ShortcutRules::withMiniPlayerBinding(QJsonObject config) {
+    auto app=config["app"].toObject();
+    if(!app.contains("miniPlayer")){
+        bool occupied=false;const QKeySequence preset(QStringLiteral("Ctrl+Shift+M"));
+        for(const auto &key:actionKeys()){
+            occupied|=QKeySequence::fromString(app[key].toString(),QKeySequence::PortableText)==preset;
+            if(config["globalEnabled"].toBool())occupied|=QKeySequence::fromString(config["global"].toObject()[key].toString(),QKeySequence::PortableText)==preset;
+        }
+        app["miniPlayer"]=occupied?"":"Ctrl+Shift+M";
+    }
+    config["app"]=app;
+    auto global=config["global"].toObject();
+    if(!global.contains("miniPlayer")){
+        bool occupied=false;const QKeySequence preset(QStringLiteral("Ctrl+Alt+M"));
+        for(const auto &key:actionKeys())
+            occupied|=QKeySequence::fromString(global[key].toString(),QKeySequence::PortableText)==preset;
+        if(config["globalEnabled"].toBool())for(const auto &value:app)
+            occupied|=QKeySequence::fromString(value.toString(),QKeySequence::PortableText)==preset;
+        global["miniPlayer"]=occupied?"":"Ctrl+Alt+M";
+    }
+    config["global"]=global;return config;
 }
 NativeKey ShortcutRules::nativeKey(const QKeySequence &sequence) {
     if (sequence.count() != 1)
@@ -68,16 +92,18 @@ bool ShortcutRules::validate(const QJsonObject &config, QString *error) {
     reserved << QKeySequence(Qt::Key_MediaPlay).toString(QKeySequence::PortableText)
              << QKeySequence(Qt::Key_MediaPause).toString(QKeySequence::PortableText);
     for (const auto &scope : {QString("app"), QString("global")}) {
-        auto map = config[scope].toObject();
-        for (int i = 0; i < actionKeys().size(); ++i) {
-            auto value = map[actionKeys()[i]];
+        auto map = withMiniPlayerBinding(config)[scope].toObject();
+        auto keys=actionKeys(),names=actionNames();
+        keys<<"miniPlayer";names<<"迷你播放器";
+        for (int i = 0; i < keys.size(); ++i) {
+            auto value = map[keys[i]];
             if (!value.isString())
                 return fail("快捷键配置不完整，请恢复默认后重试。");
             auto sequence = QKeySequence::fromString(value.toString(), QKeySequence::PortableText);
             if (value.toString().isEmpty())
                 continue;
             if (sequence.count() != 1 || sequence[0].key() == Qt::Key_unknown)
-                return fail("每项只支持一个组合键：" + actionNames()[i]);
+                return fail("每项只支持一个组合键：" + names[i]);
             auto text = sequence.toString(QKeySequence::PortableText);
             if (reserved.contains(text))
                 return fail("此组合键已用于导入、搜索或返回：" + text);
@@ -86,7 +112,7 @@ bool ShortcutRules::validate(const QJsonObject &config, QString *error) {
                 if (!native.key || (native.modifiers & 8) || sequence[0].key() == Qt::Key_F12 ||
                     (!native.modifiers && native.key < 0x70))
                     return fail("全局快捷键请使用 Ctrl / Alt / Shift 组合、功能键或媒体键：" +
-                                actionNames()[i]);
+                                names[i]);
             }
             // Bindings within each scope must be unique even when global is off.
             auto token = scope + ':' + text;

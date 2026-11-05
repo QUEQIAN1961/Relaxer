@@ -3,6 +3,9 @@ import QtQuick
 QtObject {
     objectName: "themeTokens"
     property bool dark: false
+    property bool compact: false
+    property real layoutProgress: 0
+    readonly property real pageMargin: 34 - 16 * layoutProgress
     property var custom: ({})
     readonly property color background: custom.background || (dark ? "#19191e" : "#ffffff")
     readonly property color panel: custom.panel || (dark ? "#222228" : "#f5f5f7")

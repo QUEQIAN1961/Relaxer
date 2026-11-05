@@ -13,6 +13,8 @@ class LibraryBridge final : public QObject {
     Q_PROPERTY(QVariantMap profile READ profile NOTIFY profileChanged)
     Q_PROPERTY(QVariantMap playlistDetails READ playlistDetails NOTIFY playlistChanged)
     Q_PROPERTY(QStringList playlistTags READ playlistTags CONSTANT)
+    Q_PROPERTY(QVariantMap playlistMarkers READ playlistMarkers NOTIFY playlistMarkersChanged)
+    Q_PROPERTY(QStringList playlistMarkerIcons READ playlistMarkerIcons CONSTANT)
   public:
     LibraryBridge(Library *library, PlaybackFacade *facade, TrackListModel *source,
                   TrackFilterModel *view, PlaylistListModel *playlists, QObject *parent = nullptr);
@@ -23,6 +25,10 @@ class LibraryBridge final : public QObject {
     QVariantMap profile() const;
     QVariantMap playlistDetails() const;
     QStringList playlistTags() const { return playlistTagOptions(); }
+    QVariantMap playlistMarkers() const;
+    QStringList playlistMarkerIcons() const;
+    Q_INVOKABLE bool setPlaylistMarker(const QString &id, const QString &marker);
+    Q_INVOKABLE bool setPlaylistOrder(const QStringList &ids);
     Q_INVOKABLE bool openPlaylist(const QString &id);
     Q_INVOKABLE void play(const QString &id);
     Q_INVOKABLE void playAll();
@@ -53,6 +59,7 @@ class LibraryBridge final : public QObject {
     void forgetMissing(const QVector<qint64> &ids);
   signals:
     void playlistChanged();
+    void playlistMarkersChanged();
     void errorChanged();
     void operationFailed(const QString &message);
     void operationSucceeded();

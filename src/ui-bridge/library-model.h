@@ -103,6 +103,7 @@ class PlaylistListModel final : public QAbstractListModel {
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
     bool contains(qint64 id) const;
+    Q_INVOKABLE QVariantMap get(int row) const;
     void refresh();
   signals:
     void countChanged();

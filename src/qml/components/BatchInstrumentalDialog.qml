@@ -44,8 +44,7 @@ ConfirmDialog {
                         Layout.fillWidth: true; textFormat: Text.PlainText; elide: Text.ElideRight
                         text: modelData.title.slice(0, 48) + (modelData.title.length > 48 ? "…" : "") + (modelData.artist ? " · " + modelData.artist : "")
                         HoverHandler { id: riskHover }
-                        ToolTip.visible: riskHover.hovered
-                        ToolTip.text: modelData.title + " · " + modelData.artist + "\n" + modelData.reason
+                        HintBubble {visible:riskHover.hovered;text:modelData.title+" · "+modelData.artist+"\n"+modelData.reason}
                     }
                 }
                 Label { visible: dialog.overview.riskOmitted > 0; text: "另有 " + (dialog.overview.riskOmitted || 0) + " 首未展开显示；仍属于本次冻结授权集合。"; wrapMode: Text.Wrap; Layout.fillWidth: true }

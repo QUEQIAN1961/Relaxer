@@ -2,6 +2,7 @@
 #include "storage/appearance-store.h"
 #include "shortcut-rules.h"
 #include "system-theme-fixture.h"
+#include "window.h"
 #include <QApplication>
 #include <QTemporaryDir>
 #include <QImage>
@@ -296,6 +297,28 @@ private slots:
         QSKIP("Windows font-file fixture only");
 #endif
     }
+    void regionsCanUseDifferentFontsAndReadLegacyConfiguration() {
+        Fixture f;QVERIFY(f.ok);
+        const auto folder=qEnvironmentVariable("WINDIR","C:/Windows")+"/Fonts/";
+        if(!QFileInfo::exists(folder+"segoeui.ttf")||!QFileInfo::exists(folder+"arial.ttf"))QSKIP("Windows font fixtures unavailable");
+        QVERIFY(f.bridge->saveFont(QUrl::fromLocalFile(folder+"segoeui.ttf"),allRegions(true)));
+        QCOMPARE(f.bridge->fontFiles().value("lyrics").toString(),QString("Fonts/segoeui.ttf"));
+        QVERIFY(QDir().mkpath(f.directory.filePath("one")));QVERIFY(QDir().mkpath(f.directory.filePath("two")));
+        const auto one=f.directory.filePath("one/same.ttf"),two=f.directory.filePath("two/same.ttf");
+        QVERIFY(QFile::copy(folder+"segoeui.ttf",one));QVERIFY(QFile::copy(folder+"arial.ttf",two));
+        auto files=f.bridge->fontFiles();files["songs"]=QUrl::fromLocalFile(one).toString();files["lyrics"]=QUrl::fromLocalFile(two).toString();files["footer"]="";
+        QVERIFY(f.bridge->saveFonts(files));
+        const auto saved=f.bridge->fontFiles();QVERIFY(saved.value("songs")!=saved.value("lyrics"));
+        QVERIFY(QFileInfo::exists(f.library.absolute(saved.value("songs").toString())));QVERIFY(QFileInfo::exists(f.library.absolute(saved.value("lyrics").toString())));
+        const auto songs=f.bridge->fontFamilyFor("songs"),lyrics=f.bridge->fontFamilyFor("lyrics");QVERIFY(!songs.isEmpty());QVERIFY(!lyrics.isEmpty());QVERIFY(songs!=lyrics);
+        QVERIFY(f.bridge->fontFamilyFor("footer").isEmpty());QCOMPARE(f.bridge->fontFamilyFor("next"),songs);
+        {SettingsBridge reloaded(&f.library);QCOMPARE(reloaded.fontFiles(),saved);QCOMPARE(reloaded.fontFamilyFor("lyrics"),lyrics);}
+        {Window legacy(&f.library);QVERIFY(legacy.styleSheet().contains("QWidget#lyricView{font-family:'"+lyrics+"'"));QVERIFY(legacy.styleSheet().contains("QTableWidget{font-family:'"+songs+"'"));}
+        const auto before=f.library.setting("uiFont");auto invalid=saved;invalid["lyrics"]="https://example.invalid/other.ttf";
+        QVERIFY(!f.bridge->saveFonts(invalid));QCOMPARE(f.library.setting("uiFont"),before);QCOMPARE(f.bridge->fontFamilyFor("lyrics"),lyrics);
+        auto defaults=saved;defaults["lyrics"]="";QVERIFY(f.bridge->saveFonts(defaults));QVERIFY(f.bridge->fontFamilyFor("lyrics").isEmpty());QCOMPARE(f.bridge->fontFamilyFor("songs"),songs);
+        QVERIFY(f.bridge->resetFont());for(const auto &key:allRegions(false).keys())QVERIFY(f.bridge->fontFiles().value(key).toString().isEmpty());
+    }
     void shortcutConfigurationUsesOriginalValidatorAndPortableText() {
         Fixture f; QVERIFY(f.ok);
         auto candidate = f.bridge->defaultShortcuts();
@@ -308,7 +331,7 @@ private slots:
         QCOMPARE(f.library.setting("shortcuts").toObject(), ShortcutRules::defaults());
         candidate = f.bridge->defaultShortcuts(); keys = candidate.value("app").toMap(); keys["next"] = "Space"; candidate["app"] = keys;
         QVERIFY(!f.bridge->saveShortcuts(candidate));
-        QCOMPARE(f.bridge->shortcutActions().size(), 5);
+        QCOMPARE(f.bridge->shortcutActions().size(), 6);
     }
 };
 int main(int argc, char **argv) {

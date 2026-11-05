@@ -13,6 +13,7 @@ struct NativeKey {
 class ShortcutRules {
   public:
     static QJsonObject defaults();
+    static QJsonObject withMiniPlayerBinding(QJsonObject);
     static QStringList actionKeys();
     static QStringList actionNames();
     static bool validate(const QJsonObject &, QString *error = nullptr);

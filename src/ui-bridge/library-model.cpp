@@ -3,7 +3,9 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QUrlQuery>
+#include <QJsonArray>
 #include <algorithm>
+#include <climits>
 
 namespace relaxer {
 namespace {
@@ -242,6 +244,9 @@ PlaylistListModel::PlaylistListModel(Library *library, QObject *parent) : QAbstr
     // Playlist metadata is refreshed only on content changes. Progress samples
     // must not trigger full playlist aggregate queries.
     connect(&m_refresh, &QTimer::timeout, this, &PlaylistListModel::refresh);
+    connect(library,&Library::settingsUpdated,this,[schedule](const QStringList &keys) {
+        if(keys.contains("qml.playlistOrder"))schedule();
+    });
     connect(library, &QObject::destroyed, this, [this] { m_library = nullptr; m_refresh.stop(); refresh(); });
     refresh();
 }
@@ -271,7 +276,19 @@ bool PlaylistListModel::contains(qint64 id) const {
     return false;
 }
 void PlaylistListModel::refresh() {
-    beginResetModel(); m_playlists = m_library ? m_library->playlists() : QVector<Playlist>{}; endResetModel();
+    auto lists=m_library?m_library->playlists():QVector<Playlist>{};
+    QHash<QString,int> positions;
+    if(m_library)for(const auto &id:m_library->setting("qml.playlistOrder").toArray())
+        if(!positions.contains(id.toString()))positions.insert(id.toString(),positions.size());
+    std::stable_sort(lists.begin(),lists.end(),[&](const Playlist &a,const Playlist &b) {
+        return positions.value(QString::number(a.id),INT_MAX)<positions.value(QString::number(b.id),INT_MAX);
+    });
+    beginResetModel();m_playlists=std::move(lists);endResetModel();
     emit countChanged();
+}
+QVariantMap PlaylistListModel::get(int row) const {
+    if(row<0||row>=m_playlists.size())return {};
+    const auto &playlist=m_playlists[row];
+    return {{"playlistKey",QString::number(playlist.id)},{"name",playlist.name}};
 }
 }

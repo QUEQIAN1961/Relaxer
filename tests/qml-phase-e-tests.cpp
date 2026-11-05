@@ -50,8 +50,10 @@ class PhaseEUiTests final : public QObject {
 private slots:
     void pagesAreDeferredAndBackgroundKeepsUnsavedAppearance() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
-        for (const auto *name : {"settingsPage", "aiPage", "appearancePage", "versionLogPage", "lyricsWorkspace"})
+        for (const auto *name : {"settingsPage", "aiPage", "appearancePage", "versionLogPage", "lyricsWorkspace","nowPlayingPage"})
             QVERIFY2(!visual(root, name), name);
+        for (const auto *name : {"playlistEditor","importDialog","batchInstrumentalDialog"})
+            QVERIFY2(!w->findChild<QObject *>(name), name);
         QVERIFY(f.shell->appBridge()->navigate(3));
         QTRY_VERIFY(visual(root, "settingsPage"));
         auto *settings=visual(root,"settingsPage");
@@ -578,10 +580,10 @@ private slots:
         w->resize(1000,660); QTest::qWait(100);
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
         auto *appearance=visual(root,"settingsAppearanceCell"), *threshold=visual(root,"qmlThresholdSetting"), *close=visual(root,"closeSetting");
-        QVERIFY(appearance); QVERIFY(threshold); QVERIFY(close); const auto cellWidth=appearance->width();
+        QVERIFY(appearance); QVERIFY(threshold); QVERIFY(close); const auto cellWidth=appearance->width(),thresholdWidth=threshold->width(),closeWidth=close->width();
         for(int theme:{0,2,1}) {
             QVERIFY(f.shell->settingsBridge()->setTheme(theme)); QVERIFY(f.shell->settingsBridge()->setPreference("closeToTray",theme==2)); QTest::qWait(50);
-            QVERIFY(qAbs(appearance->width()-cellWidth)<1); QVERIFY(qAbs(appearance->width()-threshold->width())<1); QVERIFY(qAbs(close->width()-cellWidth)<1);
+            QVERIFY(qAbs(appearance->width()-cellWidth)<1); QVERIFY(qAbs(threshold->width()-thresholdWidth)<1); QVERIFY(qAbs(close->width()-closeWidth)<1);
         }
         auto *scroll=visual(root,"settingsScroll"); QVERIFY(scroll);
         QVERIFY(qAbs(bounds(scroll).bottom()-bounds(visual(root,"playerBar")).top())<1);

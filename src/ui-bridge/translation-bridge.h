@@ -39,6 +39,7 @@ public:
     Q_INVOKABLE bool start(const QString &exactConsentTask);
     Q_INVOKABLE void declineConsent();
     Q_INVOKABLE bool cancel();Q_INVOKABLE bool discard();Q_INVOKABLE bool save();Q_INVOKABLE bool resume();
+    Q_INVOKABLE void cancelAll();
     TranslationSummary summary()const;
 signals:void changed();
     void feedback(const QString &category, const QString &task, const QString &target, const QString &message, const QString &details);

@@ -15,6 +15,7 @@ Controls.TextField {
     leftPadding:12;rightPadding:12
     color:Theme.text;placeholderTextColor:Theme.secondary
     selectByMouse:true
+    Controls.ContextMenu.menu: EditingMenu { editor:control }
     background:Rectangle {
         radius:8
         color:Theme.card

@@ -57,7 +57,7 @@ private slots:
         QVERIFY(!bridge->importLocalLyrics(QUrl::fromLocalFile(path),true,ws->property("fileEditToken").toString()));auto *replace=w->findChild<QObject *>("lyricsTranslationConflict");
         QVERIFY(replace);QTRY_VERIFY(replace->property("opened").toBool());QMetaObject::invokeMethod(replace,"reject");
         QCOMPARE(bytes(lib,a.id),replacement_fixture::bilingual());
-        QVERIFY(bridge->prepareInstrumentalBatch({QString::number(a.id)}));auto *batch=w->findChild<QObject *>("batchInstrumentalDialog");QVERIFY(batch);
+        QVERIFY(bridge->prepareInstrumentalBatch({QString::number(a.id)}));QVERIFY(QMetaObject::invokeMethod(w,"ensureBatchInstrumental"));auto *batch=w->findChild<QObject *>("batchInstrumentalDialog");QVERIFY(batch);
         QVERIFY(QMetaObject::invokeMethod(batch,"open"));QTRY_VERIFY(batch->property("opened").toBool());
         auto *risk=c4c5_fixture::visual(root,"batchInstrumentalRiskDetails");QVERIFY(risk);QVERIFY(QMetaObject::invokeMethod(risk,"clicked"));
         risk->setProperty("checked",true);QTRY_VERIFY(c4c5_fixture::visual(root,"batchRisk-"+QString::number(a.id))!=nullptr);
@@ -69,9 +69,11 @@ private slots:
         QMetaObject::invokeMethod(settings,"open");QTRY_VERIFY(!notice->isVisible());QMetaObject::invokeMethod(settings,"close");QTRY_VERIFY(notice->isVisible());
         QVERIFY(!c4c5_fixture::visual(root,"feedbackReason")->property("text").toString().contains("raw English"));
         QVERIFY(!c4c5_fixture::visual(root,"playerFullscreen"));
+        QVERIFY(QMetaObject::invokeMethod(ws,"close"));QTRY_VERIFY(!ws->isVisible());
         QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("lyricsOpen").toBool());
         auto *collapse=c4c5_fixture::visual(root,"playerCollapse");QVERIFY(collapse);
-        QVERIFY(QMetaObject::invokeMethod(collapse,"clicked"));QTRY_VERIFY(!w->property("lyricsOpen").toBool());
+        QTRY_COMPARE(w->property("playerProgress").toReal(),1.);
+        QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,collapse->mapToScene(QPointF(collapse->width()/2,collapse->height()/2)).toPoint());QTRY_VERIFY(!w->property("lyricsOpen").toBool());
         QVERIFY(shell.warnings().isEmpty());QVERIFY(shell.shutdown());
     }
 };

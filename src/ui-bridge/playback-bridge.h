@@ -39,7 +39,7 @@ class PlaybackBridge final : public QObject {
     qint64 position() const { return m_state.position; }
     qint64 duration() const { return m_state.duration; }
     int volume() const { return m_state.volume; }
-    bool muted() const { return volume() == 0; }
+    bool muted() const { return m_muted; }
     bool seekable() const { return m_state.seekable && m_state.duration > 0 && available(); }
     bool canPlay() const { return m_canPlay; }
     int mode() const { return int(m_state.mode); }
@@ -91,7 +91,8 @@ class PlaybackBridge final : public QObject {
     QString m_error, m_saveError;
     bool m_available = false;
     bool m_canPlay = false;
-    int m_lastVolume = 65;
+    bool m_muted = false;
+    int m_muteRestoreVolume = 0;
     int m_transitionDirection = 0;
     void refresh();
     void refreshMetadata();

@@ -5,24 +5,37 @@ Item {
     id: panel
     objectName: expandedPlayer ? "nextQueueLarge" : "nextQueueCompact"
     property bool expandedPlayer: false
-    property bool panelExpanded: false
+    property bool popupPresentation:false
+    property bool showHeader:true
+    property Item backdropSource
+    property Item secondaryBackdrop
+    property point secondaryOffset:Qt.point(0,0)
+    property rect backdropRect:Qt.rect(x,y,width,height)
+    property bool panelExpanded:popupPresentation
     property bool initialized: false
     property bool relocating: false
-    readonly property int headerHeight: 34
-    readonly property int rowHeight: panelExpanded ? (expandedPlayer ? 46 : 38) : 56
-    readonly property int coverSize: panelExpanded ? (expandedPlayer ? 36 : 26) : 40
-    readonly property real preferredWidth: Math.max(112, (expandedPlayer && !panelExpanded ? 80 : 76) + titleMetrics.advanceWidth + dashMetrics.advanceWidth + artistMetrics.advanceWidth + 12)
+    readonly property int headerHeight:showHeader?34:0
+    readonly property int rowHeight:popupPresentation?56:panelExpanded?46:56
+    readonly property int coverSize:popupPresentation?40:panelExpanded?36:40
+    readonly property bool roomyHeader:expandedPlayer||panelExpanded
+    readonly property bool inlinePreview:!expandedPlayer&&!panelExpanded
+    readonly property real inlineContentX:upcomingModel.count?70:38
+    readonly property real inlineTextSpace:Math.max(0,width-inlineContentX-34-6)
+    readonly property real inlineArtistWidth:upcomingModel.firstArtist.length&&inlineTextSpace>=96?Math.min(fullArtistMetrics.advanceWidth,inlineTextSpace*.42):0
+    readonly property real preferredWidth:Math.max(112,(expandedPlayer&&!panelExpanded?80:76)+titleMetrics.advanceWidth+dashMetrics.advanceWidth+artistMetrics.advanceWidth+12)
     signal activated(int row)
+    signal dismissRequested()
     implicitWidth: preferredWidth
-    implicitHeight: !panelExpanded ? (expandedPlayer ? 94 : 34) : headerHeight + (upcomingModel.count ? Math.min(5, upcomingModel.count) * rowHeight : 28) + 4
-    width: implicitWidth
-    height: implicitHeight
+    implicitHeight: !panelExpanded ? (expandedPlayer ? 94 : 34) : headerHeight + (upcomingModel.count ? Math.min(5, upcomingModel.count) * rowHeight : 28) + (showHeader?4:8)
+    width: popupPresentation?parent.width:implicitWidth
+    height: popupPresentation?parent.height:implicitHeight
     clip: true
     Behavior on height { enabled: !panel.relocating; NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 300; easing.type: Easing.OutCubic } }
     readonly property string regionFontFamily: { const saved=settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("next") || "Microsoft YaHei UI" }
     TextMetrics { font.family: panel.regionFontFamily; id: titleMetrics; text: "歌歌歌歌歌歌歌歌"; font.pixelSize: 15 }
     TextMetrics { font.family: panel.regionFontFamily; id: artistMetrics; text: "歌歌歌歌歌"; font.pixelSize: 15 }
-    TextMetrics { font.family: panel.regionFontFamily; id: dashMetrics; text: "—"; font.pixelSize: 15 }
+    TextMetrics { font.family: panel.regionFontFamily; id: dashMetrics; text: " — "; font.pixelSize: 15 }
+    TextMetrics {font.family:panel.regionFontFamily;id:fullArtistMetrics;text:upcomingModel.firstArtist;font.pixelSize:15}
     function coverItem(index) {
         if (!expandedPlayer && !panelExpanded && index === 0) return compactArt
         const row = rows.itemAtIndex(index)
@@ -30,69 +43,89 @@ Item {
     }
     function activate(index) {
         if (!upcomingModel.activate(index)) return
-        if (expandedPlayer) panelExpanded = false
+        if(expandedPlayer&&!popupPresentation)panelExpanded=false
         activated(index)
     }
     function resetScroll() { if (!initialized) return; wheelMotion.stop(); rows.contentY = 0; rows.scrollTarget = 0 }
+    onPopupPresentationChanged:if(popupPresentation)panelExpanded=true
     onPanelExpandedChanged: resetScroll()
-    onExpandedPlayerChanged: { panelExpanded = false; resetScroll() }
+    onExpandedPlayerChanged: { panelExpanded = popupPresentation; resetScroll() }
     Component.onCompleted: initialized = true
     Connections { target: upcomingModel; function onCountChanged() { if (rows.contentY > Math.max(0, rows.contentHeight - rows.height)) panel.resetScroll() } }
+    MouseArea {
+        objectName:"queueInputBarrier";anchors.fill:parent;enabled:panel.panelExpanded||panel.expandedPlayer
+        acceptedButtons:Qt.AllButtons
+        onWheel:wheel=>{wheel.accepted=true}
+    }
     Rectangle {
+        visible:!panel.popupPresentation&&!panel.backdropSource
         anchors.fill: parent; radius: 12
         color: panel.panelExpanded ? Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.97) : "transparent"
         border.width: panel.panelExpanded ? 1 : 0
         border.color: Theme.border
     }
+    GlassSurface {
+        objectName:"wideQueueGlassSurface";anchors.fill:parent;radius:12
+        visible:panel.panelExpanded&&!panel.popupPresentation&&!!panel.backdropSource
+        active:visible;backdrop:panel.backdropSource;sampleRect:panel.backdropRect;effectName:"wideQueueBackdropBlur"
+        secondaryBackdrop:panel.secondaryBackdrop;secondaryOffset:panel.secondaryOffset
+    }
     Item {
+        visible:panel.showHeader
         width: parent.width; height: panel.headerHeight
         Rectangle {
-            x: panel.expandedPlayer ? 0 : arrow.width; y: 1
+            x:0; y: 1
             width: parent.width - arrow.width; height: parent.height - 2; radius: 7
             color: headerMouse.containsMouse ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.08) : "transparent"
         }
         UiText { fontRegion: "next";
-            x: panel.expandedPlayer ? 12 : panel.panelExpanded ? 38 : 30
+            objectName:"nextQueueHeading";visible:!panel.inlinePreview;x:12
             height: parent.height; text: "下一首"; font.pixelSize: 15; color: Theme.text; verticalAlignment: Text.AlignVCenter
+        }
+        Symbol {
+            objectName:"nextCompactIcon";visible:panel.inlinePreview
+            x:12;anchors.verticalCenter:parent.verticalCenter;width:18;height:18
+            name:"next";color:Theme.text
         }
         Artwork {
             id: compactArt; visible: !panel.expandedPlayer && !panel.panelExpanded && upcomingModel.count > 0
-            x: 80; y: 5; width: 24; height: 24; radius: 5; resolution: 80; animated: false
+            x:38; y:5; width:24; height:24; radius:5; resolution:80; animated:false
             file: upcomingModel.firstCoverUrl; seed: upcomingModel.firstTitle; revision: upcomingModel.firstCoverRevision
         }
         UiText { fontRegion: "next";
             id: compactTitle; objectName: "nextCompactTitle"
             visible: !panel.expandedPlayer && !panel.panelExpanded
-            x: upcomingModel.count ? 112 : 80; width: Math.min(implicitWidth, Math.max(0, parent.width - x - 12)); height: parent.height
+            x:panel.inlineContentX
+            width:Math.max(0,panel.inlineTextSpace-(panel.inlineArtistWidth>0?panel.inlineArtistWidth+dashMetrics.advanceWidth:0));height:parent.height
             text: upcomingModel.count ? upcomingModel.firstTitle : "暂无待播放歌曲"
-            textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 15; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
+            textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 15; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter;horizontalAlignment:Text.AlignRight
         }
         TextMetrics { id: artistMinimum; font.family: panel.regionFontFamily; font.pixelSize: 15; text: " — …" }
         UiText { fontRegion: "next";
             objectName: "nextCompactArtist"
-            x: compactTitle.x + compactTitle.width; width: Math.max(0, parent.width - x - 12); height: parent.height
-            visible: compactTitle.visible && upcomingModel.count > 0 && upcomingModel.firstArtist.length > 0 && compactTitle.width >= compactTitle.implicitWidth && width >= artistMinimum.advanceWidth
-            text: " — " + upcomingModel.firstArtist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 15; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
+            x:compactTitle.x+compactTitle.width;width:panel.inlineArtistWidth+dashMetrics.advanceWidth;height:parent.height
+            visible: compactTitle.visible && upcomingModel.count > 0 && upcomingModel.firstArtist.length > 0 && width >= artistMinimum.advanceWidth
+            text:" — "+upcomingModel.firstArtist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 15; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter;horizontalAlignment:Text.AlignRight
         }
         MouseArea {
             id: headerMouse
-            x: panel.expandedPlayer ? 0 : arrow.width
+            x:0
             width: parent.width - arrow.width; height: parent.height; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
             onClicked: if (upcomingModel.count) panel.activate(0)
         }
         Item {
             id: arrow
-            x: panel.expandedPlayer ? parent.width - width : 0
-            width: !panel.expandedPlayer && !panel.panelExpanded ? 28 : 34
+            x:parent.width-width
+            width:34
             height: parent.height
             Rectangle { anchors.fill: parent; anchors.margins: 1; radius: 7; color: arrowMouse.containsMouse ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.08) : "transparent" }
             UiText { fontRegion: "next"; anchors.centerIn: parent; text: panel.panelExpanded ? "⌄" : "⌃"; color: Theme.text; font.pixelSize: 15 }
-            MouseArea { id: arrowMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: panel.panelExpanded = !panel.panelExpanded }
+            MouseArea {id:arrowMouse;objectName:"upcomingToggle"; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: {if(panel.popupPresentation)panel.dismissRequested();else panel.panelExpanded=!panel.panelExpanded} }
         }
     }
     ListView {
         id: rows; objectName: "upcomingRows"
-        x: 0; y: panel.headerHeight; width: panel.width; height: Math.max(0, panel.height - y - 4)
+        x: 0; y: panel.headerHeight+(panel.showHeader?0:4); width: panel.width; height: Math.max(0, panel.height - y - 4)
         visible: panel.expandedPlayer || panel.panelExpanded
         clip: true; boundsBehavior: Flickable.StopAtBounds; interactive: panel.panelExpanded
         cacheBuffer: 0; reuseItems: true; model: upcomingModel
@@ -120,11 +153,11 @@ Item {
                 file: row.coverUrl; seed: row.title; revision: row.coverRevision; resolution: 100; animated: false
             }
             UiText { fontRegion: "next";
-                id: rowTitle; x: rowArt.x + rowArt.width + 8; width: titleMetrics.advanceWidth; height: parent.height
+                id: rowTitle;objectName:"upcomingTitle-"+row.index; x: rowArt.x + rowArt.width + 8; width: panel.popupPresentation?Math.max(40,(rows.width-x-30)*.58):Math.min(titleMetrics.advanceWidth,Math.max(40,(rows.width-x-30)*.58)); height: parent.height
                 text: row.title; textFormat: Text.PlainText; font.pixelSize: 15; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
             }
-            UiText { fontRegion: "next"; id: dash; x: rowTitle.x + rowTitle.width; width: dashMetrics.advanceWidth; height: parent.height; text: "—"; font.pixelSize: 15; color: Theme.text; verticalAlignment: Text.AlignVCenter }
-            UiText { fontRegion: "next";
+            UiText { fontRegion: "next"; id: dash; x: rowTitle.x + rowTitle.width; width: dashMetrics.advanceWidth; height: parent.height; text:" — "; font.pixelSize: 15; color: Theme.text; verticalAlignment: Text.AlignVCenter }
+            UiText { fontRegion: "next";objectName:"upcomingArtist-"+row.index;
                 x: dash.x + dash.width; width: Math.min(artistMetrics.advanceWidth, Math.max(0, parent.width - x - 12)); height: parent.height
                 text: row.artist; textFormat: Text.PlainText; font.pixelSize: 15; color: Theme.text; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
             }

@@ -301,7 +301,8 @@ private slots:
         auto *window = f.shell->window(); auto *content = window->contentItem();
         QVERIFY(!f.shell->settingsBridge()->values().value("shortcuts").toMap().value("globalEnabled").toBool());
         f.shell->playbackBridge()->pause(); QTRY_VERIFY(!f.shell->facade()->playing());
-        auto *search = visual(content, "librarySearch"); QVERIFY(search); QVERIFY(click(window, search));
+        QVERIFY(click(window,visual(content,"librarySearchButton")));QTest::qWait(260);
+        auto *search=visual(content,"librarySearch");QVERIFY(search);QVERIFY(click(window,search));
         QTRY_VERIFY(search->hasActiveFocus());
         const auto queue = f.shell->facade()->queue().items;
         QTest::keyClick(window, Qt::Key_Space);

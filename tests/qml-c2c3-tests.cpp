@@ -183,6 +183,26 @@ class C2C3Tests : public QObject {
         }
         QCOMPARE(library.setting("volume").toInt(),37);
     }
+    void manualZeroDoesNotRestoreAnOldMuteVolume() {
+        QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open());
+        {
+            QmlShell shell(&library,nullptr,true); auto *bridge=shell.playbackBridge();
+            bridge->setVolume(37); bridge->toggleMute(); QVERIFY(bridge->muted());
+            // A slider gesture at zero must also discard the button's restore value.
+            bridge->setVolume(0); QSignalSpy changed(bridge,&PlaybackBridge::volumeChanged);
+            bridge->toggleMute(); QCOMPARE(bridge->volume(),0); QVERIFY(!bridge->muted()); QCOMPARE(changed.count(),1);
+            bridge->toggleMute(); QCOMPARE(bridge->volume(),0); QVERIFY(bridge->muted());
+            bridge->toggleMute(); QCOMPARE(bridge->volume(),0); QVERIFY(!bridge->muted());
+            bridge->setVolume(62); QVERIFY(!bridge->muted());
+            bridge->setVolume(0); QVERIFY(bridge->muted()); QVERIFY(shell.shutdown());
+        }
+        {
+            QmlShell rebuilt(&library,nullptr,true); auto *bridge=rebuilt.playbackBridge();
+            bridge->toggleMute(); QCOMPARE(bridge->volume(),0); QVERIFY(!bridge->muted());
+            bridge->setVolume(48); bridge->toggleMute(); bridge->toggleMute();
+            QCOMPARE(bridge->volume(),48); QVERIFY(!bridge->muted()); QVERIFY(rebuilt.shutdown());
+        }
+    }
     void commandsUseRealLibraryAndFacade() {
         QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open()); QVERIFY(seed(library,3));
         const auto connections=QSqlDatabase::connectionNames(); QmlShell shell(&library,nullptr,true); QVERIFY2(shell.load(),qPrintable(shell.warnings().join('\n')));
@@ -218,6 +238,7 @@ class C2C3Tests : public QObject {
         QTRY_VERIFY(shell.libraryModel()->selectedId()!="0"); QCOMPARE(shell.facade()->current().id,qint64(0));
         QTest::mouseDClick(shell.window(),Qt::LeftButton,Qt::NoModifier,point);
         QTRY_COMPARE(shell.playbackBridge()->trackId(),shell.libraryModel()->selectedId());
+        QVERIFY(QMetaObject::invokeMethod(visual(root,"librarySearchControl"),"open"));QTest::qWait(260);
         auto *search=visual(root,"librarySearch"); QVERIFY(search); search->setProperty("text","ARTIST A");
         QVERIFY(QMetaObject::invokeMethod(search,"textEdited")); QTRY_COMPARE(shell.libraryModel()->count(),500);
         const auto selected=shell.libraryModel()->selectedId(); shell.appBridge()->navigate(1); shell.appBridge()->navigate(0);

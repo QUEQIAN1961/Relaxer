@@ -33,8 +33,9 @@ Item {
     }
     function chooseImage(key) { imageKey = key; imagePicker.open() }
     property bool initialized: false
+    property bool retainDraftWhenHidden:false
     Component.onCompleted: initialized = true
-    onVisibleChanged: if (initialized && !visible) settingsBridge.discardAppearance()
+    onVisibleChanged: if (initialized && !visible && !retainDraftWhenHidden) settingsBridge.discardAppearance()
 
     ColumnLayout {
       anchors.fill: parent; anchors.leftMargin: 34; anchors.rightMargin: 34

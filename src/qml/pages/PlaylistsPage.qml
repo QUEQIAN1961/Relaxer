@@ -6,6 +6,9 @@ import "../theme"
 Item {
     id: page
     objectName: "playlistsPage"
+    readonly property real reflow:Theme.layoutProgress
+    readonly property real shrink:Math.min(1,2*reflow)
+    readonly property real arrange:Math.max(0,2*reflow-1)
     signal openRequested(string key)
     signal editRequested(string key, string name)
     signal createRequested()
@@ -13,7 +16,7 @@ Item {
     property string contextName: ""
     ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: 34; anchors.topMargin: 28; anchors.rightMargin: 34; anchors.bottomMargin: 16
+        anchors.leftMargin: Theme.pageMargin; anchors.topMargin: 28; anchors.rightMargin: Theme.pageMargin; anchors.bottomMargin: 16
         spacing: 18
         RowLayout {
             Layout.fillWidth: true; spacing: 20
@@ -27,7 +30,7 @@ Item {
         GridView {
             id: grid; objectName: "playlistCards"
             Layout.fillWidth: true; Layout.fillHeight: true
-            cellWidth: 204; cellHeight: 246
+            cellWidth:Theme.compact?width/2:Math.min(204,width);cellHeight:246-174*page.reflow
             clip: true; model: playlistModel; boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
             delegate: Item {
@@ -40,10 +43,26 @@ Item {
                 required property string description
                 required property real plays
                 width: grid.cellWidth; height: grid.cellHeight
-                Rectangle { objectName: "playlistCardBackground"; x: 0; y: 0; width: 190; height: Math.max(234, cardCount.y + cardCount.implicitHeight + 12); radius: 12; color: cardMouse.containsMouse ? Theme.hover : "transparent" }
-                Artwork { x: 7; y: 7; width: 170; height: 170; radius: 12; file: card.cover; seed: card.name; resolution: 350; animated: false }
-                UiText { id: cardTitle; x: 7; y: 187; width: 177; text: card.name; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 15; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                UiText { id: cardCount; x: 7; y: cardTitle.y + cardTitle.implicitHeight + 4; width: 177; text: card.trackCount + " 首歌曲"; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                Rectangle {
+                    objectName:"playlistCardBackground";x:0;y:0;width:card.width-14+10*page.reflow;height:grid.cellHeight-12+6*page.reflow
+                    radius:12;color:cardMouse.containsMouse?Theme.hover:"transparent"
+                }
+                Artwork {
+                    id:cardArt;objectName:"playlistCardCover-"+card.playlistKey
+                    x:7;y:7;width:Math.min(170-122*page.shrink,Math.max(0,card.width-14));height:width;radius:12
+                    file:card.cover;seed:card.name;resolution:350;animated:false
+                }
+                UiText {
+                    id:cardTitle;objectName:"playlistCardTitle-"+card.playlistKey
+                    x:7+64*page.shrink;y:(cardArt.height+17)*(1-page.arrange)+7*page.arrange
+                    width:Math.max(0,Math.min(177+(card.width-90-177)*page.arrange,card.width-x-14))
+                    text:card.name;textFormat:Text.PlainText;color:Theme.text;font.pixelSize:15;font.weight:Font.DemiBold;elide:Text.ElideRight
+                }
+                UiText {
+                    id:cardCount;x:cardTitle.x;y:(cardTitle.y+cardTitle.implicitHeight+4)*(1-page.arrange)+(55-implicitHeight)*page.arrange
+                    width:cardTitle.width;text:card.trackCount+" 首歌曲"+(Theme.compact&&card.description.length?" · "+card.description:"")
+                    color:Theme.secondary;font.pixelSize:13;elide:Text.ElideRight
+                }
                 MouseArea {
                     id: cardMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton | Qt.RightButton; cursorShape: Qt.PointingHandCursor
                     onClicked: mouse => {

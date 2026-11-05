@@ -170,7 +170,7 @@ Item {
             }
             ScrollView {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true
-                TextArea {
+                EntryArea {
                     objectName: "feedbackDetailText"
                     readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap
                     textFormat: TextEdit.PlainText

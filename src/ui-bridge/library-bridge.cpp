@@ -8,6 +8,8 @@
 #include <QRandomGenerator>
 #include <QSaveFile>
 #include <QSet>
+#include <QJsonObject>
+#include <QJsonArray>
 
 namespace relaxer {
 LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackListModel *source,
@@ -26,6 +28,9 @@ LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackList
     });
     connect(library, &Library::changed, this, [this] {
         refreshStatistics(); emit profileChanged(); emit playlistChanged();
+    });
+    connect(library, &Library::settingsUpdated, this, [this](const QStringList &keys) {
+        if (keys.contains("qml.playlistMarkers")) emit playlistMarkersChanged();
     });
     connect(library, &QObject::destroyed, this, [this] {
         m_library = nullptr; m_statisticsTimer.stop(); refreshStatistics(); emit profileChanged(); emit playlistChanged();
@@ -66,6 +71,31 @@ QString LibraryBridge::playlistName() const {
 bool LibraryBridge::hasPlaylist(qint64 id) const {
     if (m_library) for (const auto &list : m_library->playlists()) if (list.id == id) return true;
     return false;
+}
+QVariantMap LibraryBridge::playlistMarkers() const {
+    return m_library ? m_library->setting("qml.playlistMarkers").toObject().toVariantMap() : QVariantMap{};
+}
+QStringList LibraryBridge::playlistMarkerIcons() const {
+    return {"music", "headphones", "disc-3", "radio", "mic-vocal", "star", "heart", "sun",
+            "moon", "cloud-rain", "coffee", "book-open", "leaf", "flame", "mountain", "gamepad-2"};
+}
+bool LibraryBridge::setPlaylistOrder(const QStringList &ids) {
+    if(!m_library)return result(false,"资料库不可用");
+    const auto lists=m_library->playlists();QSet<QString> keys;
+    for(const auto &list:lists)keys.insert(QString::number(list.id));
+    const QSet<QString> requested(ids.begin(),ids.end());
+    if(ids.size()!=lists.size()||requested!=keys)return result(false,"歌单列表已改变，请重新调整排序");
+    return result(m_library->setSetting("qml.playlistOrder",QJsonArray::fromStringList(ids)));
+}
+bool LibraryBridge::setPlaylistMarker(const QString &id, const QString &marker) {
+    const auto key = id.toLongLong();
+    if (!m_library || !hasPlaylist(key)) return result(false, "歌单不存在");
+    if (!(marker.startsWith("icon:") && playlistMarkerIcons().contains(marker.mid(5))) &&
+        !(marker.startsWith("text:") && characterCount(marker.mid(5).trimmed()) == 1 && marker.mid(5) == marker.mid(5).trimmed()))
+        return result(false, "请选择图标或输入一个文字标记");
+    auto markers = m_library->setting("qml.playlistMarkers").toObject();
+    markers.insert(QString::number(key), marker);
+    return result(m_library->setSetting("qml.playlistMarkers", markers));
 }
 bool LibraryBridge::openPlaylist(const QString &id) {
     bool valid = false; const auto value = id.toLongLong(&valid);
@@ -173,6 +203,12 @@ bool LibraryBridge::removeTrack(const QString &id) {
 QString LibraryBridge::createPlaylist(const QString &name) {
     if (!m_library || name.trimmed().isEmpty()) { result(false,"请输入歌单名称");return "0"; }
     const auto id = m_library->createPlaylist(name);
+    if (id) {
+        auto markers = m_library->setting("qml.playlistMarkers").toObject();
+        if (markers.contains(QString::number(id))) {
+            markers.remove(QString::number(id));m_library->setSetting("qml.playlistMarkers", markers);
+        }
+    }
     result(id != 0); return QString::number(id);
 }
 bool LibraryBridge::renamePlaylist(const QString &id, const QString &name) {
@@ -183,7 +219,12 @@ bool LibraryBridge::renamePlaylist(const QString &id, const QString &name) {
 bool LibraryBridge::deletePlaylist(const QString &id) {
     const auto value = id.toLongLong();
     if (!m_library || !hasPlaylist(value)) return result(false,"歌单不存在");
-    return result(m_library->deletePlaylist(value));
+    if (!m_library->deletePlaylist(value)) return result(false);
+    auto markers = m_library->setting("qml.playlistMarkers").toObject();
+    if (markers.contains(QString::number(value))) {
+        markers.remove(QString::number(value));return result(m_library->setSetting("qml.playlistMarkers", markers));
+    }
+    return result(true);
 }
 bool LibraryBridge::addToPlaylist(const QString &playlist, const QString &track) {
     if (!m_library || !hasPlaylist(playlist.toLongLong()) || !m_library->track(track.toLongLong()).id) return result(false,"请选择有效歌单和歌曲");

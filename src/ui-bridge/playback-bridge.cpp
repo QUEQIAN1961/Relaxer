@@ -8,6 +8,9 @@ namespace relaxer {
 PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent, Library *library)
     : QObject(parent), m_facade(facade), m_library(library) {
     Q_ASSERT(facade && facade->thread() == thread());
+    m_muted = facade->volume() == 0;
+    if (m_muted && library)
+        m_muteRestoreVolume = qBound(0, library->setting("qml.muteRestoreVolume", 0).toInt(), 100);
     connect(facade, &PlaybackFacade::snapshotChanged, this, [this] { refresh(); });
     connect(facade, &PlaybackFacade::saved, this, [this] { refresh(); });
     connect(facade, &PlaybackFacade::playbackFailure, this,
@@ -52,7 +55,13 @@ void PlaybackBridge::refresh() {
     m_available = available();
     // A failed/missing resource remains retryable after the user repairs it.
     m_canPlay = available() && next.track.id;
-    if (next.volume > 0) m_lastVolume = next.volume;
+    if (previous.volume != next.volume) {
+        m_muted = next.volume == 0;
+        if (next.volume > 0 && m_muteRestoreVolume) {
+            m_muteRestoreVolume = 0;
+            if (m_library) m_library->setSetting("qml.muteRestoreVolume", 0);
+        }
+    }
     if (previous.track.id != next.track.id || previousTitle != title() || previousArtist != artist()) emit trackChanged();
     if (previousFavorite != currentFavorite()) emit currentFavoriteChanged();
     if (previousCover != m_coverUrl || previousRevision != m_artworkRevision) emit artworkChanged();
@@ -120,17 +129,32 @@ void PlaybackBridge::seek(qint64 position) {
         m_facade->seek(qBound<qint64>(0, position, m_facade->duration())); refresh();
     }
 }
-void PlaybackBridge::setVolume(int volume) { if (available()) { m_facade->setVolume(qBound(0,volume,100)); refresh(); } }
+void PlaybackBridge::setVolume(int volume) {
+    if (!available()) return;
+    const int previousVolume = this->volume();
+    const bool wasMuted = m_muted;
+    volume = qBound(0, volume, 100);
+    // Moving the slider explicitly replaces any volume saved by the mute button.
+    if (m_muteRestoreVolume) {
+        m_muteRestoreVolume = 0;
+        if (m_library) m_library->setSetting("qml.muteRestoreVolume", 0);
+    }
+    m_muted = volume == 0;
+    m_facade->setVolume(volume);
+    refresh();
+    if (previousVolume == this->volume() && wasMuted != m_muted) emit volumeChanged();
+}
 void PlaybackBridge::toggleMute() {
     if (!available()) return;
-    if (m_facade->volume() > 0) {
-        m_lastVolume = m_facade->volume();
-        if (m_library) m_library->setSetting("qml.lastAudibleVolume",m_lastVolume);
-        setVolume(0);
-    } else {
-        const int last = m_library ? m_library->setting("qml.lastAudibleVolume",m_lastVolume).toInt(m_lastVolume) : m_lastVolume;
-        setVolume(qBound(1,last,100));
-    }
+    const int previousVolume = volume();
+    const int nextVolume = m_muted ? m_muteRestoreVolume : 0;
+    m_muteRestoreVolume = m_muted ? 0 : previousVolume;
+    m_muted = !m_muted;
+    if (m_library) m_library->setSetting("qml.muteRestoreVolume", m_muteRestoreVolume);
+    m_facade->setVolume(nextVolume);
+    refresh();
+    // Unmuting a manually zeroed slider changes the icon without raising volume.
+    if (previousVolume == volume()) emit volumeChanged();
 }
 void PlaybackBridge::setMode(int mode) {
     if (available() && mode >= int(Mode::Sequential) && mode <= int(Mode::Shuffle)) {

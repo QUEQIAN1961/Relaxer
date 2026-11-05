@@ -2,7 +2,7 @@
   <file>Main.qml</file><file>components/HintBubble.qml</file><file>components/RoundMenuItem.qml</file><file>components/RoundMenu.qml</file><file>components/UiText.qml</file>
   <file>theme/qmldir</file><file>theme/Theme.qml</file>
   <file>components/ShellButton.qml</file><file>components/ToggleButton.qml</file><file>components/ColorSwatch.qml</file><file>components/NavigationButton.qml</file>
-  <file>components/EmptyState.qml</file><file>components/PlayerBar.qml</file>
+  <file>components/EmptyState.qml</file><file>components/PlayerBar.qml</file><file>components/PlayModeButton.qml</file><file>components/GlassSearch.qml</file>
   <file>components/TrackList.qml</file><file>pages/PlaylistsPage.qml</file>
   <file>pages/QueuePage.qml</file>
   <file>components/LyricsList.qml</file><file>pages/LyricsPage.qml</file>
@@ -11,8 +11,9 @@
   <file>pages/SettingsPage.qml</file><file>pages/ImportPage.qml</file>
   <file>pages/AiPage.qml</file><file>pages/TranslationPage.qml</file>
   <file>pages/LocalPage.qml</file><file>pages/TransitionPage.qml</file>
-  <file>components/Symbol.qml</file><file>components/EntryField.qml</file><file>components/ChoiceBox.qml</file>
+  <file>components/Symbol.qml</file><file>components/EntryField.qml</file><file>components/EntryArea.qml</file><file>components/EditingMenu.qml</file><file>components/ChoiceBox.qml</file>
   <file>components/IconButton.qml</file>
+  <file>components/VolumeButton.qml</file><file>components/MiniPlayer.qml</file>
   <file>components/Artwork.qml</file>
   <file>components/PlaybackSlider.qml</file>
   <file>components/UpcomingPanel.qml</file>
@@ -22,7 +23,30 @@
     <file>components/FeedbackPanel.qml</file>
   <file>components/ImportDialog.qml</file>
   <file>components/PlaylistEditor.qml</file>
+  <file>components/PlaylistNavigationRow.qml</file>
+  <file>components/LyricColorDialog.qml</file>
   <file>components/PlaylistHeader.qml</file>
+  <file>components/GlassSurface.qml</file>
+  <file alias="translations/controls_zh_CN.qm">../../resources/translations/controls_zh_CN.qm</file>
+  <file alias="controls/chevron-up.svg">../../resources/controls/chevron-up.svg</file>
+  <file alias="controls/chevron-down.svg">../../resources/controls/chevron-down.svg</file>
+  <file alias="marks/music.svg">../../resources/playlist-marks/music.svg</file>
+  <file alias="marks/headphones.svg">../../resources/playlist-marks/headphones.svg</file>
+  <file alias="marks/disc-3.svg">../../resources/playlist-marks/disc-3.svg</file>
+  <file alias="marks/radio.svg">../../resources/playlist-marks/radio.svg</file>
+  <file alias="marks/mic-vocal.svg">../../resources/playlist-marks/mic-vocal.svg</file>
+  <file alias="marks/star.svg">../../resources/playlist-marks/star.svg</file>
+  <file alias="marks/heart.svg">../../resources/playlist-marks/heart.svg</file>
+  <file alias="marks/sun.svg">../../resources/playlist-marks/sun.svg</file>
+  <file alias="marks/moon.svg">../../resources/playlist-marks/moon.svg</file>
+  <file alias="marks/cloud-rain.svg">../../resources/playlist-marks/cloud-rain.svg</file>
+  <file alias="marks/coffee.svg">../../resources/playlist-marks/coffee.svg</file>
+  <file alias="marks/book-open.svg">../../resources/playlist-marks/book-open.svg</file>
+  <file alias="marks/leaf.svg">../../resources/playlist-marks/leaf.svg</file>
+  <file alias="marks/flame.svg">../../resources/playlist-marks/flame.svg</file>
+  <file alias="marks/mountain.svg">../../resources/playlist-marks/mountain.svg</file>
+  <file alias="marks/gamepad-2.svg">../../resources/playlist-marks/gamepad-2.svg</file>
+  <file alias="licenses/playlist-marks.txt">../../resources/playlist-marks/LICENSE.txt</file>
   <file>pages/ProfilePage.qml</file><file>pages/VersionLogPage.qml</file>
   <file>pages/AppearancePage.qml</file>
   <file>pages/ShortcutsPage.qml</file>

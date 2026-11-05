@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtQuick.Window
 import "../components"
 import "../theme"
 import "." as Pages
@@ -46,17 +47,13 @@ ColumnLayout {
                     id: basic
                     anchors { left: parent.left; right: parent.right; top: parent.top; margins: 20 }
                     spacing: 16
-                    GridLayout {
-                        objectName:"settingsBasicGrid"
+                    Flow {
+                        id:basicGrid;objectName:"settingsBasicGrid"
                         Layout.fillWidth: true
-                        columns: 3
-                        columnSpacing: 18
-                        rowSpacing: 8
-                        UiText { Layout.fillWidth:true; Layout.preferredWidth:1; Layout.minimumWidth:0; text: "外观"; color: Theme.secondary; font.pixelSize: 14 }
-                        UiText { Layout.fillWidth:true; Layout.preferredWidth:1; Layout.minimumWidth:0; text: "有效播放比例"; color: Theme.secondary; font.pixelSize: 14 }
-                        UiText { Layout.fillWidth:true; Layout.preferredWidth:1; Layout.minimumWidth:0; text: "关闭窗口时"; color: Theme.secondary; font.pixelSize: 14 }
+                        spacing: 12
                         RowLayout {
-                            objectName:"settingsAppearanceCell"; Layout.fillWidth: true; Layout.preferredWidth:1; Layout.minimumWidth:0
+                            objectName:"settingsAppearanceCell";width:Theme.compact?basicGrid.width:Math.min(286,basicGrid.width);spacing:8
+                            UiText { text:"外观";color:Theme.secondary;font.pixelSize:14 }
                             ChoiceBox {
                                 objectName: "qmlThemeSetting"
                                 Layout.fillWidth: true
@@ -76,38 +73,62 @@ ColumnLayout {
                                 onClicked: { settingsBridge.beginAppearance(); page.appearanceRequested() }
                             }
                         }
-                        SpinBox {
-                            objectName: "qmlThresholdSetting"
-                            Layout.fillWidth: true; Layout.preferredWidth:1; Layout.minimumWidth:0
-                            from: 70; to: 100
-                            value: settingsBridge.values.threshold
-                            editable: true
-                            textFromValue: function(value) { return value + " %" }
-                            valueFromText: function(text) { return Number(text.replace("%", "").trim()) }
-                            onValueModified: settingsBridge.setPreference("threshold", value)
-                            HintBubble {
-                                visible: parent.hovered
-                                text: "整轮没有手动跳转，实际播放达到指定比例才计一次。暂停不累计，比例从下一轮生效。"
+                        RowLayout {
+                            objectName:"settingsThresholdCell";width:Theme.compact?basicGrid.width:Math.min(248,basicGrid.width);spacing:8
+                            UiText { text:"有效播放比例";color:Theme.secondary;font.pixelSize:14 }
+                            SpinBox {
+                                id:threshold;objectName: "qmlThresholdSetting"
+                                Layout.fillWidth: true; Layout.preferredWidth:1; Layout.minimumWidth:0
+                                implicitHeight:Theme.controlHeight;leftPadding:30;rightPadding:30
+                                from: 70; to: 100
+                                value: settingsBridge.values.threshold
+                                editable: true
+                                textFromValue: function(value) { return value + " %" }
+                                valueFromText: function(text) { return Number(text.replace("%", "").trim()) }
+                                onValueModified: settingsBridge.setPreference("threshold", value)
+                                background:Rectangle {objectName:"thresholdFrame";radius:8;color:Theme.card;border.color:threshold.activeFocus?Theme.accent:Theme.border}
+                                contentItem:TextInput {
+                                    text:threshold.textFromValue(threshold.value,threshold.locale);font:threshold.font;color:Theme.text
+                                    horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter
+                                    readOnly:!threshold.editable;validator:threshold.validator;selectByMouse:true
+                                    inputMethodHints:Qt.ImhDigitsOnly
+                                }
+                                up.indicator:Rectangle {
+                                    objectName:"thresholdIncrease"
+                                    x:threshold.width-width;width:30;height:threshold.height;radius:8;color:threshold.up.pressed?Theme.pressed:threshold.up.hovered?Theme.hover:"transparent"
+                                    UiText {anchors.centerIn:parent;text:"+";font.pixelSize:20;color:Theme.text}
+                                }
+                                down.indicator:Rectangle {
+                                    objectName:"thresholdDecrease"
+                                    width:30;height:threshold.height;radius:8;color:threshold.down.pressed?Theme.pressed:threshold.down.hovered?Theme.hover:"transparent"
+                                    UiText {anchors.centerIn:parent;text:"−";font.pixelSize:20;color:Theme.text}
+                                }
+                                HintBubble {
+                                    visible: parent.hovered
+                                    text: "整轮没有手动跳转，实际播放达到指定比例才计一次。暂停不累计，比例从下一轮生效。"
+                                }
                             }
                         }
-                        ChoiceBox {
-                            objectName: "closeSetting"
-                            Layout.fillWidth: true; Layout.preferredWidth:1; Layout.minimumWidth:0
-                            model: ["退出播放器", "最小化到系统托盘"]
-                            currentIndex: settingsBridge.values.closeToTray ? 1 : 0
-                            onActivated: settingsBridge.setPreference("closeToTray", currentIndex === 1)
+                        RowLayout {
+                            objectName:"settingsCloseCell";width:Theme.compact?basicGrid.width:Math.min(280,basicGrid.width);spacing:8
+                            UiText { text:"关闭窗口时";color:Theme.secondary;font.pixelSize:14 }
+                            ChoiceBox {
+                                objectName: "closeSetting"
+                                Layout.fillWidth: true; Layout.preferredWidth:1; Layout.minimumWidth:0
+                                model: ["退出播放器", "最小化到系统托盘"]
+                                currentIndex: settingsBridge.values.closeToTray ? 1 : 0
+                                onActivated: settingsBridge.setPreference("closeToTray", currentIndex === 1)
+                            }
                         }
                     }
                     Flow {
                         Layout.fillWidth: true
                         spacing: 8
-                        UiText { text: "歌词颜色"; height: 42; verticalAlignment: Text.AlignVCenter; color: Theme.secondary }
+                        UiText {text:"歌词颜色";height:36;verticalAlignment:Text.AlignVCenter;color:Theme.secondary}
                         ShellButton {
-                            objectName: "lyricColorSetting"
-                            text: "选择颜色"
-                            onClicked: { lyricColor.selectedColor = settingsBridge.values.lyricColor || Theme.text; lyricColor.open() }
+                            objectName:"lyricColorSetting";text:"编辑颜色"
+                            onClicked:lyricColorEditor.open()
                         }
-                        ShellButton { objectName: "lyricColorReset"; text: "跟随文字颜色"; onClicked: settingsBridge.setPreference("lyricColor", "") }
                         ShellButton { objectName: "uiFontSetting"; text: "字体"; onClicked: fontDialog.openSettings() }
                         ToggleButton {
                             objectName: "playerCoverBackground"
@@ -115,9 +136,7 @@ ColumnLayout {
                             checked: settingsBridge.values.playerCoverBackground
                             onClicked: settingsBridge.setPreference("playerCoverBackground", checked)
                         }
-                        Row {
-                            spacing: 8
-                            ToggleButton {
+                        ToggleButton {
                                 objectName: "reduceMotionSetting"
                                 text: "减少动画"
                                 checked: settingsBridge.values.reduceMotion
@@ -129,19 +148,21 @@ ColumnLayout {
                                 checked: settingsBridge.values.mutedBold
                                 onClicked: settingsBridge.setPreference("mutedBold", checked)
                             }
-                        }
+                        ToggleButton {objectName:"showFavoritesSetting";text:"展示红心";checked:settingsBridge.values.showFavorites;onClicked:settingsBridge.setPreference("showFavorites",checked)}
                     }
-                    RowLayout {
-                        Layout.fillWidth: true
+                    GridLayout {
+                        objectName:"dataRootRow";Layout.fillWidth:true;columnSpacing:12;rowSpacing:8
+                        columns:Theme.compact&&directoryMetrics.advanceWidth+openDirectory.implicitWidth+columnSpacing>width?1:2
+                        TextMetrics {id:directoryMetrics;text:settingsBridge.dataRoot;font:directoryLabel.font}
                         UiText {
-                            Layout.fillWidth: true
+                            id:directoryLabel;objectName:"dataRootText";Layout.fillWidth:true;Layout.minimumWidth:0
                             text: settingsBridge.dataRoot
                             textFormat: Text.PlainText
-                            wrapMode: Text.Wrap
+                            wrapMode:Text.WrapAnywhere
                             color: Theme.secondary
                             font.pixelSize: 14
                         }
-                        ShellButton { objectName: "openDataRoot"; text: "打开音乐资料目录"; onClicked: settingsBridge.openDataRoot() }
+                        ShellButton {id:openDirectory;objectName:"openDataRoot";Layout.alignment:Qt.AlignRight;text:"打开本地音乐目录";onClicked:settingsBridge.openDataRoot()}
                     }
                 }
             }
@@ -181,11 +202,6 @@ ColumnLayout {
             UiText { Layout.fillWidth: true; visible:text.length>0; text: settingsBridge.status; wrapMode: Text.Wrap; color: Theme.accent; textFormat: Text.PlainText }
         }
     }
-    ColorDialog {
-        id: lyricColor
-        title: "歌词颜色"
-        options: ColorDialog.DontUseNativeDialog
-        onAccepted: settingsBridge.setPreference("lyricColor", selectedColor.toString())
-    }
+    LyricColorDialog {id:lyricColorEditor;parent:page.Overlay.overlay}
     Pages.FontDialog { id: fontDialog }
 }

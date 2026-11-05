@@ -104,6 +104,12 @@ bool TranslationBridge::start(const QString &exactConsentTask){
 }
 void TranslationBridge::declineConsent(){if(m_consent)m_service->discard(m_consent);m_consent=0;refresh();}
 bool TranslationBridge::cancel(){const bool ok=m_service->cancel(summary().taskId);refresh();return ok;}
+void TranslationBridge::cancelAll(){
+    m_consent=0;
+    const auto tasks=m_tasks.values();
+    for(auto task:tasks)m_service->cancel(task);
+    refresh();
+}
 bool TranslationBridge::discard(){const auto task=summary().taskId;const bool ok=m_service->discard(task);if(m_consent==task)m_consent=0;refresh();return ok;}
 void TranslationBridge::reportFailure(const QString &message){
     emit feedback("Error",taskKey(),targetTrackKey(),"翻译操作失败",message.isEmpty()?QStringLiteral("操作未完成，请检查当前任务状态"):message);

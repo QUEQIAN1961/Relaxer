@@ -29,10 +29,10 @@ private slots:
     void defaultsAndPortableRoundTrip() {
         const QJsonObject expected{
             {"app", QJsonObject{{"toggle", "Space"}, {"previous", "Ctrl+Left"}, {"next", "Ctrl+Right"},
-                                {"volumeUp", "Ctrl+Up"}, {"volumeDown", "Ctrl+Down"}}},
+                                {"volumeUp", "Ctrl+Up"}, {"volumeDown", "Ctrl+Down"}, {"miniPlayer", "Ctrl+Shift+M"}}},
             {"global", QJsonObject{{"toggle", "Ctrl+Alt+Space"}, {"previous", "Ctrl+Alt+Left"},
                                    {"next", "Ctrl+Alt+Right"}, {"volumeUp", "Ctrl+Alt+Up"},
-                                   {"volumeDown", "Ctrl+Alt+Down"}}}, {"globalEnabled", false}};
+                                   {"volumeDown", "Ctrl+Alt+Down"}, {"miniPlayer", "Ctrl+Alt+M"}}}, {"globalEnabled", false}};
         QCOMPARE(ShortcutRules::defaults(), expected);
         QCOMPARE(ShortcutRules::actionKeys(), (QStringList{"toggle", "previous", "next", "volumeUp", "volumeDown"}));
         QCOMPARE(ShortcutRules::actionNames().size(), 5);
@@ -79,6 +79,22 @@ private slots:
         setBinding(config, "app", "toggle", "Ctrl+Alt+K");
         setBinding(config, "app", "next", "Alt+Ctrl+K");
         QVERIFY(!ShortcutRules::validate(config));
+    }
+    void miniPlayerBindingCanChangeWithoutBreakingOlderConfigurations() {
+        auto config=ShortcutRules::defaults();QString error;
+        setBinding(config,"app","miniPlayer","Ctrl+Alt+M");QVERIFY(ShortcutRules::validate(config,&error));
+        setBinding(config,"app","next","Ctrl+Alt+M");QVERIFY(!ShortcutRules::validate(config,&error));
+        setBinding(config,"app","miniPlayer","");QVERIFY(ShortcutRules::validate(config,&error));
+        setBinding(config,"app","next","Ctrl+Shift+M");QVERIFY(ShortcutRules::validate(config,&error));
+        auto app=config["app"].toObject();app.remove("miniPlayer");config["app"]=app;
+        QVERIFY(ShortcutRules::validate(config,&error)); // Preserve an older binding that already uses the preset.
+        setBinding(config,"app","next","Ctrl+Right");QVERIFY(ShortcutRules::validate(config,&error));
+        auto global=config["global"].toObject();global.remove("miniPlayer");config["global"]=global;
+        QCOMPARE(ShortcutRules::withMiniPlayerBinding(config)["global"].toObject()["miniPlayer"].toString(),QString("Ctrl+Alt+M"));
+        config["globalEnabled"]=true;setBinding(config,"app","miniPlayer","Ctrl+Alt+M");
+        QVERIFY(ShortcutRules::validate(config,&error)); // Migration leaves an occupied preset unbound.
+        setBinding(config,"global","miniPlayer","Ctrl+Alt+M");QVERIFY(!ShortcutRules::validate(config,&error));
+        setBinding(config,"global","miniPlayer","Meta+M");QVERIFY(!ShortcutRules::validate(config,&error));
     }
     void nativeMappings() {
         const auto up = ShortcutRules::nativeKey(sequence("Ctrl+Alt+Up"));

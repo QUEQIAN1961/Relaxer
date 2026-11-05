@@ -12,14 +12,15 @@ Item {
     property url imageUrl: "image://relaxer/artwork?file=" + encodeURIComponent(String(file))
         + "&seed=" + encodeURIComponent(seed) + "&rev=" + encodeURIComponent(revision)
         + "&resolution=" + resolution
-        + "&radiusRatio=" + (Math.min(width, height) > 0 ? radius / Math.min(width, height) : 0.075)
+        // Clip corners on the canvas; resizing must not reload or transition the image.
+        + "&radiusRatio=0"
     property url displayedUrl
     property url outgoingUrl
     property int activeDirection: 0
     property real transition: 1
     property bool initialized: false
     property bool pendingTransition: false
-    readonly property bool presentationActive: !Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized)
+    readonly property bool presentationActive:visible&&(!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
     readonly property bool reduceMotion: settingsBridge.values.reduceMotion
     readonly property alias imageItem: pocket
     implicitWidth: 62

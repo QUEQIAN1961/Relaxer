@@ -1,8 +1,17 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import "../theme"
 Dialog {
     id: dialog
+    readonly property bool miniSuspended:!!(dialog.parent&&dialog.parent.Window.window&&(dialog.parent.Window.window.miniMode||dialog.parent.Window.window.miniSwitching))
+    Binding {
+        target:dialog;property:"modal";value:false
+        when:dialog.miniSuspended
+        restoreMode:Binding.RestoreBindingOrValue
+    }
+    // The overlay already disables input while mini mode is active. Binding
+    // enabled here would save its inherited disabled value during suspension.
     popupType: Popup.Item
     padding: 18
     font.family: Theme.fontFamily

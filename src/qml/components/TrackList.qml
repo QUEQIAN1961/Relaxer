@@ -29,15 +29,27 @@ Item {
     function beginBulk(){bulkMode=true;checkedKeys=selectedKey!=="0"?[selectedKey]:[];bulkChanged(true,checkedKeys)}
     function toggleKey(key){let next=checkedKeys.slice();const i=next.indexOf(key);if(i<0)next.push(key);else next.splice(i,1);checkedKeys=next;bulkChanged(bulkMode,checkedKeys)}
     function fitColumns(){
-        const count=statisticsMode?7:8;let widths=[bulkMode?48:34,32,260,120,120,64,88,104]
+        const showFavorites=settingsBridge.values.showFavorites
+        const count=statisticsMode?7:8;let widths=[bulkMode?48:34,showFavorites?32:0,260,120,120,64,88,104]
         for(let i=2;i<count;i++){const saved=Number(widthOverrides[columnKeys[i]]||0);if(saved>=40)widths[i]=Math.max(i===2?96:40,saved)}
-        const available=Math.max(200,width-12)
+        const available=Math.max(0,width-12)
+        for(const column of [7,6,4,5]) {
+            if(column>=count)continue
+            let minimum=0;for(let index=0;index<count;index++)minimum+=index===2?180:index===3?100:widths[index]
+            if(minimum<=available)break
+            widths[column]=0
+        }
         let other=0;for(let i=0;i<count;i++)if(i!==2)other+=widths[i]
         if(!widthOverrides.title)widths[2]=Math.max(96,available-other)
         let used=0;for(let i=0;i<count-1;i++)used+=widths[i]
-        let shortage=Math.max(0,used+40-available)
-        for(let i=2;i<count-1&&shortage>0;i++){const n=Math.min(shortage,Math.max(0,widths[i]-(i===2?96:40)));widths[i]-=n;shortage-=n;used-=n}
-        widths[count-1]=Math.max(40,available-used);return widths
+        const lastMinimum=widths[count-1]>0?40:0
+        let shortage=Math.max(0,used+lastMinimum-available)
+        for(let i=2;i<count-1&&shortage>0;i++){if(!widths[i])continue;const n=Math.min(shortage,Math.max(0,widths[i]-(i===2?96:40)));widths[i]-=n;shortage-=n;used-=n}
+        widths[count-1]=lastMinimum?Math.max(lastMinimum,available-used):0
+        if(!lastMinimum)widths[2]+=Math.max(0,available-used)
+        const number=bulkMode?42:30,favorite=showFavorites?32:0,artist=Math.min(150,Math.max(92,available*.28))
+        const compact=[number,favorite,Math.max(96,available-number-favorite-artist),artist,0,0,0,0]
+        return widths.map((wide,index)=>wide+(compact[index]-wide)*Theme.layoutProgress)
     }
     function sortColumn(column){
         if(column<2)return
@@ -55,11 +67,13 @@ Item {
                 model:table.columnLabels
                 delegate:Item{
                     required property int index;required property string modelData
-                    width:table.columnWidths[index];height:38
+                    objectName:"trackHeading-"+index
+                    width:table.columnWidths[index];height:38;visible:width>0;clip:true
+
                     UiText { fontRegion: "songs";anchors.fill:parent;anchors.leftMargin:8;text:table.bulkMode&&index===0?"选择":modelData;color:Theme.secondary;font.pixelSize: 13;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
                     MouseArea{anchors.fill:parent;onClicked:{if(index===0&&table.bulkMode){const all=[];for(let i=0;i<table.trackModel.count;i++)all.push(table.trackModel.idAt(i));table.checkedKeys=table.checkedKeys.length===all.length?[]:all;table.bulkChanged(true,table.checkedKeys)}else table.sortColumn(index)}}
                     MouseArea{
-                        visible:index>=2;anchors.right:parent.right;width:6;height:parent.height;cursorShape:Qt.SplitHCursor
+                        visible:!Theme.compact&&index>=2;anchors.right:parent.right;width:6;height:parent.height;cursorShape:Qt.SplitHCursor
                         property real origin:0;property real startWidth:0
                         onPressed:mouse=>{origin=mapToGlobal(mouse.x,mouse.y).x;startWidth=parent.width}
                         onPositionChanged:mouse=>{if(!pressed)return;const next=Object.assign({},table.widthOverrides);next[table.columnKeys[index]]=Math.max(index===2?96:40,Math.min(2400,startWidth+mapToGlobal(mouse.x,mouse.y).x-origin));table.widthOverrides=next}
@@ -109,13 +123,16 @@ Item {
                     anchors.fill:parent
                     Item{
                         width:table.columnWidths[0];height:parent.height
+
                         CheckBox{visible:table.bulkMode;anchors.centerIn:parent;checked:table.checkedKeys.indexOf(row.trackKey)>=0;onClicked:table.toggleKey(row.trackKey)}
                         UiText { objectName:"trackNumber-"+row.trackKey;fontRegion: "songs";visible:!table.bulkMode&&!rowHover.hovered&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
                         IconButton{objectName:"trackPlayback-"+row.trackKey;visible:!table.bulkMode&&(rowHover.hovered||table.currentKey===row.trackKey);anchors.centerIn:parent;width:30;height:30;padding:3;horizontalPadding:3;verticalPadding:3;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"pause":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:if(table.currentKey===row.trackKey)playbackBridge.toggle();else table.playRequested(row.trackKey)}
                     }
-                    Item{width:table.columnWidths[1];height:parent.height;IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;width:30;height:30;padding:3;symbol:row.favorite?"liked":"heart";tint:row.favorite?Theme.accent:Theme.secondary;onClicked:if(!table.bulkMode)table.favoriteRequested(row.trackKey)}}
+                    Item{width:table.columnWidths[1];height:parent.height;visible:width>0;clip:true;
+IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;width:30;height:30;padding:3;symbol:row.favorite?"liked":"heart";tint:row.favorite?Theme.accent:Theme.secondary;onClicked:if(!table.bulkMode)table.favoriteRequested(row.trackKey)}}
                     Item{
                         width:table.columnWidths[2];height:parent.height
+
                         Artwork{x:6;anchors.verticalCenter:parent.verticalCenter;width:40;height:40;file:row.rowCover;seed:row.title;resolution:128;radius:6}
                         UiText { fontRegion: "songs";x:56;width:parent.width-62;anchors.verticalCenter:parent.verticalCenter;text:row.title;textFormat:Text.PlainText;color:table.currentKey===row.trackKey?Theme.accent:Theme.text;font.pixelSize: 15;font.weight:Font.DemiBold;elide:Text.ElideRight}
                     }
@@ -123,7 +140,8 @@ Item {
                         model:table.statisticsMode?4:5
                         delegate:Item{
                             required property int index
-                            width:table.columnWidths[index+3];height:row.height
+                            width:table.columnWidths[index+3];height:row.height;visible:width>0;clip:true
+
                             UiText { fontRegion: "songs";anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:8;text:index===0?row.artist:index===1?row.album:index===2?table.timeText(row.duration):index===3?table.statisticsMode?row.rowPlays:table.sizeText(row.rowSize):row.rowAdded.length?row.rowAdded.slice(0,10):"—";textFormat:Text.PlainText;color:Theme.secondary;font.pixelSize: 14;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
                         }
                     }

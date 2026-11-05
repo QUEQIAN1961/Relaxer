@@ -264,7 +264,7 @@ private slots:
         QmlShell shell(&lib,nullptr,true);QVERIFY(shell.settingsBridge()->setTheme(theme));QVERIFY(shell.load());
         auto *w=shell.window();w->showNormal();w->setGeometry(40,45,1240,790);QVERIFY(QTest::qWaitForWindowExposed(w));
         auto *panel=visual(w->contentItem(),"importPanel"),*label=visual(w->contentItem(),"importStatusText");QVERIFY(panel&&label);
-        auto *dialog=w->findChild<QObject *>("importDialog");QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(w,"ensureImportDialog"));auto *dialog=w->findChild<QObject *>("importDialog");QVERIFY(dialog);
         auto *bridge=shell.importBridge();QSignalSpy frames(w,&QQuickWindow::frameSwapped);
         auto writeWave=[&](const QString &path,int variation){
             QFile file(path);if(!file.open(QIODevice::WriteOnly))return false;

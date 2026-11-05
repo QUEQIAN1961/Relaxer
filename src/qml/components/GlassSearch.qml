@@ -1,0 +1,62 @@
+import QtQuick
+import QtQuick.Controls
+import "../theme"
+
+Item {
+    id:control
+    required property Item backdrop
+    property string query:""
+    readonly property bool opened:searchPopup.visible
+    property point anchor:Qt.point(0,0)
+    signal queryEdited(string value)
+    implicitWidth:36;implicitHeight:36
+    function place() {
+        anchor=searchButton.mapToItem(backdrop,0,0)
+        searchPopup.expandedWidth=Math.min(280,Math.max(160,anchor.x+searchButton.width-8))
+    }
+    function open() {place();searchPopup.open();Qt.callLater(function(){input.forceActiveFocus();input.selectAll()})}
+    function close() {searchPopup.close()}
+    onVisibleChanged:if(!visible)close()
+    Connections {target:control.backdrop;function onWidthChanged(){if(control.opened)Qt.callLater(control.place)}}
+    IconButton {
+        id:searchButton;objectName:"librarySearchButton";anchors.fill:parent
+        symbol:"search";text:"搜索音乐库";showTooltip:true
+        iconColor:control.query.length?Theme.accent:Theme.text
+        onClicked:{if(searchPopup.visible)control.close();else control.open()}
+    }
+    Popup {
+        id:searchPopup;objectName:"librarySearchPopup";parent:searchButton;popupType:Popup.Item
+        property real reveal:0
+        property real expandedWidth:280
+        x:searchButton.width-width;y:(searchButton.height-height)/2
+        width:36+(expandedWidth-36)*reveal;height:42;padding:0
+        modal:false;dim:false;focus:true
+        closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutsideParent
+        enter:Transition {NumberAnimation{target:searchPopup;property:"reveal";from:0;to:1;duration:settingsBridge.values.reduceMotion?0:220;easing.type:Easing.OutCubic}}
+        exit:Transition {NumberAnimation{target:searchPopup;property:"reveal";to:0;duration:settingsBridge.values.reduceMotion?0:100;easing.type:Easing.InCubic}}
+        background:GlassSurface {
+            objectName:"searchGlassSurface";backdrop:control.backdrop;active:searchPopup.visible;effectName:"searchBackdropBlur"
+            tintOpacity:Theme.dark?.76:.68
+            sampleRect:Qt.rect(control.anchor.x+searchPopup.x,control.anchor.y+searchPopup.y,searchPopup.width,searchPopup.height)
+        }
+        contentItem:Item {
+            clip:true
+            EntryField {
+                id:input;objectName:"librarySearch";anchors.fill:parent
+                text:control.query;placeholderText:"搜索歌曲、歌手、专辑"
+                leftPadding:40;rightPadding:clearButton.visible?36:12
+                opacity:searchPopup.reveal
+                background:Item{}
+                onTextEdited:control.queryEdited(text)
+                onAccepted:control.close()
+                Accessible.name:"搜索音乐库"
+            }
+            Symbol {x:12;anchors.verticalCenter:parent.verticalCenter;width:18;height:18;name:"search";color:Theme.secondary;opacity:searchPopup.reveal}
+            IconButton {
+                id:clearButton;objectName:"clearLibrarySearch";anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter
+                anchors.rightMargin:4;width:28;height:28;padding:7;visible:input.text.length>0;opacity:searchPopup.reveal
+                symbol:"close";text:"清空搜索";onClicked:{control.queryEdited("");input.forceActiveFocus()}
+            }
+        }
+    }
+}

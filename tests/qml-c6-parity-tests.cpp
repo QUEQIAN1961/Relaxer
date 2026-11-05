@@ -161,6 +161,7 @@ private slots:
         const bool localQtKeys=window->isActive()&&QGuiApplication::focusWindow()==window;
         if(localQtKeys){
         QTest::keyClick(window,Qt::Key_Up,Qt::ControlModifier);QCOMPARE(fixture.shell->playbackBridge()->volume(),45);
+        QVERIFY(QMetaObject::invokeMethod(visual(window->contentItem(),"librarySearchControl"),"open"));QTest::qWait(260);
         auto *search=visual(window->contentItem(),"librarySearch");QVERIFY(search);search->forceActiveFocus();
         QTest::keyClick(window,Qt::Key_Up,Qt::ControlModifier);QCOMPARE(fixture.shell->playbackBridge()->volume(),45);
         }else{
@@ -294,7 +295,7 @@ private slots:
         auto *list=visual(window->contentItem(),"trackListView");auto *lyrics=visual(window->contentItem(),"lyricsList");
         auto *upcoming=visual(window->contentItem(),"nextQueuePanel");QVERIFY(list&&lyrics&&upcoming);
         QTRY_VERIFY(textItem(list,fixture.a.title));QTRY_VERIFY(textItem(lyrics,"Hello moon"));QTRY_VERIFY(textItem(lyrics,"月亮你好"));
-        auto *title=visual(window->contentItem(),"currentTitle");auto *search=visual(window->contentItem(),"librarySearch");
+        auto *title=visual(window->contentItem(),"currentTitle");auto *search=visual(window->contentItem(),"librarySearchButton");
         auto *next=textItem(upcoming,"下一首");QVERIFY(title&&search&&next);
         for(const auto &region:regions){
             for(const auto &key:regions)flags[key]=key==region;

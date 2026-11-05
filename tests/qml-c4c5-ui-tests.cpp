@@ -78,6 +78,7 @@ private slots:
         Fixture f;QVERIFY(f.ok);const auto folder=f.dir.filePath("新 歌曲");QVERIFY(QDir().mkpath(folder));
         for(int i=0;i<80;++i)QVERIFY(import_fixture::midi(folder+QString("/%1.mid").arg(i),i));
         auto *window=f.shell->window();
+        QVERIFY(QMetaObject::invokeMethod(window,"ensureImportDialog"));
         const auto queue=f.shell->facade()->queue().items;auto *importPage=window->findChild<QObject *>("importDialog");QVERIFY(importPage);QVariant started;
         QTRY_VERIFY(f.shell->facade()->position()>500);const auto beforeImport=f.shell->facade()->position();
         const auto single=f.dir.filePath("single.mid");QVERIFY(import_fixture::midi(single,9999));const QVariant singleUrl=QVariant::fromValue(QList<QUrl>{QUrl::fromLocalFile(single)});

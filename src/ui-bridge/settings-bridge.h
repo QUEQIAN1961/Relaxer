@@ -26,6 +26,7 @@ class SettingsBridge final : public QObject {
     Q_PROPERTY(bool appearanceDirty READ appearanceDirty NOTIFY appearanceChanged)
     Q_PROPERTY(QString activeAppearanceId READ activeAppearanceId NOTIFY appearanceChanged)
     Q_PROPERTY(QString fontFamily READ fontFamily NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantMap fontFiles READ fontFiles NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap windowBounds READ windowBounds NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList shortcutActions READ shortcutActions CONSTANT)
     Q_PROPERTY(QString dataRoot READ dataRoot CONSTANT)
@@ -47,6 +48,7 @@ public:
     bool appearanceDirty() const { return m_appearanceDirty; }
     QString activeAppearanceId() const { return m_activeAppearanceId; }
     QString fontFamily() const { return m_fontFamily; }
+    QVariantMap fontFiles() const;
     QVariantList shortcutActions() const;
     QString dataRoot() const { return m_library->root(); }
     QString status() const { return m_status; }
@@ -54,12 +56,17 @@ public:
     Q_INVOKABLE bool edit(const QString &key, const QVariant &value);
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool setPreference(const QString &key, const QVariant &value);
+    Q_INVOKABLE QVariantMap miniWindowPosition() const;
+    Q_INVOKABLE bool saveMiniWindowPosition(int x,int y);
     Q_INVOKABLE bool setTheme(int theme);
     Q_INVOKABLE bool saveWindowState(int width, int height, bool maximized);
     Q_INVOKABLE bool openDataRoot();
     Q_INVOKABLE QString fontFamilyFor(const QString &region) const;
     Q_INVOKABLE bool saveFont(const QUrl &source, const QVariantMap &regions);
+    Q_INVOKABLE bool saveFonts(const QVariantMap &files);
     Q_INVOKABLE bool resetFont();
+    Q_INVOKABLE bool chooseLyricColor(QObject *ownerWindow);
+    Q_INVOKABLE bool chooseLyricColorDraft(const QString &color,QObject *ownerWindow);
     Q_INVOKABLE QString shortcutText(int key, int modifiers) const;
     Q_INVOKABLE QVariantMap defaultShortcuts() const;
     Q_INVOKABLE bool saveShortcuts(const QVariantMap &configuration);
@@ -75,6 +82,7 @@ public:
     Q_INVOKABLE bool removeAppearance(const QString &id);
     Q_INVOKABLE bool savePalette(const QString &name, const QString &background, const QString &panel, const QString &accent);
 signals:
+    void lyricColorChosen(const QString &color);
     void settingsChanged();
     void draftChanged();
     void statusChanged();
@@ -91,7 +99,8 @@ private:
     bool m_appearanceDirty = false;
     QString m_activeAppearanceId;
     QString m_status;
-    int m_fontId = -1;
+    QHash<QString,int> m_fontIds;
+    QHash<QString,QString> m_fontFamilies;
     QString m_fontFamily;
     QPointer<QColorDialog> m_colorDialog;
     quint64 m_appearanceSession = 0;
@@ -102,6 +111,8 @@ private:
     QString validatePreference(const QString &key, const QJsonValue &value) const;
     QString validate(const QJsonObject &value) const;
     void updateFont();
+    bool importFont(const QUrl &source,QString &relative,bool uniqueName);
+    QColorDialog *createColorDialog(const QString &color,QObject *ownerWindow,const QString &name);
     void previewAppearance();
 };
 } // namespace relaxer

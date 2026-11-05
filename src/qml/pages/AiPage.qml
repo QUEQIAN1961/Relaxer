@@ -319,7 +319,7 @@ ColumnLayout {
                     color: Theme.secondary
                     font.pixelSize: 14
                 }
-                TextArea {
+                EntryArea {
                     id: style
                     objectName: "translationStyle"
                     property bool dirty: false

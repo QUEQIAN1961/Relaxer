@@ -25,6 +25,10 @@ Page {
     signal batchInstrumentalRequested(var keys)
     function open() { aboutToShow(); opened = true; reveal = 1; forceActiveFocus() }
     function close() { opened = false; reveal = 0; closed() }
+    function closeForNarrow() {
+        for(const popup of [consent,leaveConfirm,replaceConfirm,discardConfirm,pasteDialog,instrumentalConfirm,offsetEditor,searchSettings,localLyrics])popup.close()
+        close()
+    }
     padding: 18
     topPadding: 6; bottomPadding: 6
     spacing: 8
@@ -325,10 +329,11 @@ Page {
                         Accessible.name: title + " · " + artist + " · " + status + (translationReason.length ? " · " + translationReason : "")
                         // Shared classification reason: explains "cannot read" or "needs a look"
                         // instead of silently dropping the row from the filter.
-                        ToolTip.visible: hovered && translationReason.length > 0 &&
-                            translationStatus !== "translated" && translationStatus !== "not-needed"
-                        ToolTip.text: translationReason
-                        ToolTip.delay: 700
+                        HintBubble {
+                            visible:parent.hovered && parent.translationReason.length>0 &&
+                                parent.translationStatus!=="translated" && parent.translationStatus!=="not-needed"
+                            text:parent.translationReason;delay:700
+                        }
                         background: Rectangle { radius: 7; color: parent.highlighted ? Theme.selected : parent.hovered ? Theme.hover : "transparent" }
                         contentItem: Item {
                             implicitHeight: 54; clip: true
@@ -506,7 +511,7 @@ Page {
             }
             ScrollView {
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 80; clip: true
-                TextArea {
+                EntryArea {
                     objectName: "lyricsWorkspacePreview"; readOnly: true; selectByMouse: true
                     textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; font.pixelSize: 14
                     color: Theme.text; background: Rectangle { radius: 8; color: Theme.panel; border.color: Theme.border }
@@ -588,7 +593,7 @@ Page {
         anchors.centerIn: parent; width: Math.min(580, parent.width - 40); modal: true; title: "粘贴歌词"; standardButtons: Dialog.Save | Dialog.Cancel
         contentItem: ColumnLayout {
             UiText { text: "保存会替换这首歌已有的本地歌词。"; color: Theme.secondary; wrapMode: Text.Wrap }
-            ScrollView { Layout.fillWidth: true; Layout.preferredHeight: 250; TextArea { id: pasted; objectName: "lyricsPasteText"; placeholderText: "粘贴 LRC 或普通歌词"; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; selectByMouse: true } }
+            ScrollView { Layout.fillWidth: true; Layout.preferredHeight: 250; EntryArea { id: pasted; objectName: "lyricsPasteText"; placeholderText: "粘贴 LRC 或普通歌词"; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; selectByMouse: true } }
         }
         onAccepted: if (exactTarget === lyricsSearchBridge.targetTrackKey) lyricsSearchBridge.saveText(pasted.text, true, editToken)
     }
@@ -615,7 +620,7 @@ Page {
             Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "预览（文件生效时间；未叠加播放显示延时）\n" + (offsetEditor.info.timeline || "") }
             ScrollView {
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true
-                TextArea { objectName: "lyricsFileOffsetPreview"; readOnly: true; selectByMouse: true; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; text: offsetEditor.info.preview || "" }
+                EntryArea { objectName: "lyricsFileOffsetPreview"; readOnly: true; selectByMouse: true; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; text: offsetEditor.info.preview || "" }
             }
             CheckBox { id: offsetDiscard; objectName: "lyricsFileOffsetTaskConsent"; visible: !!offsetEditor.info.confirmationRequired; text: "明确保存偏移；仅成功后放弃该曲翻译任务或未保存译文" }
             Label { objectName: "lyricsFileOffsetError"; Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.accent; text: offsetEditor.info.error || ""; visible: text.length > 0 }

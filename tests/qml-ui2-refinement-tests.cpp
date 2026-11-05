@@ -37,7 +37,7 @@ private slots:
                 QVERIFY(background->property("border").isValid()||background->property("color").isValid());
                 QVERIFY(bounds(button).right()<=w->width()+1);
             }
-            auto *search=visual(root,"librarySearch");QVERIFY(search);QCOMPARE(search->height(),36.);
+            auto *search=visual(root,"librarySearchButton");QVERIFY(search);QCOMPARE(search->height(),36.);
             auto *import=visual(root,"importMusicButton");QCOMPARE(bounds(import).center().y(),bounds(search).center().y());
             auto *stack=visual(root,"pageStack");QVERIFY(stack);QCOMPARE(bounds(stack).top(),22.);
             shot(w,size.width()==1240?"01-library":"02-compact-library");
@@ -61,7 +61,7 @@ private slots:
     void bodyTypeIsReadableAndVisibleListActionsHaveBorders(){
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();
         auto *tokens=w->property("designTokens").value<QObject *>();QVERIFY(tokens);QCOMPARE(tokens->property("fontSize").toInt(),15);
-        auto *play=visual(root,"playAllButton");auto *search=visual(root,"librarySearch");QVERIFY(play);QVERIFY(search);
+        auto *play=visual(root,"playAllButton");auto *search=visual(root,"librarySearchButton");QVERIFY(play);QVERIFY(search);
         QVERIFY(play->property("font").value<QFont>().pixelSize()>=15);QVERIFY(play->property("font").value<QFont>().weight()>=QFont::Medium);
         QVERIFY(search->property("font").value<QFont>().pixelSize()>=15);
         auto *page=visual(root,"localPage");QVERIFY(page);
@@ -142,7 +142,7 @@ private slots:
                 QTest::qWait(7);
             }
             QVERIFY(departed);QVERIFY(switched);QVERIFY(arrived);
-            QCOMPARE(w->property("upcomingAtLeft").toBool(),open);QVERIFY(qAbs(bounds(panel).bottom()-(w->height()-4))<1);
+            QCOMPARE(w->property("upcomingAtLeft").toBool(),open);QVERIFY(qAbs(bounds(panel).bottom()-(w->height()-(open?4:14)))<1);
         }
         const auto folder=qEnvironmentVariable("RELAXER_UI2_SCREENSHOTS");
         if(!folder.isEmpty()){QFile out(QDir(folder).filePath("upcoming-frames.json"));QVERIFY(out.open(QIODevice::WriteOnly));out.write(QJsonDocument(frames).toJson());}

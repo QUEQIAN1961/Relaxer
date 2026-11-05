@@ -42,37 +42,39 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 9
             RowLayout {
-                Layout.fillWidth: true; spacing: 18
+                Layout.fillWidth: true; spacing: 18;visible:!Theme.compact
                 UiText { text: "功能"; Layout.minimumWidth: 100; Layout.maximumWidth: 100; color: Theme.secondary; font.pixelSize: 14 }
                 UiText { text: "应用内"; Layout.fillWidth: true; Layout.preferredWidth: 1; color: Theme.secondary; font.pixelSize: 14 }
                 UiText { text: "全局"; Layout.fillWidth: true; Layout.preferredWidth: 1; color: Theme.secondary; font.pixelSize: 14 }
             }
             Repeater {
                 model: settingsBridge.shortcutActions
-                delegate: Row {
+                delegate: Item {
                     id: actionRow
                     required property var modelData
                     Layout.fillWidth: true
                     Layout.preferredWidth: content.width
-                    Layout.preferredHeight: 42
-                    width: content.width
-                    height: 42
-                    spacing: 18
+                    Layout.preferredHeight:Theme.compact&&!modelData.appOnly?92:42
+                    width:content.width
+                    height:Theme.compact&&!modelData.appOnly?92:42
                     UiText { text: modelData.name; width: 100; height: 42; verticalAlignment: Text.AlignVCenter; color: Theme.text }
                     Repeater {
-                        model: ["app", "global"]
+                        model: actionRow.modelData.appOnly?["app"]:["app", "global"]
                         delegate: Row {
                             id: binding
                             required property string modelData
+                            required property int index
                             readonly property string scope: modelData
                             readonly property string action: actionRow.modelData.key
-                            width: Math.max(0, (content.width - 136) / 2)
-                            height: 42
-                            spacing: 4
+                            x:Theme.compact?112:118+index*(width+18)
+                            y:Theme.compact?index*46:0
+                            width:Theme.compact?Math.max(0,content.width-112):Math.max(0,(content.width-136)/2)
+                            height:42;spacing:4
+                            UiText { visible:Theme.compact;width:Theme.compact?48:0;height:42;verticalAlignment:Text.AlignVCenter;text:binding.scope==="app"?"应用内":"全局";color:Theme.secondary }
                             EntryField {
                                 id: input
                                 objectName: "shortcut-" + binding.scope + "-" + binding.action
-                                width: Math.max(0, binding.width - clearBinding.width - 4)
+                                width: Math.max(0, binding.width-clearBinding.width-4-(Theme.compact?52:0))
                                 height: 42
                                 horizontalAlignment: TextInput.AlignLeft
                                 onTextChanged: cursorPosition = 0
@@ -90,28 +92,34 @@ Rectangle {
                             ToolButton { id: clearBinding; width: 28; height: 42; text: "×"; Accessible.name: "清除此快捷键"; onClicked: page.setBinding(binding.scope, binding.action, "") }
                         }
                     }
+                    UiText {
+                        visible:actionRow.modelData.appOnly&&!Theme.compact
+                        x:136+Math.max(0,(content.width-136)/2);height:42;verticalAlignment:Text.AlignVCenter
+                        text:"仅应用内";color:Theme.secondary
+                    }
                 }
             }
         }
-        RowLayout {
-            Layout.fillWidth: true; spacing: 16
+        GridLayout {
+            Layout.fillWidth:true;columns:Theme.compact?1:2;columnSpacing:16;rowSpacing:12
             ColumnLayout {
-                objectName: "shortcutsHelp"
-                Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 8
-                UiText { Layout.fillWidth: true; text: uiIntegration.shortcutStatus; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
-                UiText { Layout.fillWidth: true; text: "录入后点击保存；输入文字时不触发应用内播放快捷键。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
+                objectName:"shortcutsHelp";Layout.fillWidth:true;Layout.minimumWidth:0;spacing:8
+                UiText { Layout.fillWidth:true;text:uiIntegration.shortcutStatus;wrapMode:Text.Wrap;color:Theme.secondary;font.pixelSize:14 }
+                UiText { Layout.fillWidth:true;text:"录入后点击保存；输入文字时不触发应用内播放快捷键。";wrapMode:Text.Wrap;color:Theme.secondary;font.pixelSize:14 }
             }
-            Row {
-                objectName: "shortcutsActions"
-                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter; spacing: 8
+            Flow {
+                objectName:"shortcutsActions";Layout.fillWidth:Theme.compact
+                Layout.preferredWidth:Theme.compact?1:globalToggle.width+resetActions.width+8
+                Layout.alignment:Qt.AlignVCenter;spacing:8
                 ToggleButton {
-                    objectName: "globalShortcutsEnabled"
-                    text: "启用全局快捷键"
-                    checked: page.configuration.globalEnabled
-                    onClicked: { const copy = JSON.parse(JSON.stringify(page.configuration)); copy.globalEnabled = checked; page.configuration = copy; page.dirty = true }
+                    id:globalToggle;objectName:"globalShortcutsEnabled";text:"启用全局快捷键";checked:page.configuration.globalEnabled
+                    onClicked:{const copy=JSON.parse(JSON.stringify(page.configuration));copy.globalEnabled=checked;page.configuration=copy;page.dirty=true}
                 }
-                ShellButton { objectName: "shortcutsReset"; text: "恢复默认"; onClicked: { page.configuration = settingsBridge.defaultShortcuts(); page.dirty = true } }
-                ShellButton { objectName: "shortcutsSave"; text: "保存快捷键"; onClicked: { if (uiIntegration.saveShortcuts(page.configuration)) page.load() } }
+                Row {
+                    id:resetActions;spacing:8
+                    ShellButton {objectName:"shortcutsReset";text:"恢复默认";onClicked:{page.configuration=settingsBridge.defaultShortcuts();page.dirty=true}}
+                    ShellButton {objectName:"shortcutsSave";text:"保存快捷键";onClicked:{if(uiIntegration.saveShortcuts(page.configuration))page.load()}}
+                }
             }
         }
     }

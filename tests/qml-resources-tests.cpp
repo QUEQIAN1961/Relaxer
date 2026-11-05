@@ -1,4 +1,6 @@
 #include "ui-bridge/qml-shell.h"
+#include "phase-c-version.h"
+#include "release-version.h"
 #include <QFile>
 #include <QImageReader>
 #include <QJsonDocument>
@@ -10,6 +12,16 @@ using namespace relaxer;
 class QmlResourcesTests : public QObject {
     Q_OBJECT
 private slots:
+    void currentIdentityMatchesTheLatestChangelog() {
+        QTemporaryDir directory;Library library(directory.filePath("data"));QVERIFY(library.open());QmlShell shell(&library,nullptr,true);
+        QFile file(":/changelog.json");QVERIFY(file.open(QIODevice::ReadOnly));
+        const auto history=QJsonDocument::fromJson(file.readAll()).array();QVERIFY(!history.isEmpty());const auto latest=history.first().toArray();QCOMPARE(latest.size(),3);
+        QCOMPARE(latest.at(0).toString(),QString("Relaxer ")+QString::fromLatin1(phaseC::Display));QVERIFY(!latest.at(2).toString().isEmpty());
+        QCOMPARE(QString::fromLatin1(phaseC::Version),QString::fromLatin1(release::Numeric)+"-"+QString::fromLatin1(release::Prerelease));
+        QCOMPARE(QString::fromLatin1(phaseC::WindowTitle),QString::fromLatin1(release::WindowTitle));
+        QVERIFY2(shell.load(),qPrintable(shell.warnings().join('\n')));QCOMPARE(shell.appBridge()->version(),QString::fromLatin1(phaseC::Display));
+        QCOMPARE(shell.settingsBridge()->changelog().first().toList().first().toString(),latest.first().toString());
+    }
     void qmlResourcesAndShellAreAvailable() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());

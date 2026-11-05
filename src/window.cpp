@@ -1,5 +1,6 @@
 #include "window.h"
 #include "release-version.h"
+#include "ui-font-config.h"
 #include "lyrics-document-reader.h"
 #include "changelog.h"
 #include "client-frame-windows.h"
@@ -1842,7 +1843,27 @@ void Window::applyTheme() {
     }
     css+="QPushButton#volumeButton{background:transparent;border:none;padding:5px;}"
          "QPushButton#volumeButton:hover{background:rgba(128,128,128,15);}";
-    {const auto uiFont=m_library->setting("uiFont").toObject();static int installed=-1;static QString installedFile;const auto relative=uiFont["file"].toString();const auto absolute=relative.isEmpty()?QString():m_library->absolute(relative);if(installedFile!=absolute){if(installed>=0)QFontDatabase::removeApplicationFont(installed);installed=-1;installedFile=absolute;if(QFileInfo::exists(absolute))installed=QFontDatabase::addApplicationFont(absolute);}const auto family=installed<0?QString():QFontDatabase::applicationFontFamilies(installed).value(0);const QString stack="'Segoe UI','Noto Sans CJK SC','Microsoft YaHei'";auto familyFor=[&](const char *key){return !family.isEmpty()&&uiFont[key].toBool()?QString("'%1',%2").arg(QString(family).replace('\'',QString()),stack):stack;};if(uiFont["rest"].toBool()&&!family.isEmpty())css.replace("font-family:"+stack,"font-family:"+familyFor("rest"));css+="QTableWidget{font-family:"+familyFor("songs")+";} QWidget#lyricView{font-family:"+familyFor("lyrics")+";} QWidget#playerBar,QWidget#playerBar QLabel,QWidget#bulkBar,QWidget#bulkBar QLabel{font-family:"+familyFor("footer")+";} QWidget#nextQueueLarge,QWidget#nextQueueCompact{font-family:"+familyFor("next")+";}";}
+    {
+        const auto files=uiFontFiles(m_library->setting("uiFont").toObject());
+        static QJsonObject installedFiles;static QString installedRoot;static QHash<QString,int> installed;
+        if(files!=installedFiles||installedRoot!=m_library->root()) {
+            for(const auto id:installed)if(id>=0)QFontDatabase::removeApplicationFont(id);
+            installed.clear();installedFiles=files;installedRoot=m_library->root();
+            for(const auto &region:uiFontRegions()) {
+                const auto relative=files.value(region).toString();
+                if(relative.startsWith("Fonts/")&&QDir::cleanPath(relative)==relative&&!installed.contains(relative))
+                    installed.insert(relative,QFontDatabase::addApplicationFont(m_library->absolute(relative)));
+            }
+        }
+        const QString stack="'Segoe UI','Noto Sans CJK SC','Microsoft YaHei'";
+        auto familyFor=[&](const char *key){
+            const auto id=installed.value(files.value(key).toString(),-1);
+            const auto family=id<0?QString():QFontDatabase::applicationFontFamilies(id).value(0);
+            return family.isEmpty()?stack:QString("'%1',%2").arg(QString(family).replace('\'',QString()),stack);
+        };
+        if(familyFor("rest")!=stack)css.replace("font-family:"+stack,"font-family:"+familyFor("rest"));
+        css+="QTableWidget{font-family:"+familyFor("songs")+";} QWidget#lyricView{font-family:"+familyFor("lyrics")+";} QWidget#playerBar,QWidget#playerBar QLabel,QWidget#bulkBar,QWidget#bulkBar QLabel{font-family:"+familyFor("footer")+";} QWidget#nextQueueLarge,QWidget#nextQueueCompact{font-family:"+familyFor("next")+";}";
+    }
     css+="QDoubleSpinBox#lyricDelay{padding:4px 8px;min-width:96px;}";
     if(footerCustom)css+="QWidget#playerBar,QWidget#bulkBar,QStackedWidget#bottomStack{background:transparent;}";
     setStyleSheet(css);

@@ -7,6 +7,12 @@ import "../theme"
 Item {
     id:page
     objectName:"lyricsPage"
+    readonly property real reflow:Theme.layoutProgress
+    readonly property real shrink:Math.min(1,2*reflow)
+    readonly property real arrange:Math.max(0,2*reflow-1)
+    readonly property real wideColumnWidth:Math.max(0,(columns.width-32)/2)
+    readonly property real wideCoverSize:Math.max(120,Math.min(360,wideColumnWidth-40,page.height-310))
+    function blend(wide,narrow){return wide+(narrow-wide)*reflow}
     property bool fullScreen:false
     property bool metadataTravelling:false
     property alias metadataTitle:largeTitle
@@ -17,7 +23,7 @@ Item {
     property alias largeArtwork:art
     property bool toolsVisible:false
     property bool delayOpen:false
-    readonly property bool presentationActive: !Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized)
+    readonly property bool presentationActive:visible&&(!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
     signal collapseRequested()
     signal fullscreenRequested()
     signal translationRequested()
@@ -31,45 +37,64 @@ Item {
         visible:source.toString().length>0
     }
     Rectangle{anchors.fill:parent;color:Theme.background;opacity:settingsBridge.values.playerCoverBackground?.68:0}
-    RowLayout{
-        x:34;y:28;width:parent.width-68;height:34;opacity:page.detailsOpacity
-        ShellButton{objectName:"playerCollapse";text:"收起";flat:true;symbol:"collapse";onClicked:page.collapseRequested()}
+    RowLayout {
+        x:page.blend(Theme.pageMargin,0);y:page.blend(28,0);width:parent.width-x-Theme.pageMargin;height:page.blend(36,32);opacity:page.detailsOpacity
+        Item {
+            objectName:"playerCollapse"
+            property string text:Theme.compact?"":"收起"
+            Layout.preferredWidth:Theme.compact?42:wideCollapse.implicitWidth
+            Layout.preferredHeight:Theme.compact?32:36
+            Layout.minimumHeight:Layout.preferredHeight;Layout.maximumHeight:Layout.preferredHeight
+            IconButton {objectName:"compactPlayerCollapse";anchors.fill:parent;visible:Theme.compact;padding:9;symbol:"collapse";tip:"收起播放";onClicked:page.collapseRequested()}
+            ShellButton {id:wideCollapse;anchors.fill:parent;visible:!Theme.compact;text:"收起";flat:true;symbol:"collapse";onClicked:page.collapseRequested()}
+        }
         Item{Layout.fillWidth:true}
     }
     LyricsList {
         id: lyrics
-        x: columns.x + lyricSide.x - previewInset
+        x:Math.max(0,columns.x+lyricSide.x-previewInset)
+        leadingInset:columns.x+lyricSide.x-x
         y: columns.y + lyricSide.y
-        width: lyricSide.width + previewInset; height: lyricSide.height
+        width:columns.x+lyricSide.x+lyricSide.width-x; height: lyricSide.height
         opacity: page.detailsOpacity
     }
-    RowLayout{
+    Item{
         id: columns
         anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;anchors.bottom:parent.bottom
-        anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:76;anchors.bottomMargin:20;spacing:32
-        Item{
-            Layout.fillWidth:true;Layout.fillHeight:true;Layout.preferredWidth:page.width/2
-            Column{
-                width:parent.width;anchors.verticalCenter:parent.verticalCenter;spacing:0
-                Artwork{
-                    id:art;objectName:"currentArtwork";width:Math.max(160,Math.min(360,parent.width-40,page.height-310));height:width;anchors.horizontalCenter:parent.horizontalCenter
-                    file:playbackBridge.coverUrl;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";revision:playbackBridge.artworkRevision;radius:24
-                    animated:page.visible&&!page.artworkTravelling;direction:page.trackDirection
-                    opacity:page.artworkTravelling?0:1
+        anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:page.blend(76,48);anchors.bottomMargin:20
+        Item {
+            id:metadataSide
+            width:page.wideColumnWidth+(parent.width-page.wideColumnWidth)*page.arrange;height:parent.height
+            Item {
+                id:metadataGroup;objectName:"expandedMetadataGroup"
+                width:parent.width
+                y:Math.max(0,(parent.height-height)/2)*(1-page.shrink)
+                height:Math.max(art.height,largeArtist.y+largeArtist.height)
+                Artwork {
+                    id:art;objectName:"currentArtwork"
+                    x:Math.max(0,(page.wideColumnWidth-page.wideCoverSize)/2)*(1-page.reflow);y:0
+                    width:page.wideCoverSize+(88-page.wideCoverSize)*page.shrink;height:width
+                    file:playbackBridge.coverUrl;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";revision:playbackBridge.artworkRevision;radius:page.blend(24,12)
+                    animated:page.visible&&!page.artworkTravelling;direction:page.trackDirection;opacity:page.artworkTravelling?0:1
                 }
-                Item{height:22;width:1}
                 UiText {
-                    id:largeTitle
-                    width:parent.width-40;anchors.horizontalCenter:parent.horizontalCenter;text:playbackBridge.hasTrack?playbackBridge.title:"还没有音乐正在播放";textFormat:Text.PlainText
-                    wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter
-                    font.pixelSize:27;font.weight:Font.DemiBold;color:Theme.text;opacity:page.metadataTravelling?0:page.detailsOpacity
+                    id:largeTitle;objectName:"expandedSongTitle";x:20+88*page.shrink;y:(art.height+22)*(1-page.arrange)+14*page.arrange
+                    width:Math.max(0,parent.width-x-page.blend(20,0))
+                    text:playbackBridge.hasTrack?playbackBridge.title:"还没有音乐正在播放";textFormat:Text.PlainText
+                    wrapMode:Theme.compact?Text.NoWrap:Text.Wrap;maximumLineCount:Theme.compact?1:2;elide:Text.ElideRight;horizontalAlignment:Theme.compact?Text.AlignLeft:Text.AlignHCenter
+                    font.pixelSize:page.blend(27,20);font.weight:Font.DemiBold;color:Theme.text;opacity:page.metadataTravelling?0:page.detailsOpacity
                 }
-                Item{height:8;width:1}
-                UiText {id:largeArtist;width:parent.width-40;anchors.horizontalCenter:parent.horizontalCenter;text:playbackBridge.hasTrack?playbackBridge.artist:"选一首喜欢的歌，慢慢听。";textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter;font.pixelSize:16;color:Theme.secondary;opacity:page.metadataTravelling?0:page.detailsOpacity}
+                UiText {
+                    id:largeArtist;objectName:"expandedSongArtist";x:largeTitle.x;y:(art.height+22+largeTitle.height+8)*(1-page.arrange)+52*page.arrange;width:largeTitle.width
+                    text:playbackBridge.hasTrack?playbackBridge.artist:"选一首喜欢的歌，慢慢听。";textFormat:Text.PlainText
+                    wrapMode:Theme.compact?Text.NoWrap:Text.Wrap;maximumLineCount:Theme.compact?1:2;elide:Text.ElideRight;horizontalAlignment:Theme.compact?Text.AlignLeft:Text.AlignHCenter
+                    font.pixelSize:16;color:Theme.secondary;opacity:page.metadataTravelling?0:page.detailsOpacity
+                }
             }
         }
         Item{
-            id:lyricSide;Layout.fillWidth:true;Layout.fillHeight:true;Layout.preferredWidth:page.width/2;opacity:page.detailsOpacity
+            id:lyricSide;x:(page.wideColumnWidth+32)*(1-page.arrange);y:195*page.shrink-85*page.arrange
+            width:Math.max(0,parent.width-x);height:parent.height-y;opacity:page.detailsOpacity
             HoverHandler{onPointChanged:{page.toolsVisible=true;if(!tools.opened)idle.restart()} onHoveredChanged:if(hovered){page.toolsVisible=true;if(!tools.opened)idle.restart()}}
             ToolButton{
                 id:question;objectName:"lyricToolsQuestion";width:20;height:20;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.rightMargin:26;anchors.bottomMargin:6

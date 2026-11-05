@@ -89,7 +89,9 @@ int main(int argc,char **argv) {
     QGuiApplication app(argc,argv);app.setQuitOnLastWindowClosed(false);
     QCommandLineParser parser;parser.addHelpOption();
     parser.addOptions({{"data","Owned synthetic fixture root","path"},{"count","0/1000/10000","number"},
-        {"output","Result JSON","file"},{"prepare","Create a new isolated fixture then exit"},{"screenshots","Save three window sizes","directory"}});
+        {"output","Result JSON","file"},{"prepare","Create a new isolated fixture then exit"},{"screenshots","Save three window sizes","directory"},
+        {"lifecycle","Measure startup, foreground, mini and minimized resources"},
+        {"popup-lifecycle","Also open queue and volume windows before minimizing"}});
     parser.process(app);bool valid=false;const int count=parser.value("count").toInt(&valid);
     const auto root=parser.value("data");
     if(!valid||(count!=0&&count!=1000&&count!=10000)||root.isEmpty())return 64;
@@ -111,7 +113,49 @@ int main(int argc,char **argv) {
         {"firstFrameFromShellInitMs",firstFrameMs},{"firstScreenVisibleDelegates",maxDelegates},
         {"graphicsApi",int(window->rendererInterface()->graphicsApi())},{"qpa",QGuiApplication::platformName()},
         {"quickBackend",qEnvironmentVariable("QT_QUICK_BACKEND")},{"windowWidth",window->width()},{"windowHeight",window->height()},
-        {"devicePixelRatio",window->devicePixelRatio()},{"cachePolicy","Fresh process; OS caches not flushed; synthetic fixture prepared immediately beforehand"}};
+        {"devicePixelRatio",window->devicePixelRatio()},{"cachePolicy","Fresh process; owned synthetic fixture reused; OS caches not flushed"}};
+    if(parser.isSet("lifecycle")||parser.isSet("popup-lifecycle")){
+        const auto objects=[&]{return window->findChildren<QObject *>().size();};
+        const auto sample=[&]{QJsonObject value=memory();value["objects"]=objects();return value;};
+        const auto settled=[&]{return QTest::qWaitFor([&]{window->grabWindow();return !window->property("miniSwitching").toBool();},5000);};
+        QTest::qWait(800);window->grabWindow();
+        result["foreground"]=sample();result["expandedCreatedAtStartup"]=visual(window->contentItem(),"nowPlayingPage")!=nullptr;
+        if(count){shell.libraryBridge()->playAll();if(!QTest::qWaitFor([&]{return shell.facade()->playing();},5000))return 40;shell.playbackBridge()->pause();}
+        QMetaObject::invokeMethod(window,"showLyrics");QTest::qWait(650);window->grabWindow();result["expanded"]=sample();
+        QMetaObject::invokeMethod(window,"closeLyrics");QTest::qWait(550);window->grabWindow();result["normalAfterExpanded"]=sample();
+        QMetaObject::invokeMethod(window,"enterMiniPlayer");if(!settled())return 41;QTest::qWait(500);result["mini"]=sample();
+        QPointer<QQuickWindow> queueWindow,volumeWindow;
+        QObject *queuePopup=nullptr,*volumePopup=nullptr;
+        if(parser.isSet("popup-lifecycle")){
+            auto *mini=visual(window->contentItem(),"miniPlayer");
+            if(!mini||!QMetaObject::invokeMethod(mini,"openQueue"))return 44;
+            queuePopup=mini->findChild<QObject *>("miniQueuePopup");
+            if(!queuePopup||!QTest::qWaitFor([&]{return queuePopup->property("opened").toBool();},3000))return 45;
+            queueWindow=queuePopup->property("contentItem").value<QQuickItem *>()->window();
+            QTest::qWait(400);queueWindow->grabWindow();result["queueOpen"]=sample();
+            result["queuePersistentGraphics"]=queueWindow->isPersistentGraphics();
+            result["queuePersistentSceneGraph"]=queueWindow->isPersistentSceneGraph();
+            QMetaObject::invokeMethod(queuePopup,"close");QTest::qWait(800);result["queueClosed"]=sample();
+            auto *volume=visual(mini,"miniVolume");if(!volume||!QMetaObject::invokeMethod(volume,"openVolume"))return 46;
+            volumePopup=volume->findChild<QObject *>("compactVolumePopup");
+            if(!volumePopup||!QTest::qWaitFor([&]{return volumePopup->property("opened").toBool();},3000))return 47;
+            volumeWindow=volumePopup->property("contentItem").value<QQuickItem *>()->window();
+            QTest::qWait(400);volumeWindow->grabWindow();result["volumeOpen"]=sample();
+            result["volumePersistentGraphics"]=volumeWindow->isPersistentGraphics();
+        }
+        window->showMinimized();QTest::qWait(1600);result["minimized"]=sample();
+        if(parser.isSet("popup-lifecycle")){
+            result["queueVisibleInBackground"]=queuePopup->property("visible").toBool();
+            result["volumeVisibleInBackground"]=volumePopup->property("visible").toBool();
+            result["mainExposedInBackground"]=window->isExposed();
+            result["queueExposedInBackground"]=queueWindow&&queueWindow->isExposed();
+            result["volumeExposedInBackground"]=volumeWindow&&volumeWindow->isExposed();
+        }
+        window->showNormal();QTest::qWait(500);window->grabWindow();result["miniRestored"]=sample();
+        QMetaObject::invokeMethod(window,"leaveMiniPlayer");if(!settled())return 42;QTest::qWait(500);window->grabWindow();result["normalRestored"]=sample();
+        result["warnings"]=QJsonArray::fromStringList(shell.warnings());result["workload"]="1000 synthetic tracks; decoded WAV paused after playback initialization; fresh process, OS cache retained";
+        const bool ok=saveJson(parser.value("output"),result);shell.shutdown();return ok&&shell.warnings().isEmpty()?0:43;
+    }
     auto *model=shell.libraryModel();if(count)model->setSelectedId(model->idAt(count/2));const auto selection=model->selectedId();
     clock.restart();model->setFilterText("Artist A");result["filterModelMs"]=clock.nsecsElapsed()/1000000.;
     if(frame(window)<0||model->count()!=(count+1)/2)return 15;

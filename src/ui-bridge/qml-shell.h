@@ -14,6 +14,7 @@
 #include "lyrics-search-bridge.h"
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
+#include <QTranslator>
 #include <memory>
 
 namespace relaxer {
@@ -72,6 +73,7 @@ class QmlShell final : public QObject {
     ImportBridge m_importBridge;
     LyricsSearchCoordinator m_search;
     LyricsSearchBridge m_searchBridge;
+    QTranslator m_controlsTranslator;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QStringList m_warnings;
     bool m_artworkRecoveryScheduled=false;

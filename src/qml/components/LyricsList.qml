@@ -7,7 +7,8 @@ Item {
     objectName: "lyricsPanel"
     property bool manualScroll: false
     property bool reduceMotion: settingsBridge.values.reduceMotion
-    readonly property real previewInset: previewTime.implicitWidth + 12
+    readonly property real previewInset:previewTime.implicitWidth+12
+    property real leadingInset:previewInset
     readonly property int previewIndex: {
         const center = list.contentY + list.height / 2
         let nearest = -1, distance = Number.MAX_VALUE
@@ -31,7 +32,7 @@ Item {
         panel.centerCurrent()
     }
     function centerCurrent() {
-        if (manualScroll || lyricsModel.currentIndex < 0) return
+        if (!visible || manualScroll || lyricsModel.currentIndex < 0) return
         followMotion.stop()
         const before = list.contentY
         list.forceLayout()
@@ -44,6 +45,7 @@ Item {
         followMotion.restart()
     }
     NumberAnimation { id: followMotion; objectName: "lyricsFollowMotion"; target: list; property: "contentY"; duration: 360; easing.type: Easing.OutCubic }
+    onVisibleChanged:if(visible)Qt.callLater(panel.centerCurrent);else followMotion.stop()
     Timer { id: returnIdle; interval: 3000; onTriggered: { if (list.dragging || list.flicking || lyricBar.pressed || previewTime.pressed) restart(); else panel.returnCurrent() } }
     Connections {
         target: lyricsModel
@@ -53,7 +55,7 @@ Item {
     }
     ColumnLayout {
         id: layout
-        anchors.fill: parent; anchors.leftMargin: panel.previewInset; spacing: 8
+        anchors.fill: parent; anchors.leftMargin:panel.leadingInset; spacing: 8
         RowLayout {
             visible: lyricsModel.preview || panel.manualScroll || lyricsModel.loading || lyricsModel.error.length > 0
             Layout.fillWidth: true

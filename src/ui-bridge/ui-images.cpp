@@ -8,12 +8,25 @@
 #include <QUrlQuery>
 #include <QMutexLocker>
 #include <QFileInfo>
+#include <QFile>
+#include <QSvgRenderer>
 namespace relaxer {
 static QImage iconImage(const QString &name, const QColor &c) {
     QImage pm(64, 64, QImage::Format_ARGB32_Premultiplied);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing);
+    if (name.startsWith("mark-")) {
+        QFile file(":/qml/marks/" + name.mid(5) + ".svg");
+        if (file.open(QIODevice::ReadOnly)) {
+            auto svg = file.readAll();
+            svg.replace("currentColor", c.name().toUtf8());
+            QSvgRenderer renderer(svg);
+            p.setOpacity(c.alphaF());
+            renderer.render(&p, QRectF(0, 0, 64, 64));
+        }
+        return pm;
+    }
     p.scale(2, 2);
     p.setPen(QPen(c, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     p.setBrush(Qt::NoBrush);
@@ -71,8 +84,22 @@ static QImage iconImage(const QString &name, const QColor &c) {
             p.restore();
         }
     } else if (name == "search") {
-        p.drawEllipse(QRectF(6, 5, 15, 15));
-        p.drawLine(20, 20, 27, 27);
+        p.drawEllipse(QRectF(6, 6, 15, 15));
+        p.drawLine(QPointF(19,19),QPointF(26.5,26.5));
+    } else if (name == "close") {
+        p.drawLine(9,9,23,23);p.drawLine(23,9,9,23);
+    } else if (name == "pin") {
+        QPainterPath pin;
+        pin.moveTo(11,6);pin.lineTo(21,6);
+        pin.moveTo(13,6);pin.lineTo(13,15);pin.lineTo(9,20);
+        pin.lineTo(23,20);pin.lineTo(19,15);pin.lineTo(19,6);
+        p.drawPath(pin);
+        p.drawLine(16,20,16,28);
+    } else if (name == "check") {
+        p.drawPolyline(QPolygonF{{8,16},{14,22},{25,10}});
+    } else if (name == "more") {
+        p.setPen(Qt::NoPen);p.setBrush(c);
+        for(int index=0;index<3;++index)p.drawEllipse(QPointF(8+index*8,16),1.6,1.6);
     } else if (name == "plus") {
         p.drawLine(16, 7, 16, 25);
         p.drawLine(7, 16, 25, 16);
@@ -100,12 +127,12 @@ static QImage iconImage(const QString &name, const QColor &c) {
         p.drawLine(22, 8, 28, 8);
         p.drawLine(24, 4, 28, 8);
         p.drawLine(24, 12, 28, 8);
-    } else if (name == "volume" || name == "volumeMuted" || name == "volumeLow" ||
+    } else if (name == "volume" || name == "volumeMuted" || name == "volumeZero" || name == "volumeLow" ||
                name == "volumeMedium" || name == "volumeHigh") {
         p.drawPolygon(QPolygonF{{4, 12}, {9, 12}, {14, 7}, {14, 25}, {9, 20}, {4, 20}});
         if(name=="volumeMuted"){
             p.drawLine(19,12,26,20);p.drawLine(19,20,26,12);
-        }else{
+        }else if(name!="volumeZero"){
             const int waves=name=="volumeLow"?1:name=="volumeMedium"?2:3;
             for(int i=0;i<waves;++i){
                 const qreal x=18+4*i,reach=3+2*i,half=3+3*i;
@@ -173,11 +200,12 @@ QImage UiImages::requestImage(const QString &id,QSize *resultSize,const QSize &r
     const int preferred=query.queryItemValue("resolution").toInt();
     const int size=qBound(64,requested.isValid()?qMax(requested.width(),requested.height()):(preferred>0?preferred:640),960);
     const QFileInfo info(QUrl(query.queryItemValue("file",QUrl::FullyDecoded)).toLocalFile());
-    const QString cacheKey=id+QString::number(size)+QString::number(info.size())+artworkVersionKey(artworkFileVersion(info.absoluteFilePath()));
+    const int backgroundSize=requested.isValid()?qBound(64,qMax(requested.width(),requested.height()),1600):preferred>0?qBound(64,preferred,1600):1600;
+    const QString cacheKey=id+QString::number(url.path()=="/background"?backgroundSize:size)+QString::number(info.size())+artworkVersionKey(artworkFileVersion(info.absoluteFilePath()));
     {QMutexLocker lock(&m_mutex);if(auto *cached=m_cache.object(cacheKey)){if(resultSize)*resultSize=cached->size();return *cached;}}
     const auto seed=query.queryItemValue("seed",QUrl::FullyDecoded);const auto file=QUrl(query.queryItemValue("file",QUrl::FullyDecoded));QImage out;
     if(url.path()=="/background"){
-        auto background=file.isLocalFile()?backgroundImage(file.toLocalFile(),1600):QImage();
+        auto background=file.isLocalFile()?backgroundImage(file.toLocalFile(),backgroundSize):QImage();
         if(!background.isNull())background=gaussianBlur(background,qBound(0.,query.queryItemValue("blur").toDouble(),50.));
         if(resultSize)*resultSize=background.size();
         if(!background.isNull()){QMutexLocker lock(&m_mutex);m_cache.insert(cacheKey,new QImage(background),qMax(1,int(background.sizeInBytes()/1024)));}

@@ -47,7 +47,7 @@ ScrollView {
             }
             UiText { anchors.centerIn: parent; visible: parent.count === 0; text: "暂无候选版本"; color: Theme.secondary }
         }
-        TextArea { Layout.fillWidth: true; Layout.preferredHeight: 140; readOnly: true; text: lyricsSearchBridge.previewText; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; selectByMouse: true; placeholderText: "选择候选版本查看原文" }
+        EntryArea { Layout.fillWidth: true; Layout.preferredHeight: 140; readOnly: true; text: lyricsSearchBridge.previewText; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; selectByMouse: true; placeholderText: "选择候选版本查看原文" }
         ShellButton { text: "保存所选歌词版本"; enabled: lyricsSearchBridge.selectedKey.length > 0; onClicked: { replaceConsent.exactKey = lyricsSearchBridge.selectedKey; replaceConsent.open() } }
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
         AiPage { Layout.fillWidth: true }
