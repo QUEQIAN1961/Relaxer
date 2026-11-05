@@ -1,7 +1,5 @@
 # V0.2.4-GA 构建与组装
 
-修订二使用 `v0.2.4-GA-r2` 标签及新发行目录，应用版本仍为 V0.2.4-GA。保留原始标签和附件。
-
 环境：Windows x64、MSYS2 UCRT64、C++17、Qt 6.11.2、CMake/Ninja。沿用本机已准备的 `.dependencies/midi`，无需重新下载依赖。
 
 先提交完整源码及资源，再配置和构建；所有核心 PE 必须与源码指纹一致。开发构建和打包不替代独立 Harness 全量回归。
@@ -15,7 +13,7 @@ cmake --build D:\Git\Relaxer\Testing\build-ui --target Relaxer relaxer_qml_runti
 python D:\Git\Relaxer\Development\scripts\package-rc.py `
   --source D:\Git\Relaxer\Development --build D:\Git\Relaxer\Testing\build-ui `
   --baseline 'D:\Git\Relaxer Version\Release\V0.2.2-GA\Assets\Relaxer-V0.2.2-GA-Win64.zip' `
-  --destination D:\Git\Relaxer\Releases\V0.2.4-GA-r2
+  --destination D:\Git\Relaxer\Releases\V0.2.4-GA
 ```
 
 组包脚本沿用名称，同时支持 RC 与 GA；目标必须是新目录，不能覆盖既有归档。`Desktop-Win64/` 为运行目录，`Assets/` 包含运行包、应用源码 ZIP 和说明，`Source/` 是只读源码导出，不是新的开发工作区。基础第三方对应源码沿用原有归档并通过同批说明引用。

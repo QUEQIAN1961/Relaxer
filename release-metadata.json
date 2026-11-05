@@ -1,14 +1,8 @@
 {
   "applicationName": "Relaxer",
-  "latestStableTag": "v0.2.4-GA-r2",
+  "latestStableTag": "v0.2.4-GA",
   "repository": "https://github.com/QUEQIAN1961/Relaxer",
   "releases": [
-    {
-      "tag": "v0.2.4-GA-r2",
-      "status": "stable",
-      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.4-GA-r2",
-      "notes": "docs/releases/v0.2.4-GA/RELEASE-NOTES.md"
-    },
     {
       "tag": "v0.2.4-GA",
       "status": "stable",
