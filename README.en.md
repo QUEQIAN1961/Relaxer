@@ -2,7 +2,7 @@
 
 A local music player for Windows, built with C++17, Qt 6 and QML. Includes a music library, playlists, queue, synced lyrics and custom themes, plus Widgets compatibility mode.
 
-V0.2.4-GA adds adaptive narrow layouts, a single-window mini player and synchronized bilingual lyric scrolling, with refinements to resizing, playlists, search, appearance and background resources. Published assets and availability are shown on the actual [release page](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.4-GA).
+V0.2.4-GA adds adaptive narrow layouts, a single-window mini player and synchronized bilingual lyric scrolling, with refinements to resizing, playlists, search, appearance and background resources. Published assets and availability are shown on the actual [release page](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.4-GA-r2).
 
 Extract the complete Windows x64 portable ZIP to a new writable folder and launch the root `Relaxer.exe`. Use `Relaxer.exe --widgets` for compatibility mode. Back up the entire `data/` folder before upgrading, test with a copy, and never run two versions against the same data. An explicit `--data` path is supported. Do not mix runtime files from different packages.
 

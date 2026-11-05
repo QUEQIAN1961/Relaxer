@@ -309,11 +309,17 @@ private slots:
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
 #endif
+    void narrowingLyricsWorkspaceCancelsAllPendingWorkAndReturnsToLocalMusic_data(){
+        QTest::addColumn<bool>("reduceMotion");
+        QTest::newRow("animated")<<false;QTest::newRow("reduced-motion")<<true;
+    }
     void narrowingLyricsWorkspaceCancelsAllPendingWorkAndReturnsToLocalMusic(){
+        QFETCH(bool,reduceMotion);
         search_fixture::Network network;network.respond=nullptr;
         Fixture f;QVERIFY(f.ok);f.shell.reset();
         f.shell=std::make_unique<QmlShell>(&f.library,nullptr,true,f.runtime.get(),nullptr,SettingsBridge::SystemThemeReader{},&network);
-        QVERIFY(f.shell->load());f.shell->facade()->play({f.a.id,f.b.id},f.a.id);QVERIFY(prepare(f));auto *w=f.shell->window();
+        QVERIFY(f.shell->load());QVERIFY(f.shell->settingsBridge()->setPreference("reduceMotion",reduceMotion));
+        f.shell->facade()->play({f.a.id,f.b.id},f.a.id);QVERIFY(prepare(f));auto *w=f.shell->window();
         auto *search=f.shell->lyricsSearchBridge();auto *translation=f.shell->translationBridge();f.http.setHold(true);
         QList<quint64> tasks;
         for(auto id:{f.a.id,f.b.id}){QVERIFY(translation->setTargetTrack(QString::number(id)));QVERIFY(translation->classify(1));const auto token=translation->prepareAi();QVERIFY(!token.isEmpty());tasks.append(token.toULongLong());QVERIFY(translation->start(token));}

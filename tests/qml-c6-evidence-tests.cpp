@@ -443,7 +443,12 @@ private slots:
         QTRY_COMPARE(title->property("text").toString(),f.b.title);
         QVERIFY(panel->setProperty("width",480));QTRY_VERIFY(artist->isVisible());QVERIFY(title->width()>=title->implicitWidth());QVERIFY(artist->x()>=title->x()+title->width());
         QCOMPARE(artist->property("text").toString(),QString(" — ")+f.b.artist);
-        QVERIFY(panel->setProperty("width",112+title->implicitWidth()+14));QTRY_VERIFY(!artist->isVisible());QVERIFY(title->width()>=title->implicitWidth());
+        // Text metrics now decide when both labels fit; don't encode the old
+        // fixed title/artist cutoff. A roomy panel must retain the full title.
+        QVERIFY(panel->setProperty("width",title->x()+title->implicitWidth()+artist->implicitWidth()+40));
+        QTRY_VERIFY(artist->isVisible());QVERIFY(title->width()>=title->implicitWidth());
+        QVERIFY(artist->x()>=title->x()+title->width());
+        QVERIFY(artist->x()+artist->width()<=panel->width()-34);
         QVERIFY(panel->setProperty("width",160));QTRY_VERIFY(title->width()<title->implicitWidth());QVERIFY(!artist->isVisible());
         QVERIFY(panel->setProperty("width",480));QTRY_VERIFY(artist->isVisible());shot(w,"next-title-and-artist");
         record("next-title-priority",{{"title",title->property("text").toString()},{"artist",artist->property("text").toString()},{"width",panel->width()}});QVERIFY(f.shell->warnings().isEmpty());

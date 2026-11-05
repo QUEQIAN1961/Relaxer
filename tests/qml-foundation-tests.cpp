@@ -62,7 +62,7 @@ class QmlFoundationTests final : public QObject {
         QVERIFY(window->isVisible());
         QCOMPARE(window->title(), QString::fromLatin1(phaseC::WindowTitle) + QStringLiteral(" · QML"));
         QCOMPARE(shell.appBridge()->version(), QString::fromLatin1(phaseC::Display));
-        QVERIFY(window->minimumWidth() >= 900); QVERIFY(window->minimumHeight() >= 600);
+        QCOMPARE(window->minimumWidth(), 414); QCOMPARE(window->minimumHeight(), 540);
         QCOMPARE(QSqlDatabase::connectionNames(), connections);
         QCOMPARE(shell.findChildren<Playback *>().size(), 1);
         QCOMPARE(shell.findChildren<PlaybackFacade *>().size(), 1);

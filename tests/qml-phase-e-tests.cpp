@@ -5,6 +5,7 @@
 #include <QLineF>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQmlProperty>
 #include <QWheelEvent>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -15,6 +16,40 @@
 #endif
 using namespace c4c5_fixture;
 namespace {
+class PopupHeightProbe final : public QObject {
+    Q_OBJECT
+public:
+    explicit PopupHeightProbe(QObject *popup) : m_popup(popup) {}
+    void reset() { m_samples.clear(); }
+    bool animated() const {
+        qreal first=-1;
+        bool moved=false;
+        for(const auto &sample:m_samples) {
+            const auto h=sample.value("height").toReal(), full=sample.value("full").toReal();
+            if(h<=.01 || h>=full-.01)continue;
+            if(sample.value("scale").toReal()!=1 || sample.value("opacity").toReal()!=1)return false;
+            if(qAbs(sample.value("width").toReal()-m_popup->property("width").toReal())>.01)return false;
+            if(first<0)first=h;
+            else if(qAbs(h-first)>.1)moved=true;
+        }
+        return moved;
+    }
+    QString diagnostic() const {
+        QStringList values;
+        for(const auto &sample:m_samples)
+            values.append(QString("%1/%2").arg(sample.value("height").toReal()).arg(sample.value("full").toReal()));
+        return "popup height samples: "+values.join(", ");
+    }
+public slots:
+    void sample() {
+        m_samples.append({{"height",m_popup->property("height")},{"full",m_popup->property("expandedHeight")},
+                          {"width",m_popup->property("width")},{"scale",m_popup->property("scale")},
+                          {"opacity",m_popup->property("opacity")}});
+    }
+private:
+    QObject *m_popup;
+    QList<QVariantMap> m_samples;
+};
 QRectF bounds(QQuickItem *item) { return item->mapRectToScene(QRectF(QPointF(), item->size())); }
 bool click(QQuickWindow *w, QQuickItem *item) {
     if (!item || !item->isVisible() || !item->isEnabled()) return false;
@@ -258,20 +293,23 @@ private slots:
     void dropdownsAnimateAndBrowserMenuUsesButtonAnchor() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         auto exercisePopup=[&](QQuickItem *control, const QString &name) -> bool {
-            if(!control || !click(w,control)) return false;
+            if(!control) return false;
             auto *popup=qvariant_cast<QObject *>(control->property("popup")); if(!popup) return false;
-            QTest::qWait(60);
-            const auto openingWidth=popup->property("width").toReal(), openingHeight=popup->property("height").toReal();
-            const bool animating=openingHeight>0 && openingHeight<popup->property("expandedHeight").toReal()
-                && popup->property("scale").toReal()==1 && popup->property("opacity").toReal()==1;
-            shot(w,name+"-opening"); QTest::qWait(240); shot(w,name);
-            if(!popup->property("opened").toBool()) return false;
-            const auto fullHeight=popup->property("height").toReal();
-            if(qAbs(popup->property("width").toReal()-openingWidth)>.01 || fullHeight<=openingHeight) return false;
+            PopupHeightProbe probe(popup);
+            if(!QQmlProperty(popup,"height").connectNotifySignal(&probe,SLOT(sample())))return false;
+            if(!click(w,control))return false;
+            const auto openingWidth=popup->property("width").toReal();
+            if(!QTest::qWaitFor([&]{return popup->property("opened").toBool();},1000))return false;
+            qInfo().noquote()<<name<<"open"<<probe.diagnostic();
+            const bool animating=probe.animated();
+            shot(w,name);
+            if(qAbs(popup->property("width").toReal()-openingWidth)>.01
+                || qAbs(popup->property("height").toReal()-popup->property("expandedHeight").toReal())>.01)return false;
+            probe.reset();
             if(!QMetaObject::invokeMethod(popup,"close")) return false;
-            QTest::qWait(60); const bool closing=popup->property("visible").toBool() && popup->property("height").toReal()<fullHeight
-                && qAbs(popup->property("width").toReal()-openingWidth)<.01 && popup->property("scale").toReal()==1;
-            QTest::qWait(180); return animating && closing && !popup->property("visible").toBool();
+            if(!QTest::qWaitFor([&]{return !popup->property("visible").toBool();},1000))return false;
+            qInfo().noquote()<<name<<"close"<<probe.diagnostic();
+            return animating && probe.animated() && qAbs(popup->property("width").toReal()-openingWidth)<.01;
         };
         QVERIFY(click(w,visual(root,"findMissingLyrics"))); QTest::qWait(300);
         QVERIFY(exercisePopup(visual(root,"lyricsCandidateSourceFilter"),"sources-dropdown"));
@@ -285,19 +323,27 @@ private slots:
         QVERIFY(click(w,visual(root,"lyricsSearchSettingsClose"))); QTest::qWait(150);
         auto *browser=visual(root,"lyricsBrowserButton"); QVERIFY(browser);
         auto *menu=w->findChild<QObject *>("lyricsBrowserMenu"); QVERIFY(menu); QPointF menuOrigin;
+        PopupHeightProbe menuProbe(menu);
+        QVERIFY(QQmlProperty(menu,"height").connectNotifySignal(&menuProbe,SLOT(sample())));
         for(int point:{0,1}) {
             const auto button=bounds(browser);
+            menuProbe.reset();
             QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,QPointF(button.left()+button.width()*(point?.8:.2),button.center().y()).toPoint());
-            QTest::qWait(60); QCOMPARE(menu->property("scale").toReal(),1.);
-            const auto openingWidth=menu->property("width").toReal(), openingHeight=menu->property("height").toReal();
-            QVERIFY(openingHeight>0 && openingHeight<menu->property("expandedHeight").toReal()); QTest::qWait(240);
-            QCOMPARE(menu->property("width").toReal(),openingWidth); QVERIFY(menu->property("height").toReal()>openingHeight);
+            const auto openingWidth=menu->property("width").toReal();
+            QTRY_VERIFY_WITH_TIMEOUT(menu->property("opened").toBool(),1000);
+            qInfo().noquote()<<"browser menu open"<<point<<menuProbe.diagnostic();
+            QVERIFY2(menuProbe.animated(),qPrintable(menuProbe.diagnostic()));
+            QCOMPARE(menu->property("scale").toReal(),1.);
+            QCOMPARE(menu->property("width").toReal(),openingWidth);
+            QCOMPARE(menu->property("height").toReal(),menu->property("expandedHeight").toReal());
             auto *content=qvariant_cast<QQuickItem *>(menu->property("contentItem")); QVERIFY(content);
             const auto origin=bounds(content).topLeft();
             if(point) QVERIFY(QLineF(origin,menuOrigin).length()<1); else menuOrigin=origin;
             QVERIFY(qAbs(bounds(content).right()+menu->property("rightPadding").toReal()-button.right())<1);
             QVERIFY(qAbs(origin.y()-menu->property("topPadding").toReal()-button.bottom()-4)<1);
-            shot(w,"anchored-browser-menu"); QVERIFY(QMetaObject::invokeMethod(menu,"close")); QTest::qWait(180);
+            shot(w,"anchored-browser-menu"); menuProbe.reset();QVERIFY(QMetaObject::invokeMethod(menu,"close"));
+            QTRY_VERIFY_WITH_TIMEOUT(!menu->property("visible").toBool(),1000);
+            QVERIFY2(menuProbe.animated(),qPrintable(menuProbe.diagnostic()));
         }
         QVERIFY(QMetaObject::invokeMethod(visual(root,"lyricsWorkspace"),"close")); QTest::qWait(300);
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
@@ -588,7 +634,10 @@ private slots:
         auto *scroll=visual(root,"settingsScroll"); QVERIFY(scroll);
         QVERIFY(qAbs(bounds(scroll).bottom()-bounds(visual(root,"playerBar")).top())<1);
         auto *bold=visual(root,"mutedBoldSetting"), *reduce=visual(root,"reduceMotionSetting"); QVERIFY(bold); QVERIFY(reduce);
-        QVERIFY(qAbs(bounds(bold).top()-bounds(reduce).top())<1); QVERIFY(bounds(bold).left()>bounds(reduce).right());
+        // Responsive options may wrap. Both controls must fit without overlap.
+        QVERIFY(!bounds(bold).intersects(bounds(reduce)));
+        const auto optionFlow=bounds(bold->parentItem());
+        QVERIFY(optionFlow.contains(bounds(bold)));QVERIFY(optionFlow.contains(bounds(reduce)));
         QVERIFY(click(w,bold)); QVERIFY(f.shell->settingsBridge()->values().value("mutedBold").toBool());
         auto *caption=visual(root,"librarySummary"); QVERIFY(caption); QCOMPARE(caption->property("font").value<QFont>().weight(),QFont::DemiBold);
         QVERIFY(click(w,bold)); QCOMPARE(caption->property("font").value<QFont>().weight(),QFont::Medium);

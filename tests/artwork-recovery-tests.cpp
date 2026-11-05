@@ -165,11 +165,19 @@ private slots:
         shell.feedbackBridge()->post("Playback","Error","保留正在显示的错误","raw diagnostic");const auto visibleEvent=shell.feedbackBridge()->current()["eventId"].toString();
         QTRY_COMPARE_WITH_TIMEOUT(done.size(),1,20000);QCOMPARE(summary(done).recovered,2);QVERIFY(!art.isEmpty());
         const auto path=l.absolute(l.track(a.id).cover);QTRY_COMPARE(shell.playbackBridge()->coverUrl().toLocalFile(),path);QTRY_COMPARE(shell.lyricsModel()->cover().toLocalFile(),path);
-        auto *small=c4c5_fixture::visual(shell.window()->contentItem(),"bottomCover"),*large=c4c5_fixture::visual(shell.window()->contentItem(),"currentArtwork");QVERIFY(small&&large);QTRY_COMPARE(small->property("file").toUrl().toLocalFile(),path);QTRY_COMPARE(large->property("file").toUrl().toLocalFile(),path);
+        auto *small=c4c5_fixture::visual(shell.window()->contentItem(),"bottomCover");QVERIFY(small);
+        QTRY_COMPARE(small->property("file").toUrl().toLocalFile(),path);
+        QVERIFY(!c4c5_fixture::visual(shell.window()->contentItem(),"currentArtwork"));
+        QVERIFY(QMetaObject::invokeMethod(shell.window(),"showLyrics"));
+        QQuickItem *large=nullptr;
+        QTRY_VERIFY((large=c4c5_fixture::visual(shell.window()->contentItem(),"currentArtwork")));
+        QTRY_COMPARE(large->property("file").toUrl().toLocalFile(),path);
         bool found=false;for(int i=0;i<shell.libraryModel()->rowCount();++i){const auto ix=shell.libraryModel()->index(i,0);if(shell.libraryModel()->data(ix,TrackListModel::TrackKey).toString()==QString::number(a.id)){found=true;QCOMPARE(shell.libraryModel()->data(ix,TrackListModel::Cover).toUrl().toLocalFile(),path);}}QVERIFY(found);
         QVERIFY(closeColor(qmlImage(path),Qt::red));QVERIFY(closeColor(coverPixmap(path,a.title,96).toImage(),Qt::red));
         QCOMPARE(shell.feedbackBridge()->current()["eventId"].toString(),visibleEvent);QCOMPARE(shell.feedbackBridge()->history().size(),2);QVERIFY(shell.feedbackBridge()->history()[0].toMap()["silent"].toBool());
         shell.facade()->play({a.id,b.id},b.id);const auto bpath=l.absolute(l.track(b.id).cover);QTRY_COMPARE(shell.playbackBridge()->coverUrl().toLocalFile(),bpath);QVERIFY(closeColor(qmlImage(bpath),Qt::green));
+        QTRY_COMPARE(small->property("file").toUrl().toLocalFile(),bpath);
+        QTRY_COMPARE(large->property("file").toUrl().toLocalFile(),bpath);
         QVERIFY(shell.warnings().isEmpty());QVERIFY(shell.shutdown());
     }
     void qmlCloseWaitsForArtworkOnlyAndStopsProcess(){

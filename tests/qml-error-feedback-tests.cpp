@@ -165,7 +165,7 @@ private slots:
         QVERIFY(table->property("bulkMode").toBool());QVERIFY(!w->property("popupOpen").toBool());
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());QVERIFY(!table->property("bulkMode").toBool());
         auto *upcoming=visual(w->contentItem(),"nextQueuePanel");QVERIFY(upcoming);QVERIFY(upcoming->isVisible());
-        QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,upcoming->mapToScene(QPointF(14,upcoming->property("headerHeight").toDouble()/2)).toPoint());
+        QVERIFY(click(w,visual(upcoming,"upcomingToggle")));
         QTRY_VERIFY(upcoming->property("panelExpanded").toBool());
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!upcoming->property("panelExpanded").toBool());
         QCOMPARE(f->visible(),notification);QCOMPARE(f->history().size(),notification?1:0);QVERIFY(shell.warnings().isEmpty());

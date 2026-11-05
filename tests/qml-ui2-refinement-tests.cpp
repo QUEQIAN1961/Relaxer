@@ -133,7 +133,7 @@ private slots:
             bool departed=false,arrived=false,switched=false;
             QElapsedTimer timer;timer.start();
             while(timer.elapsed()<560){
-                const auto rect=bounds(panel);const bool left=w->property("upcomingAtLeft").toBool();const qreal expected=left?8:w->width()-8-panel->width();
+                const auto rect=bounds(panel);const bool left=w->property("upcomingAtLeft").toBool();const qreal expected=left?8:w->width()-11-panel->width();
                 QVERIFY(qAbs(rect.x()-expected)<.5);
                 if(left!=open&&rect.top()>w->height()-panel->height()/2.)departed=true;
                 if(left==open){switched=true;if(rect.top()<w->height()-12)arrived=true;}
@@ -142,7 +142,7 @@ private slots:
                 QTest::qWait(7);
             }
             QVERIFY(departed);QVERIFY(switched);QVERIFY(arrived);
-            QCOMPARE(w->property("upcomingAtLeft").toBool(),open);QVERIFY(qAbs(bounds(panel).bottom()-(w->height()-(open?4:14)))<1);
+            QCOMPARE(w->property("upcomingAtLeft").toBool(),open);QVERIFY(qAbs(bounds(panel).bottom()-(w->height()-(open?4:11)))<1);
         }
         const auto folder=qEnvironmentVariable("RELAXER_UI2_SCREENSHOTS");
         if(!folder.isEmpty()){QFile out(QDir(folder).filePath("upcoming-frames.json"));QVERIFY(out.open(QIODevice::WriteOnly));out.write(QJsonDocument(frames).toJson());}

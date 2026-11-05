@@ -9,6 +9,7 @@
 #include <QSignalSpy>
 #include <QQuickWindow>
 #include <QSet>
+#include <QRegularExpression>
 #include <cmath>
 #include <functional>
 
@@ -79,7 +80,8 @@ private slots:
         const QStringList names{"本地音乐", "歌单", "个人", "设置", "我喜欢"};
         int navigationCount = 0;
         QList<QQuickItem *> all;std::function<void(QQuickItem *)> collect=[&](QQuickItem *item){all.append(item);for(auto *child:item->childItems())collect(child);};collect(sidebar);
-        for (auto *object : all) if (object->objectName().startsWith("navigation")) ++navigationCount;
+        const QRegularExpression navigationButton("^navigation[0-9]+$");
+        for (auto *object : all) if (navigationButton.match(object->objectName()).hasMatch()) ++navigationCount;
         QCOMPARE(navigationCount, 5);
         for (int index = 0; index < names.size(); ++index) {
             auto *button = visual(sidebar, "navigation" + QString::number(index)); QVERIFY(button);
@@ -92,7 +94,7 @@ private slots:
         auto *bar = visual(content, "playerBar"); auto *cover = visual(content, "bottomCover");
         auto *title = visual(content, "currentTitle"); auto *center = visual(content, "playerCenter");
         QVERIFY(bar); QVERIFY(cover); QVERIFY(title); QVERIFY(center);
-        QCOMPARE(bar->height(), 98.); QCOMPARE(cover->size(), QSizeF(62, 62));
+        QCOMPARE(bar->height(), 98.); QCOMPARE(cover->size(), QSizeF(76, 76));
         QCOMPARE(sceneBounds(bar).bottom(), qreal(window->height()));
         QVERIFY(sceneBounds(cover).center().x() < window->width() / 3.);
         QVERIFY(sceneBounds(bar).contains(sceneBounds(cover)));
@@ -187,8 +189,8 @@ private slots:
         QTRY_VERIFY(panel->isVisible());
         const auto queue = f.shell->facade()->queue().items;
         const auto compact = sceneBounds(panel);
-        QVERIFY(qAbs(compact.right() - (window->width() - 8)) < 2);
-        QVERIFY(qAbs(compact.bottom() - (window->height() - 4)) < 2);
+        QVERIFY(qAbs(compact.right() - (window->width() - 11)) < 2);
+        QVERIFY(qAbs(compact.bottom() - (window->height() - 11)) < 2);
         const auto expected = f.shell->facade()->upcoming(); QVERIFY(!expected.isEmpty());
         QTRY_COMPARE(forecast->ids(), expected);
         QSignalSpy activated(forecast, &UpcomingModel::aboutToActivate);

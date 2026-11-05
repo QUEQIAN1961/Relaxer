@@ -520,7 +520,10 @@ ApplicationWindow {
     onWidthChanged: windowSave.restart()
     onHeightChanged: windowSave.restart()
     Timer { id: windowSave; interval: 350; onTriggered: if(!root.miniMode&&!root.miniSwitching&&root.visibility!==Window.FullScreen && root.visibility!==Window.Minimized)settingsBridge.saveWindowState(root.width,root.height,root.visibility===Window.Maximized) }
-    onNarrowLayoutChanged: {
+    // Cancellation and page changes can synchronously invalidate the layout.
+    // Finish evaluating narrowLayout before running those side effects.
+    onNarrowLayoutChanged: Qt.callLater(root.applyNarrowLayout)
+    function applyNarrowLayout() {
         narrowQueue.close();compactNavigationMenu.close();narrowMotion.stop()
         if(narrowLayout&&workspaceVisible&&!miniMode&&!miniSwitching){
             lyricsSearchBridge.stop();lyricsSearchBridge.cancelInstrumentalBatch();lyricsSearchBridge.cancelFileOffset()

@@ -4,7 +4,7 @@
 
 Relaxer 是使用 C++17、Qt 6 和 QML 开发的 Windows 本地音乐播放器，提供音乐库、歌单、播放队列、滚动歌词和可自定义的外观。
 
-Relaxer V0.2.4-GA 新增自适应窄窗、单窗口迷你播放器与双语歌词滚动，完善窗口缩放、歌单、搜索、外观和后台资源释放。正式附件及公开状态以 [V0.2.4-GA Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.4-GA) 实际页面为准。
+Relaxer V0.2.4-GA 新增自适应窄窗、单窗口迷你播放器与双语歌词滚动，完善窗口缩放、歌单、搜索、外观和后台资源释放。正式附件及公开状态以 [V0.2.4-GA Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.4-GA-r2) 实际页面为准。
 
 ![Relaxer 主界面](docs/images/relaxer-v0.2.1.png)
 
