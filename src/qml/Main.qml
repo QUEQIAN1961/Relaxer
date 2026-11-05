@@ -520,11 +520,16 @@ ApplicationWindow {
     onWidthChanged: windowSave.restart()
     onHeightChanged: windowSave.restart()
     Timer { id: windowSave; interval: 350; onTriggered: if(!root.miniMode&&!root.miniSwitching&&root.visibility!==Window.FullScreen && root.visibility!==Window.Minimized)settingsBridge.saveWindowState(root.width,root.height,root.visibility===Window.Maximized) }
-    // Cancellation and page changes can synchronously invalidate the layout.
-    // Finish evaluating narrowLayout before running those side effects.
-    onNarrowLayoutChanged: Qt.callLater(root.applyNarrowLayout)
-    function applyNarrowLayout() {
+    // Queue only task/page side effects. Start the layout animation while the
+    // resize is still requesting a frame, including on the threaded renderer.
+    onNarrowLayoutChanged: {
         narrowQueue.close();compactNavigationMenu.close();narrowMotion.stop()
+        if(narrowLayout&&workspaceVisible&&!miniMode&&!miniSwitching)narrowWorkspaceExit.restart()
+        if(miniSwitching||miniMode||settingsBridge.values.reduceMotion)narrowProgress=narrowLayout?1:0
+        else{narrowMotion.from=narrowProgress;narrowMotion.to=narrowLayout?1:0;narrowMotion.restart()}
+    }
+    Timer { id:narrowWorkspaceExit;interval:0;onTriggered:root.closeNarrowWorkspace() }
+    function closeNarrowWorkspace() {
         if(narrowLayout&&workspaceVisible&&!miniMode&&!miniSwitching){
             lyricsSearchBridge.stop();lyricsSearchBridge.cancelInstrumentalBatch();lyricsSearchBridge.cancelFileOffset()
             translationBridge.cancelAll()
@@ -532,8 +537,6 @@ ApplicationWindow {
             lyricsWorkspace.closeForNarrow()
             root.clearBulk();libraryBridge.openPlaylist("0");appBridge.navigate(0)
         }
-        if(miniSwitching||miniMode||settingsBridge.values.reduceMotion)narrowProgress=narrowLayout?1:0
-        else{narrowMotion.from=narrowProgress;narrowMotion.to=narrowLayout?1:0;narrowMotion.restart()}
     }
     Loader {
         id:miniLoader;anchors.fill:parent;z:200;active:root.miniMode||root.miniSwitching

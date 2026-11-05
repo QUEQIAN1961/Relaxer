@@ -1279,10 +1279,23 @@ private slots:
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void settingsRowsWrapAndRestoreAfterNarrowMode() {
-        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(300);
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();
+        w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));
+        QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(300);
+        auto *normalShell=visual(root,"normalShell");QVERIFY(normalShell);
         const QStringList cells{"settingsAppearanceCell","settingsThresholdCell","settingsCloseCell"};
         for(int width:{1240,1000,900,600,546,414,547,1000,1240}) {
-            w->resize(width,790);QTest::qWait(380);w->grabWindow();
+            QElapsedTimer layoutClock;layoutClock.start();w->resize(width,790);
+            // Native geometry can precede the scene viewport. Observe the
+            // committed viewport and animation endpoint before judging rows.
+            QVERIFY2(QTest::qWaitFor([&]{
+                return w->width()==width&&normalShell->width()==width
+                    &&w->property("narrowLayout").toBool()==(width<547)
+                    &&w->property("narrowProgress").toReal()==(width<547?1.:0.);
+            },2000),qPrintable(QString("Requested %1, window %2, scene %3, narrow progress %4")
+                .arg(width).arg(w->width()).arg(normalShell->width()).arg(w->property("narrowProgress").toReal())));
+            qInfo()<<"settings layout settled"<<width<<"ms"<<layoutClock.elapsed();
+            w->grabWindow();
             auto *flow=visual(root,"settingsBasicGrid");QVERIFY(flow);
             QList<QRectF> boxes;
             for(const auto &name:cells) {
