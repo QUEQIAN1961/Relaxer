@@ -77,6 +77,10 @@ def assemble(source, build, baseline, destination):
     shutil.copy2(source / 'docs/MIDI-BASS.md', stage / 'MIDI-BASS.md')
     for name in ('LICENSE', 'LICENSE-NOTICE.txt', 'THIRD_PARTY_NOTICES.md'):
         shutil.copy2(source / name, stage / name)
+    markers = stage / 'licenses/playlist-marks'
+    markers.mkdir(parents=True, exist_ok=True)
+    for name in ('LICENSE.txt', 'README.md'):
+        shutil.copy2(source / 'resources/playlist-marks' / name, markers / name)
     notes = source / 'docs/releases' / ('v' + version)
     shutil.copy2(notes / 'RELEASE-NOTES.md', stage / 'RELEASE-NOTES.md')
     (stage / 'READ-ME-FIRST.md').write_text(
@@ -89,7 +93,8 @@ def assemble(source, build, baseline, destination):
 
     metadata = dict(sourceCommit=frozen['commit'], sourceTree=frozen['tree'], sourceFingerprint=fingerprint,
                     displayVersion=display, fileVersion=version.split('-')[0] + '.0', entry='Relaxer.exe',
-                    published=False, channel=channel, dependencyBaseline=baseline.name,
+                    published=False, publicReleaseApproved=False, acceptanceStatus='pending-independent-regression',
+                    channel=channel, dependencyBaseline=baseline.name,
                     dependencyBaselineSHA256=BASELINE_SHA256)
     metadata['midiDependencies'] = midi_runtime
     metadata['coreBinarySHA256'] = {'Relaxer.exe': core['RelaxerPortable.exe'],
@@ -100,7 +105,11 @@ def assemble(source, build, baseline, destination):
                userDataOverride='--data or RELAXER_DATA', sourcePreparationRequired=False, readyMarkerRequired=False,
                integrity=dict(manifest='PORTABLE-SHA256SUMS.txt', mode='full-sha256-every-launch', workers=4, cache=False)))
     components['displayVersion'] = display
-    components['publicReleaseApproved'] = channel == 'GA'
+    # A GA version label is not evidence of a completed Harness regression.
+    components['publicReleaseApproved'] = False
+    components['acceptanceStatus'] = 'pending-independent-regression'
+    components['packages'].append(dict(name='Lucide playlist markers', version=['0.468.0'],
+                                      licenses=['ISC', 'MIT'], upstream=['https://github.com/lucide-icons/lucide/tree/0.468.0/icons']))
     components['midiLicenseCompatibility'] = 'unresolved; see MIDI-BASS.md'
     components['sourceMaterials'] = 'Relaxer-' + display + '-Source.zip; Relaxer-V0.2.2-GA-Third-Party-Source.zip'
     components['midiDistributionScope'] = midi_runtime['distribution']

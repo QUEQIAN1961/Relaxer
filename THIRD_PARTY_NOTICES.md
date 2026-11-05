@@ -54,10 +54,15 @@ OpenCC STCharacters 嵌入数据采用 Apache-2.0，原 LICENSE、AUTHORS、改�
 
 原始 librsvg Cargo.lock 未取得；重放锁按重放材料标识。原 CI 的实际编译版本、registry checksum、647 个精确 crate 和配方支撑来源/构建依赖对应；该限制影响原构建的逐字节复现，未发现因此缺失的特定 covered source 或用户修改权利，不以补造旧锁或更新 crate 代替原件。
 
-MPL covered source 和所有适用 GPL/LGPL 对应源码的获取方式：在同一 GitHub Release 下载完整应用源码及第三方源码两个附件，链接入口为 https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.3-GA 。二进制公开时必须同时提供这两份附件及校验值；GitHub 自动源码归档不包含全部第三方材料。此为网络同址提供方式，不使用书面要约。
+MPL covered source 和所有适用 GPL/LGPL 对应源码的获取方式：在同一 GitHub Release 下载完整应用源码及第三方源码两个附件，链接入口为 https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.4-GA 。二进制公开时必须同时提供这两份附件及校验值；GitHub 自动源码归档不包含全部第三方材料。此为网络同址提供方式，不使用书面要约。
 
 ## MIDI 依赖
 
 V0.2.3 新增 BASS 2.4.18.3、BASSMIDI 2.4.16（Un4seen Developments Ltd.）及 GeneralUser GS 2.0.3（S. Christian Collins）。BASS 免费使用限非商业条件，BASSMIDI 随 BASS 使用；它们是专有运行库，不被既有 GPL/LGPL 声明覆盖。GeneralUser GS 使用作者自定许可，保留原文，包括部分早期采样来源的不确定性说明。运行库及音色原文位于运行目录的 `licenses/midi/`。
 
 本次版本更新没有解决该组合的 GPL 兼容性，未改动项目 LICENSE 或授予链接例外；公开发布不等同于取得新的库授权。准备方法、固定来源与当前边界见 [docs/MIDI-BASS.md](docs/MIDI-BASS.md) 和 `resources/midi-dependencies.json`。既有 V0.2.2-GA 第三方源码附件不包含这些新增专有运行库；不能据此声称新增部分已取得 GPL 源码或公开发行许可。
+
+
+## 歌单标记
+
+V0.2.4 的 16 个歌单标记改编自 Lucide 0.468.0；保留 Lucide 的 ISC 及 Feather 派生图形的 MIT 声明。完整原文随运行包置于 `licenses/playlist-marks/LICENSE.txt`，源代码中的资源目录同时保留原文与改编来源。图形未被重新许可为 GPL；原许可保持不变。来源：https://github.com/lucide-icons/lucide/tree/0.468.0/icons 。

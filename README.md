@@ -1,16 +1,16 @@
-# Relaxer V0.2.3-GA
+# Relaxer V0.2.4-GA
 
 **简体中文** · [English](README.en.md)
 
 Relaxer 是使用 C++17、Qt 6 和 QML 开发的 Windows 本地音乐播放器，提供音乐库、歌单、播放队列、滚动歌词和可自定义的外观。
 
-Relaxer V0.2.3-GA 整合 Phase E 的 UI、交互、启动与后台资源优化，并更新 MIDI 播放后端。正式下载见 [V0.2.3-GA Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.3-GA)。
+Relaxer V0.2.4-GA 新增自适应窄窗、单窗口迷你播放器与双语歌词滚动，完善窗口缩放、歌单、搜索、外观和后台资源释放。正式附件及公开状态以 [V0.2.4-GA Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.4-GA) 实际页面为准。
 
 ![Relaxer 主界面](docs/images/relaxer-v0.2.1.png)
 
 ## 下载与使用
 
-Windows x64 便携包名称为 `Relaxer-V0.2.3-GA-Win64.zip`。完整解压到新的可写文件夹，双击根目录 **`Relaxer.exe`**。运行包自带依赖，不需要 Qt、编译环境或源码准备入口。不要在压缩包预览中运行，也不要单独取出 EXE。
+Windows x64 便携包名称为 `Relaxer-V0.2.4-GA-Win64.zip`。完整解压到新的可写文件夹，双击根目录 **`Relaxer.exe`**。运行包自带依赖，不需要 Qt、编译环境或源码准备入口。不要在压缩包预览中运行，也不要单独取出 EXE。
 
 默认 QML 界面；兼容界面可运行 `Relaxer.exe --widgets`。资料默认位于同级 `data/`，也可用 `Relaxer.exe --data "绝对资料目录"` 指定。日常本地播放可离线使用；在线歌词和可选翻译需要网络，凭据与付费请求由用户选择和确认。
 
@@ -18,10 +18,11 @@ Windows x64 便携包名称为 `Relaxer-V0.2.3-GA-Win64.zip`。完整解压到�
 
 ## 本版本
 
-整合 UI 布局、动画、歌词操作、KIMI/Qwen 配置、启动优化、后台资源释放和 MIDI 播放改进，说明见 [V0.2.3-GA 更新日志](docs/releases/v0.2.3-GA/RELEASE-NOTES.md)。历史日志和版本说明保留于 `resources/changelog.json` 与 `docs/releases/`。
+正常窗口支持窄列表；迷你播放器复用同一窗口，支持 `Ctrl+Shift+M`、可配置的全局快捷键、拖拽展开和回弹。迷你播放时显示原文及可用译文，长句在换句前滚动展示；暂停时恢复歌曲信息。详细说明见 [V0.2.4-GA 更新日志](docs/releases/v0.2.4-GA/RELEASE-NOTES.md)。历史日志和版本说明保留于 `resources/changelog.json` 与 `docs/releases/`。
 
 |历史公开版本|下载与说明|
 |---|---|
+|0.2.3-GA|[Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.3-GA)|
 |0.2.2-GA|[Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.2-GA)|
 |0.2.1-GA|[Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.1-GA)|
 |0.2.1|[Release](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.1)|
@@ -33,7 +34,7 @@ MIDI 使用 BASS/BASSMIDI 与 GeneralUser GS。构建 MIDI 支持前运行 `pyth
 
 ## 校验与源码
 
-应用源码附件为 `Relaxer-V0.2.3-GA-Source.zip`；第三方源码沿用正式 V0.2.2-GA 的既有附件。程序保留原有启动完整性校验，GitHub 自动 Source code 归档不是可运行播放器。
+应用源码附件为 `Relaxer-V0.2.4-GA-Source.zip`；第三方源码沿用正式 V0.2.2-GA 的既有附件。程序保留原有启动完整性校验，GitHub 自动 Source code 归档不是可运行播放器。
 
 构建环境为 Windows、MSYS2 UCRT64、C++17、CMake/Ninja、版本匹配的 Qt 6 Core/Gui/Widgets/Sql/Multimedia/Svg/Network/Qml/Quick/QuickControls2；测试另需 Qt Test。使用发行提交的完整源：
 
@@ -42,7 +43,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/m
 cmake --build build --parallel
 ```
 
-Declarative 位于单独前缀时设置 `QT_ADDITIONAL_PACKAGES_PREFIX_PATH` 或相应 Qt6 包目录。应用、QML DLL 与根便携入口须从同一源码身份构建，普通包不包含 `RelaxerStart.exe`。构建与材料组装方法见 [BUILD-AND-SOURCE.md](docs/releases/v0.2.3-GA/BUILD-AND-SOURCE.md)。
+Declarative 位于单独前缀时设置 `QT_ADDITIONAL_PACKAGES_PREFIX_PATH` 或相应 Qt6 包目录。应用、QML DLL 与根便携入口须从同一源码身份构建，普通包不包含 `RelaxerStart.exe`。构建与材料组装方法见 [BUILD-AND-SOURCE.md](docs/releases/v0.2.4-GA/BUILD-AND-SOURCE.md)。
 
 项目自有代码采用 [GPL-3.0-only](LICENSE)。Qt、FFmpeg、OpenCC 和其他组件保留原授权和声明；见 [第三方说明](THIRD_PARTY_NOTICES.md)、运行包许可证目录及配套对应源码。软件许可不授权外部音乐、封面、歌词或服务内容。
 
