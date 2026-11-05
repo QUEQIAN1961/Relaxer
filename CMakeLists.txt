@@ -627,6 +627,16 @@ if(RELAXER_ENABLE_QML)
   target_link_libraries(relaxer_qml_adaptive_tests PRIVATE relaxer_qml Qt6::Test)
   relaxer_add_qt_test(relaxer_qml_adaptive relaxer_qml_adaptive_tests)
   relaxer_qml_test_environment(relaxer_qml_adaptive)
+  if(BUILD_TESTING)
+    # This suite checks HWND styles and native geometry as well as QML. An
+    # offscreen WId is not a Windows HWND. Keep software rendering, but use
+    # real Windows windows; physical input remains separately opt-in.
+    if(WIN32)
+      set_property(TEST relaxer_qml_adaptive APPEND PROPERTY ENVIRONMENT_MODIFICATION
+        "QT_QPA_PLATFORM=set:windows")
+    endif()
+    set_tests_properties(relaxer_qml_adaptive PROPERTIES TIMEOUT 300)
+  endif()
   target_link_libraries(relaxer_qml_phase_e_tests PRIVATE relaxer_qml Qt6::Test)
   if(WIN32)
     target_link_libraries(relaxer_qml_phase_e_tests PRIVATE psapi)
