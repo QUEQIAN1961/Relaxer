@@ -274,8 +274,14 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toReal()>.999);
         auto *page=visual(w->contentItem(),"nowPlayingPage");QVERIFY(page);
         QVERIFY(!visual(page,"fullscreenButton"));auto *collapse=visual(page,"playerCollapse");QVERIFY(collapse);QVERIFY(collapse->isVisible());
+        auto *barrier=visual(w->contentItem(),"playerTransitionInputBarrier");QVERIFY(barrier);
+        qInfo()<<"collapse readiness at .999"<<w->property("playerProgress")<<"input blocked"<<barrier->isVisible();
+        // OutCubic passes .999 before the transition finishes. Wait for the
+        // actual input guard, rather than clicking through a moving page.
+        QTRY_VERIFY(!barrier->isVisible());QCOMPARE(w->property("playerProgress").toReal(),1.);
+        QSignalSpy collapsed(page,SIGNAL(collapseRequested()));QVERIFY(collapsed.isValid());
         shot(w,"expanded-player-without-extra-fullscreen");QVERIFY(click(w,collapse));
-        QTRY_VERIFY(w->property("playerProgress").toReal()<.001);
+        QCOMPARE(collapsed.count(),1);QTRY_COMPARE(w->property("playerProgress").toReal(),0.);
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
 };

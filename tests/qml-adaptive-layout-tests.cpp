@@ -864,12 +864,16 @@ private slots:
         w->resize(width,790);QTest::qWait(420);
         if(screenEdge){const auto screen=w->screen()->availableGeometry();w->setPosition(screen.right()+1-width,screen.bottom()+1-w->height()-20);QTest::qWait(100);}
         if(expanded){QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_COMPARE(w->property("playerProgress").toReal(),1.);QTest::qWait(100);}
+        auto *bar=visual(root,"playerBar");QVERIFY(bar);QTRY_COMPARE(bar->property("compactProgress").toReal(),1.);
         auto *speaker=visual(root,"muteButton");QVERIFY(speaker);auto *popup=w->findChild<QObject *>("compactVolumePopup");QVERIFY(popup);
         // QtTest sends moves directly to the chosen window; supply the leave
         // event Windows normally sends when moving to another native surface.
         QQuickWindow *hoverWindow=nullptr;
         const auto move=[&](QQuickWindow *window,QPoint point){
-            if(hoverWindow&&hoverWindow!=window){QEvent leave(QEvent::Leave);QCoreApplication::sendEvent(hoverWindow,&leave);}
+            if(hoverWindow!=window){
+                if(hoverWindow){QEvent leave(QEvent::Leave);QCoreApplication::sendEvent(hoverWindow,&leave);}
+                QEnterEvent enter(point,point,window->mapToGlobal(point));QCoreApplication::sendEvent(window,&enter);
+            }
             QTest::mouseMove(window,point);hoverWindow=window;QCoreApplication::processEvents();
         };
         move(w,QPoint(200,300));QVERIFY(!popup->property("visible").toBool());
@@ -886,11 +890,18 @@ private slots:
         for(const auto &point:QList<QPoint>{QPoint(1,1),QPoint(right,1),QPoint(right,46),QPoint(1,46),QPoint(1,84),QPoint(right,84)}) {
             move(floating,hover->mapToScene(point).toPoint());QVERIFY(popup->property("opened").toBool());
         }
-        QVERIFY(click(floating,mute));QCOMPARE(bridge->volume(),0);QVERIFY(bridge->muted());QCOMPARE(mute->property("symbol").toString(),QString("volumeMuted"));
+        // A physical click follows a move to the button. QtTest mouseClick
+        // alone teleports the press from the last corner without a hover move.
+        move(floating,rect(mute).center().toPoint());
+        QVERIFY(popup->property("opened").toBool());QVERIFY(mute->property("hovered").toBool());
+        QSignalSpy muteClicks(mute,SIGNAL(clicked()));QVERIFY(muteClicks.isValid());
+        QVERIFY(click(floating,mute));QCOMPARE(muteClicks.count(),1);QCOMPARE(bridge->volume(),0);QVERIFY(bridge->muted());QCOMPARE(mute->property("symbol").toString(),QString("volumeMuted"));
         QVERIFY(click(floating,mute));QCOMPARE(bridge->volume(),37);QVERIFY(!bridge->muted());
         auto *handle=slider->property("handle").value<QQuickItem *>();QVERIFY(handle);const auto track=rect(slider);const QPoint start=rect(handle).center().toPoint();
+        move(floating,start);
         QTest::mousePress(floating,Qt::LeftButton,Qt::NoModifier,start);QTest::mouseMove(floating,QPoint(qRound(track.left()),start.y()),30);QTest::mouseRelease(floating,Qt::LeftButton,Qt::NoModifier,QPoint(qRound(track.left()),start.y()));
         QCOMPARE(bridge->volume(),0);QVERIFY(bridge->muted());
+        move(floating,rect(mute).center().toPoint());
         QVERIFY(click(floating,mute));QCOMPARE(bridge->volume(),0);QVERIFY(!bridge->muted());QCOMPARE(mute->property("symbol").toString(),QString("volumeZero"));
         shot(floating,QString("volume-hover-%1-%2%3").arg(width).arg(expanded).arg(screenEdge?"-screen-edge":""));
         move(floating,QPoint(-2,43));QVERIFY(!popup->property("visible").toBool());
