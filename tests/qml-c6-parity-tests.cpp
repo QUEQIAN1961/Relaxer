@@ -173,8 +173,9 @@ private slots:
 #ifdef Q_OS_WIN
         auto config=ShortcutRules::defaults();auto global=config["global"].toObject();
         for(const auto &key:ShortcutRules::actionKeys())global[key]="";
+        global["miniPlayer"]="";
         global["volumeUp"]="Ctrl+Alt+Shift+F24";config["global"]=global;config["globalEnabled"]=true;
-        QVERIFY(integration->saveShortcuts(config.toVariantMap()));
+        QVERIFY2(integration->saveShortcuts(config.toVariantMap()),qPrintable(integration->shortcutStatus()));
         {Reservation busy(VK_F24);QVERIFY(!busy.registered);}
         {
             Reservation occupied(VK_F22);QVERIFY(occupied.registered);

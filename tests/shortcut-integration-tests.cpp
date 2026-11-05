@@ -35,6 +35,9 @@ QJsonObject globals(const QString &first, const QString &second = {}) {
     auto config = ShortcutRules::defaults();
     auto keys = config["global"].toObject();
     for (const auto &name : ShortcutRules::actionKeys()) keys[name] = "";
+    // The mini binding is separate from the five playback actions. This
+    // fixture reserves only F22/F23/F24, never the user's default Ctrl+Alt+M.
+    keys["miniPlayer"] = "";
     keys["volumeUp"] = first;
     keys["next"] = second;
     config["global"] = keys;
@@ -69,7 +72,7 @@ private slots:
             {
                 UiIntegration integration(&library, &playback);
                 integration.attach(&window);
-                QVERIFY(integration.saveShortcuts(initial.toVariantMap()));
+                QVERIFY2(integration.saveShortcuts(initial.toVariantMap()),qPrintable(integration.shortcutStatus()));
                 QCOMPARE(library.setting("shortcuts").toObject(), initial);
                 { Reservation busy(VK_F24); QVERIFY(!busy.registered); }
                 {
