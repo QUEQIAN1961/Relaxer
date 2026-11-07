@@ -6,6 +6,8 @@ Relaxer 自有代码采用 GPL-3.0-only。第三方代码、数据、字体（�
 
 ## 版权及许可证材料
 
+- `third_party/qrcodegen/`：Nayuki QR Code generator，MIT 许可；源文件中保留完整版权和许可，用于本机生成网易云登录二维码。
+
 - `third-party-licenses/`：原部署提供的软件包许可证与版权，包含所用包之外保留的原通知，不按目录数量推定实际分发组件。
 - `licenses/startup/`：GCC/MinGW 运行代码版权、GPL 和适用例外材料。
 - `licenses/supplemental/`：既有 Qt 精确源归属与许可、Rust crate 许可及 OpenCC 归属材料。
@@ -58,11 +60,12 @@ MPL covered source 和所有适用 GPL/LGPL 对应源码的获取方式：在同
 
 ## MIDI 依赖
 
-V0.2.3 新增 BASS 2.4.18.3、BASSMIDI 2.4.16（Un4seen Developments Ltd.）及 GeneralUser GS 2.0.3（S. Christian Collins）。BASS 免费使用限非商业条件，BASSMIDI 随 BASS 使用；它们是专有运行库，不被既有 GPL/LGPL 声明覆盖。GeneralUser GS 使用作者自定许可，保留原文，包括部分早期采样来源的不确定性说明。运行库及音色原文位于运行目录的 `licenses/midi/`。
+V0.2.5-RC 已将 MIDI 后端替换为 FluidSynth 2.6.2（LGPL-2.1-or-later）。发行 DLL 从固定源码构建并禁用可选外部编解码及音频输出库，不分发 SDL3 或 libsndfile；构建所用 GCEM 数学头文件为 MIT 许可，原文随包保留。GeneralUser GS 2.0.3（S. Christian Collins）继续按作者独立许可使用；原文位于运行目录 `licenses/midi/`。原 BASS/BASSMIDI 不再使用或加入新包。
 
-本次版本更新没有解决该组合的 GPL 兼容性，未改动项目 LICENSE 或授予链接例外；公开发布不等同于取得新的库授权。准备方法、固定来源与当前边界见 [docs/MIDI-BASS.md](docs/MIDI-BASS.md) 和 `resources/midi-dependencies.json`。既有 V0.2.2-GA 第三方源码附件不包含这些新增专有运行库；不能据此声称新增部分已取得 GPL 源码或公开发行许可。
+来源、固定版本、准备方式及对应源码链接见 [docs/MIDI-BASS.md](docs/MIDI-BASS.md) 和 `resources/midi-dependencies.json`；分发须满足 LGPL 的原文许可、对应源码与重新链接要求，既有第三方源码附件不自动涵盖新增版本。
 
+## 歌单标记与界面图标
 
-## 歌单标记
+V0.2.5-RC 的 48 个歌单标记为 Relaxer 独立重绘的矢量图，遵循项目许可证。较早版本曾使用 Lucide 0.468.0 / Feather 派生图形；历史版权及 ISC、MIT 许可继续保留在 `licenses/playlist-marks/LICENSE.txt` 和资源目录内。
 
-V0.2.4 的 16 个歌单标记改编自 Lucide 0.468.0；保留 Lucide 的 ISC 及 Feather 派生图形的 MIT 声明。完整原文随运行包置于 `licenses/playlist-marks/LICENSE.txt`，源代码中的资源目录同时保留原文与改编来源。图形未被重新许可为 GPL；原许可保持不变。来源：https://github.com/lucide-icons/lucide/tree/0.468.0/icons 。
+界面的返回箭头、大头钉及下载状态图形参考 Morphicons 所用的 Lucide 开源图形，并按 Relaxer 的尺寸、线宽和动画规则适配。原图形的 ISC / MIT 声明保留，不重新许可为 GPL。来源：https://github.com/lucide-icons/lucide/tree/0.468.0/icons ，https://www.morphicons.com/ 。

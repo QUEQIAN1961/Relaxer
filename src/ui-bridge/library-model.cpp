@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QUrlQuery>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <algorithm>
 #include <climits>
 
@@ -44,13 +45,13 @@ QVariant TrackListModel::data(const QModelIndex &index, int role) const {
     case Duration: return t.duration;
     case Favorite: return t.favorite;
     case File: return t.file;
-    case Cover: return m_library && !t.cover.isEmpty() ? artworkUrl(m_library->absolute(t.cover)) : QUrl{};
+    case Cover: return m_cloud?(t.cover.isEmpty()?QUrl{}:t.cover.startsWith("http")?QUrl(t.cover):QUrl::fromLocalFile(t.cover)):m_library && !t.cover.isEmpty() ? artworkUrl(m_library->absolute(t.cover)) : QUrl{};
     case Plays: return t.plays;
     case Heard: return t.heard;
     case ImportedAt: return t.importedAt;
     case LyricsAvailable: return !t.lyrics.isEmpty();
     case FileSize: {
-        if (!m_library) return qint64(-1);
+        if (!m_library||m_cloud) return qint64(-1);
         const auto path = m_library->absolute(t.file);
         if (!m_fileSizes.contains(path)) {
             const QFileInfo file(path);
@@ -76,14 +77,20 @@ bool TrackListModel::matches(int row, const QString &text) const {
 }
 void TrackListModel::setPlaylist(qint64 playlist) {
     if (m_playlist == playlist) return;
-    m_playlist = playlist; m_refresh.stop(); refresh();
+    m_playlist = playlist;m_cloud=false;m_cloudTracks.clear();
+    if(m_library)for(const auto &list:m_library->playlists())if(list.id==playlist){m_cloud=!list.provider.isEmpty();break;}
+    m_refresh.stop(); refresh();
+}
+void TrackListModel::setCloudTracks(qint64 playlist,const QVector<Track> &tracks){if(m_cloud&&m_playlist==playlist){m_cloudTracks=tracks;refresh();}}
+void TrackListModel::updateCloudTrack(const Track &track){
+    if(!m_cloud)return;const auto row=rowForId(track.id);if(row<0)return;auto updated=track;updated.plays=m_tracks[row].plays;updated.heard=m_tracks[row].heard;if(!updated.matchedLocalId)updated.matchedLocalId=m_tracks[row].matchedLocalId;m_tracks[row]=updated;m_cloudTracks[row]=updated;emit dataChanged(index(row),index(row),{Cover,Favorite});
 }
 void TrackListModel::refresh() {
     Q_ASSERT(QThread::currentThread() == thread());
-    auto next = !m_library ? QVector<Track>{} : m_playlist == -2 ? m_library->recent() :
+    auto next = !m_library ? QVector<Track>{} : m_cloud?m_cloudTracks:m_playlist == -2 ? m_library->recent() :
                 m_library->tracks(m_playlist == -3 ? 0 : m_playlist);
     if (m_playlist == -3)
-        std::stable_sort(next.begin(), next.end(), [](const Track &a, const Track &b) { return a.plays > b.plays; });
+        std::stable_sort(next.begin(), next.end(), [](const Track &a, const Track &b) { return a.heard > b.heard; });
     beginResetModel();
     m_tracks = next; m_rows.clear(); m_rows.reserve(m_tracks.size()); m_fileSizes.clear();
     for (int row = 0; row < m_tracks.size(); ++row) m_rows.insert(m_tracks[row].id, row);
@@ -94,9 +101,10 @@ void TrackListModel::refreshStatistics(qint64 trackId) {
     const auto row = rowForId(trackId); if (row < 0) return;
     // The facade identifies the one track that accumulated listening time;
     // keep ordinary progress independent of total library size.
-    auto &track = m_tracks[row]; const auto updated = m_library->track(trackId);
-    if (!updated.id || (track.plays == updated.plays && track.heard == updated.heard)) return;
+    auto &track = m_tracks[row]; const auto updated = m_cloud?(track.matchedLocalId?m_library->track(track.matchedLocalId):m_library->onlineTrack(track.hash)):m_library->track(trackId);
+    if ((!m_cloud&&!updated.id) || (track.plays == updated.plays && track.heard == updated.heard)) return;
     track.plays = updated.plays; track.heard = updated.heard;
+    if(m_cloud)m_cloudTracks[row]=track;
     emit dataChanged(index(row), index(row), {Plays, Heard});
 }
 
@@ -139,17 +147,21 @@ void TrackFilterModel::setFilterText(const QString &text) {
     if (m_filter == text) return;
     m_filter = text; invalidateFilter(); emit filterTextChanged(); changed();
 }
-void TrackFilterModel::setSortKey(int key) {
-    if (key < 0 || key > 8 || m_sortKey == key) return;
+void TrackFilterModel::setSortKey(int key) { setSorting(key,m_descending); }
+void TrackFilterModel::setDescending(bool value) { setSorting(m_sortKey,value); }
+void TrackFilterModel::setSorting(int key, bool descending) {
+    if (key < 0 || key > 8 || (m_sortKey == key && m_descending == descending)) return;
     static const int roles[]{Qt::DisplayRole, TrackListModel::Title, TrackListModel::Artist, TrackListModel::Album,
         TrackListModel::Duration, TrackListModel::Plays, TrackListModel::ImportedAt, TrackListModel::Heard, TrackListModel::FileSize};
-    m_sortKey = key; setSortRole(roles[key]); invalidate(); sort(0, m_descending ? Qt::DescendingOrder : Qt::AscendingOrder);
+    m_sortKey=key; m_descending=descending;
+    setSortRole(roles[key]); invalidate(); sort(0,descending ? Qt::DescendingOrder : Qt::AscendingOrder);
     emit sortChanged(); emit selectionChanged();
 }
-void TrackFilterModel::setDescending(bool value) {
-    if (m_descending == value) return;
-    m_descending = value; sort(0, value ? Qt::DescendingOrder : Qt::AscendingOrder);
-    emit sortChanged(); emit selectionChanged();
+void TrackFilterModel::cycleSort(int key) {
+    if (key < 1 || key > 8) return;
+    if (m_sortKey != key) setSorting(key,false);
+    else if (!m_descending) setSorting(key,true);
+    else setSorting(0,false);
 }
 void TrackFilterModel::setSelectedId(const QString &id) {
     const auto value = id.toLongLong();
@@ -245,7 +257,7 @@ PlaylistListModel::PlaylistListModel(Library *library, QObject *parent) : QAbstr
     // must not trigger full playlist aggregate queries.
     connect(&m_refresh, &QTimer::timeout, this, &PlaylistListModel::refresh);
     connect(library,&Library::settingsUpdated,this,[schedule](const QStringList &keys) {
-        if(keys.contains("qml.playlistOrder"))schedule();
+        if(keys.contains("qml.playlistOrder")||keys.contains("qml.cloudPlaylistRemarks"))schedule();
     });
     connect(library, &QObject::destroyed, this, [this] { m_library = nullptr; m_refresh.stop(); refresh(); });
     refresh();
@@ -254,7 +266,7 @@ int PlaylistListModel::rowCount(const QModelIndex &parent) const { return parent
 QHash<int, QByteArray> PlaylistListModel::roleNames() const {
     return {{Qt::UserRole + 1, "playlistId"}, {Qt::UserRole + 2, "name"}, {Qt::UserRole + 3, "trackCount"},
             {Qt::UserRole + 4, "playlistKey"}, {Qt::UserRole + 5, "cover"}, {Qt::UserRole + 6, "tags"},
-            {Qt::UserRole + 7, "description"}, {Qt::UserRole + 8, "plays"}};
+            {Qt::UserRole + 7, "description"}, {Qt::UserRole + 8, "plays"},{Qt::UserRole+9,"cloud"},{Qt::UserRole+10,"provider"},{Qt::UserRole+11,"remoteId"}};
 }
 QVariant PlaylistListModel::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.row() < 0 || index.row() >= m_playlists.size()) return {};
@@ -262,12 +274,15 @@ QVariant PlaylistListModel::data(const QModelIndex &index, int role) const {
     switch (role) {
     case Qt::UserRole + 1: return p.id;
     case Qt::UserRole + 4: return QString::number(p.id);
-    case Qt::UserRole + 2: case Qt::DisplayRole: return p.name;
+    case Qt::UserRole + 2: case Qt::DisplayRole: {const auto remark=!p.provider.isEmpty()&&m_library?m_library->setting("qml.cloudPlaylistRemarks").toObject().value(QString::number(p.id)).toString():QString();return remark.isEmpty()?p.name:remark;}
     case Qt::UserRole + 3: return p.count;
-    case Qt::UserRole + 5: return m_library && !p.cover.isEmpty() ? artworkUrl(m_library->absolute(p.cover)) : QUrl{};
+    case Qt::UserRole + 5: return !p.provider.isEmpty()?QUrl(p.cover):m_library && !p.cover.isEmpty() ? artworkUrl(m_library->absolute(p.cover)) : QUrl{};
     case Qt::UserRole + 6: return p.tags;
     case Qt::UserRole + 7: return p.description;
     case Qt::UserRole + 8: return p.plays;
+    case Qt::UserRole+9:return !p.provider.isEmpty();
+    case Qt::UserRole+10:return p.provider;
+    case Qt::UserRole+11:return p.remoteId;
     default: return {};
     }
 }
@@ -289,6 +304,6 @@ void PlaylistListModel::refresh() {
 QVariantMap PlaylistListModel::get(int row) const {
     if(row<0||row>=m_playlists.size())return {};
     const auto &playlist=m_playlists[row];
-    return {{"playlistKey",QString::number(playlist.id)},{"name",playlist.name}};
+    return {{"playlistKey",QString::number(playlist.id)},{"name",data(index(row),Qt::DisplayRole)},{"cloud",!playlist.provider.isEmpty()},{"provider",playlist.provider},{"remoteId",playlist.remoteId}};
 }
 }

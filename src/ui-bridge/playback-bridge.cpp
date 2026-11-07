@@ -50,7 +50,7 @@ void PlaybackBridge::refresh() {
     const bool wasPlayable = m_canPlay;
     m_state = next;
     if (previous.track.id != next.track.id || previous.track.title != next.track.title ||
-        previous.track.artist != next.track.artist || previous.track.cover != next.track.cover)
+        previous.track.artist != next.track.artist || previous.track.cover != next.track.cover || previous.track.favorite != next.track.favorite)
         readMetadata();
     m_available = available();
     // A failed/missing resource remains retryable after the user repairs it.
@@ -99,6 +99,7 @@ void PlaybackBridge::playUpcoming(int index) {
 }
 void PlaybackBridge::toggleFavorite() {
     if (!available() || !m_library || !hasTrack()) return;
+    if(m_facade->onlineActive()){emit onlineFavoriteRequested(m_state.track.id);return;}
     const auto track = m_library->track(m_state.track.id);
     if (track.id && !m_library->favorite(track.id, !track.favorite)) emit persistenceFailure(m_library->lastError());
 }
@@ -118,9 +119,11 @@ void PlaybackBridge::refreshMetadata() {
     if (previousTitle != title() || previousArtist != artist()) emit trackChanged();
 }
 void PlaybackBridge::readMetadata() {
-    m_metadata = m_library && m_state.track.id ? m_library->track(m_state.track.id) : m_state.track;
+    m_metadata = m_library && m_state.track.id && !m_facade->onlineActive() ? m_library->track(m_state.track.id) : m_state.track;
     if (!m_library) { m_metadata.cover.clear(); m_metadata.favorite = false; }
-    m_coverUrl = m_library && !m_metadata.cover.isEmpty() ? QUrl::fromLocalFile(m_library->absolute(m_metadata.cover)) : QUrl();
+    const QUrl source(m_metadata.cover);
+    m_coverUrl = source.scheme()=="https"||source.scheme()=="http" ? source : m_library && !m_metadata.cover.isEmpty() ? QUrl::fromLocalFile(m_library->absolute(m_metadata.cover)) : QUrl();
+    if(!m_coverUrl.isEmpty()&&!m_coverUrl.isLocalFile()){m_artworkRevision=m_coverUrl.toString();return;}
     const QFileInfo image(m_coverUrl.toLocalFile());
     m_artworkRevision = m_coverUrl.isEmpty() ? QString() : QString::number(image.lastModified().toMSecsSinceEpoch()) + ':' + QString::number(image.size());
 }

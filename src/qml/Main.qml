@@ -86,9 +86,9 @@ ApplicationWindow {
     Binding { target: Theme; property: "compact"; value: root.narrowLayout }
     Binding { target: Theme; property: "layoutProgress"; value: root.narrowProgress }
     property bool windowPinned: false
-    flags: Qt.Window | Qt.FramelessWindowHint | (miniMode||miniSwitching||(windowResizeActive&&resizeMiniPinned)||windowPinned ? Qt.WindowStaysOnTopHint : 0)
+    flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint | (miniMode||miniSwitching||(windowResizeActive&&resizeMiniPinned)||windowPinned ? Qt.WindowStaysOnTopHint : 0)
     title: appBridge.windowTitle + " · QML"
-    color: Theme.background
+    color: miniSwitching ? (Theme.dark&&!Theme.customHighlights ? "#19191e" : "white") : Theme.background
     readonly property string restFontFamily: { const saved = settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("rest") || "Microsoft YaHei UI" }
     readonly property string footerFontFamily: { const saved = settingsBridge.values.uiFont; return settingsBridge.fontFamilyFor("footer") || root.restFontFamily }
     font.family: restFontFamily
@@ -145,8 +145,8 @@ ApplicationWindow {
     readonly property real playerReveal: playerProgress
     property bool upcomingAtLeft: false
     property real upcomingTravel: 0
-    property var coverFrom: ({x:0,y:0,width:62,height:62})
-    property var coverTo: ({x:0,y:0,width:62,height:62})
+    property var coverFrom: ({x:0,y:0,width:62,height:62,radius:10})
+    property var coverTo: ({x:0,y:0,width:62,height:62,radius:10})
     property bool coverTravelling: false
     property real coverProgress: 0
     property url flightFile: ""
@@ -175,12 +175,21 @@ ApplicationWindow {
         return false
     }
     function imageRect(item) { const p = item.mapToItem(root.contentItem,0,0); return {x:p.x,y:p.y,width:item.width,height:item.height} }
+    function artworkRect(item) {
+        const bounds = imageRect(item)
+        bounds.radius = item.radius
+        return bounds
+    }
     function textRect(item) {
         const bounds = imageRect(item)
-        const width = Math.min(bounds.width, item.contentWidth + 2)
+        // A flight keeps its font fixed and scales the glyphs. Capture its
+        // painted size when reversing midway, rather than the backing font.
+        const scale = item.flightScale === undefined ? 1 : item.flightScale
+        bounds.width *= scale; bounds.height *= scale
+        const width = Math.min(bounds.width, (item.contentWidth + 2) * scale)
         if (item.horizontalAlignment === Text.AlignHCenter) bounds.x += (bounds.width - width) / 2
         bounds.width = Math.max(1, width)
-        bounds.pixelSize = item.font.pixelSize
+        bounds.pixelSize = item.font.pixelSize * scale
         bounds.family = item.font.family
         bounds.weight = item.font.weight
         return bounds
@@ -202,11 +211,11 @@ ApplicationWindow {
         if (lyricsOpen === open && !playerMotion.running) return
         ensureNowPlaying()
         if(open)nowPage.forceActiveFocus()
-        const start = coverTravelling ? ({x:flight.x,y:flight.y,width:flight.width,height:flight.height}) : imageRect(open ? playerBar.smallArtwork : nowPage.largeArtwork)
+        const start = artworkRect(coverTravelling ? flight : open ? playerBar.smallArtwork : nowPage.largeArtwork)
         const titleStart = metadataTravelling ? textRect(titleFlight) : textRect(open ? playerBar.metadataTitle : nowPage.metadataTitle)
         const artistStart = metadataTravelling ? textRect(artistFlight) : textRect(open ? playerBar.metadataArtist : nowPage.metadataArtist)
         lyricsOpen = open
-        coverFrom = start; coverTo = imageRect(open ? nowPage.largeArtwork : playerBar.smallArtwork)
+        coverFrom = start; coverTo = artworkRect(open ? nowPage.largeArtwork : playerBar.smallArtwork)
         titleFrom = titleStart; titleTo = textRect(open ? nowPage.metadataTitle : playerBar.metadataTitle)
         artistFrom = artistStart; artistTo = textRect(open ? nowPage.metadataArtist : playerBar.metadataArtist)
         flightFile = playbackBridge.coverUrl; flightSeed = playbackBridge.hasTrack ? playbackBridge.title : "Relaxer"
@@ -268,8 +277,8 @@ ApplicationWindow {
     }
     function animateMiniGeometry(from,to,entering){
         miniMotionFrom=from;miniMotionTo=to
-        miniMotion.from=entering?0:1;miniMotion.to=entering?1:0
-        miniMotion.duration=settingsBridge.values.reduceMotion?0:300
+        miniTween.from=entering?0:1;miniTween.to=entering?1:0
+        miniTween.duration=settingsBridge.values.reduceMotion?0:300
         miniMotion.restart()
     }
     onMiniTransitionProgressChanged:{
@@ -277,7 +286,13 @@ ApplicationWindow {
         const p=miniMode?miniTransitionProgress:1-miniTransitionProgress,a=miniMotionFrom,b=miniMotionTo
         setMiniGeometry([a[0]+(b[0]-a[0])*p,a[1]+(b[1]-a[1])*p,a[2]+(b[2]-a[2])*p,a[3]+(b[3]-a[3])*p])
     }
-    NumberAnimation {id:miniMotion;objectName:"miniGeometryMotion";target:root;property:"miniTransitionProgress";easing.type:Easing.InOutCubic;onFinished:root.finishMiniTransition()}
+    SequentialAnimation {
+        id:miniMotion;objectName:"miniGeometryMotion"
+        // Present the destination's first scene before native resize starts.
+        PauseAnimation {duration:settingsBridge.values.reduceMotion?0:16}
+        NumberAnimation {id:miniTween;target:root;property:"miniTransitionProgress";easing.type:Easing.InOutCubic}
+        onFinished:root.finishMiniTransition()
+    }
     function finishMiniTransition(){
         setMiniGeometry(miniMotionTo)
         if(!miniMode&&miniRestorePlacement){
@@ -426,12 +441,12 @@ ApplicationWindow {
     function navigateOriginal(index) {
         const same = index === 0 ? appBridge.page === 0 && libraryBridge.playlistId === "0"
                    : index === 4 ? appBridge.page === 0 && libraryBridge.playlistId === "-1"
-                   : appBridge.page === index && (index !== 3 || settingsSection === "settings")
+                   : index===1 ? appBridge.page===4 : appBridge.page === index && (index !== 3 || settingsSection === "settings")
         if (same) { if (lyricsOpen) animatePlayer(false); return }
         changePage(function() {
             settingsSection="settings"
             if (index===0) { libraryBridge.openPlaylist("0"); appBridge.navigate(0) }
-            else if(index===1) appBridge.navigate(1)
+            else if(index===1) appBridge.navigate(4)
             else if(index===2) { libraryBridge.openPlaylist("-2"); appBridge.navigate(2) }
             else if(index===3) appBridge.navigate(3)
             else { libraryBridge.openPlaylist("-1"); appBridge.navigate(0) }
@@ -453,7 +468,7 @@ ApplicationWindow {
         ensureLyricsWorkspace().open()
     }
     function backgroundUrl(file,blur){return root.backgrounded||(root.miniMode&&!root.miniSwitching) ? "" : String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
-    function applySettings() { Theme.fontFamily=root.restFontFamily; if(settingsBridge.values.reduceMotion)relocateUpcoming(lyricsOpen); Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}) }
+    function applySettings() { Theme.fontFamily=root.restFontFamily; if(settingsBridge.values.reduceMotion)relocateUpcoming(lyricsOpen); Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}); Theme.customHighlights=!!settingsBridge.palette.custom }
     Component.onCompleted: { width=settingsBridge.windowBounds.width;height=settingsBridge.windowBounds.height;applySettings(); if(settingsBridge.windowBounds.maximized)showMaximized() }
     Connections {
         target: lyricsSearchBridge
@@ -473,7 +488,7 @@ ApplicationWindow {
             if(root.miniMode||!root.lyricsOpen||settingsBridge.values.reduceMotion)return
             const origin=upcoming.coverItem(row)
             if(!origin)return
-            root.coverFrom=root.imageRect(origin);root.coverTo=root.imageRect(nowPage.largeArtwork)
+            root.coverFrom=root.artworkRect(origin);root.coverTo=root.artworkRect(nowPage.largeArtwork)
             root.flightFile=cover;root.flightSeed=key;root.coverProgress=0;root.coverTravelling=true
             coverMotion.duration=460;coverMotion.restart()
         }
@@ -540,8 +555,9 @@ ApplicationWindow {
     }
     Loader {
         id:miniLoader;anchors.fill:parent;z:200;active:root.miniMode||root.miniSwitching
-        opacity:root.miniFlightActive?0:root.miniTransitionProgress;enabled:root.miniMode&&!root.miniSwitching
+        opacity:root.miniFlightActive&&root.miniTransitionProgress<1?0:root.miniTransitionProgress;enabled:root.miniMode&&!root.miniSwitching
         sourceComponent:MiniPlayer {
+            modeTransitionActive:root.miniSwitching
             onRestoreRequested:Qt.callLater(root.leaveMiniPlayer)
         }
         onLoaded:item.forceActiveFocus()
@@ -551,14 +567,14 @@ ApplicationWindow {
         width:root.miniMode||root.miniSwitching?root.miniNormalGeometry[2]:Math.max(414,root.width)
         height:root.miniMode||root.miniSwitching?root.miniNormalGeometry[3]:root.height
         visible:!root.miniMode||root.miniSwitching;enabled:!root.miniMode&&!root.miniSwitching
-        opacity:1-root.miniTransitionProgress
-        // Its layout is already frozen at the normal geometry. Cache that
-        // presentation only for the flight instead of repainting the entire
-        // page while the native swapchain and its scale change every frame.
-        layer.enabled:root.miniSwitching
-        layer.live:false
-        layer.smooth:true
+        // A tiny initial opacity prepares the hidden destination's images and
+        // nodes in the warm-up frame, behind the still-visible mini player.
+        opacity:root.miniSwitching&&!root.miniMode&&root.miniTransitionProgress===1?.001:1-root.miniTransitionProgress
+        // Geometry stays fixed throughout the flight; only its GPU transform
+        // changes. A new full-window frozen texture was unnecessary here.
         transform:Scale {xScale:root.miniSwitching&&root.miniMode?root.width/normalShell.width:1;yScale:root.miniSwitching&&root.miniMode?root.height/normalShell.height:1}
+        // Keep an opaque background beneath every normal-view frame.
+        Rectangle {anchors.fill:parent;color:Theme.background}
     Item {
         id: contentHost
         visible: !root.workspaceOpened
@@ -567,7 +583,11 @@ ApplicationWindow {
         anchors.bottom: importPanel.visible ? importPanel.top : root.bulkActive ? bulkBar.top : playerBar.top
         Rectangle {
             id: sidebar; objectName: "sidebar"; width:root.sidebarBaseWidth*(1-root.narrowProgress); opacity:1-root.narrowProgress; enabled:!root.narrowLayout&&!root.playerSettled; height: parent.height; color: Theme.panel;clip:true
+            Item {id:sidebarBackdrop;anchors.fill:parent
+                Rectangle {anchors.fill:parent;color:Theme.panel}
             Image { objectName:"sidebarBackground"; x:0;y:0;width:settingsBridge.palette.shareLR?normalShell.width:parent.width;height:settingsBridge.palette.shareLR&&settingsBridge.palette.shareFooter?normalShell.height:parent.height;source:root.backgroundUrl(settingsBridge.palette.leftImage,settingsBridge.palette.blurLeft); fillMode: Image.PreserveAspectCrop; asynchronous: true; visible: source.toString().length>0 }
+            }
+            Binding {target:Theme;property:"sidebarBackdrop";value:sidebarBackdrop}
             ColumnLayout {
                 x:18; y:27; width:169-121*root.sidebarCondenseProgress; height:parent.height-47; spacing:14
                 Item {
@@ -585,19 +605,19 @@ ApplicationWindow {
                 }
                 Item { Layout.preferredHeight: 2 }
                 Item {
-                    Layout.fillWidth:true;Layout.preferredHeight:libraryCaption.implicitHeight
-                    UiText {id:libraryCaption;opacity:1-root.sidebarCondenseProgress;visible:opacity>0;text:"音乐资料库";color:Theme.text;font.pixelSize:14;font.weight:Font.DemiBold}
+                    Layout.fillWidth:true;Layout.preferredHeight:26
+                    UiText {id:libraryCaption;anchors.fill:parent;verticalAlignment:Text.AlignVCenter;opacity:1-root.sidebarCondenseProgress;visible:opacity>0;text:"音乐资料库";color:Theme.text;font.pixelSize:14;font.weight:Font.DemiBold}
                     Rectangle {objectName:"librarySectionDivider";visible:opacity>0;anchors.centerIn:parent;width:20;height:2;radius:1;color:Theme.secondary;opacity:.5*root.sidebarCondenseProgress}
                 }
                 Column {
                     Layout.fillWidth:true; spacing:8
                     Repeater {
-                        model:["本地音乐","歌单","个人","设置","我喜欢"]
+                        model:["本地音乐","发现","个人","设置","我喜欢"]
                         NavigationButton {
                             required property int index; required property string modelData
                             objectName:"navigation"+index; width:parent.width; text:modelData;compact:root.sidebarCondensed
-                            marker:["music","playlist","person","settings","heart"][index]
-                            selected:!root.lyricsOpen && (index===4 ? appBridge.page===0&&libraryBridge.playlistId==="-1" : index===0 ? appBridge.page===0&&libraryBridge.playlistId==="0" : appBridge.page===index)
+                            marker:["music","mark-compass","person","settings","heart"][index]
+                            selected:!root.lyricsOpen && (index===4 ? appBridge.page===0&&libraryBridge.playlistId==="-1" : index===0 ? appBridge.page===0&&libraryBridge.playlistId==="0" : index===1?appBridge.page===4:appBridge.page===index)
                             onClicked:root.navigateOriginal(index)
                         }
                     }
@@ -607,9 +627,9 @@ ApplicationWindow {
                     Rectangle {objectName:"playlistSectionDivider";visible:opacity>0;anchors.centerIn:parent;width:20;height:2;radius:1;color:Theme.secondary;opacity:.5*root.sidebarCondenseProgress}
                     RowLayout {
                         opacity:1-root.sidebarCondenseProgress;visible:opacity>0;enabled:!root.sidebarCondensed;anchors.fill:parent;spacing:4
-                        UiText { text:"我的歌单"; color:Theme.text; font.pixelSize: 14;font.weight:Font.DemiBold; Layout.fillWidth:true }
+                        UiText { text:"我的歌单"; color:Theme.text; font.pixelSize: 14;font.weight:Font.DemiBold; Layout.fillWidth:true;Layout.fillHeight:true;verticalAlignment:Text.AlignVCenter }
                         IconButton {
-                            objectName:root.playlistOrderEditing?"savePlaylistOrder":"sidebarPlaylistOptions";width:26;height:26;padding:5
+                            objectName:root.playlistOrderEditing?"savePlaylistOrder":"sidebarPlaylistOptions";implicitWidth:26;implicitHeight:26;padding:5
                             text:root.playlistOrderEditing?"保存排序":"歌单管理";showTooltip:true
                             contentItem:Item {
                                 Symbol{anchors.fill:parent;name:"more";opacity:1-root.playlistOrderProgress;scale:1-.2*root.playlistOrderProgress}
@@ -618,7 +638,7 @@ ApplicationWindow {
                             onClicked:if(root.playlistOrderEditing)root.savePlaylistOrder();else playlistNavigationOptions.popup(this,0,height)
                         }
                         IconButton {
-                            objectName:root.playlistOrderEditing?"cancelPlaylistOrder":"sidebarCreatePlaylist";width:26;height:26;padding:5
+                            objectName:root.playlistOrderEditing?"cancelPlaylistOrder":"sidebarCreatePlaylist";implicitWidth:26;implicitHeight:26;padding:5
                             text:root.playlistOrderEditing?"取消排序":"创建歌单";showTooltip:true
                             contentItem:Symbol {objectName:"sidebarCreateRotation";name:"plus";rotation:45*root.playlistOrderProgress}
                             onClicked:if(root.playlistOrderEditing)root.cancelPlaylistOrder();else root.ensurePlaylistEditor().create()
@@ -627,6 +647,7 @@ ApplicationWindow {
                 }
                 ListView {
                     id: sidebarLists;objectName:"playlistNavigation"; Layout.fillWidth:true;Layout.fillHeight:true
+                    SmoothWheelHandler { flickable: sidebarLists }
                     model:root.playlistOrderDraftActive?playlistOrderDraft:playlistModel;clip:true;spacing:3
                     move:Transition {NumberAnimation{properties:"y";duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.InOutCubic}}
                     moveDisplaced:Transition {NumberAnimation{properties:"y";duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.InOutCubic}}
@@ -643,8 +664,11 @@ ApplicationWindow {
         }
         Item {
             id: paper; objectName:"paperSurface"; x:sidebar.width;width:parent.width-x;height:parent.height;clip:true;enabled:!root.playerSettled
+            Item {id:pageBackdrop;anchors.fill:parent
             Rectangle{anchors.fill:parent;color:Theme.background}
             Image{objectName:"pageBackground";x:settingsBridge.palette.shareLR||settingsBridge.palette.shareFooter?-paper.x:0;y:0;width:settingsBridge.palette.shareLR||settingsBridge.palette.shareFooter?normalShell.width:parent.width;height:settingsBridge.palette.shareFooter?normalShell.height:parent.height;source:root.backgroundUrl(settingsBridge.palette.rightImage,settingsBridge.palette.blurRight);fillMode:Image.PreserveAspectCrop;asynchronous:true;visible:source.toString().length>0}
+            }
+            Binding {target:Theme;property:"pageBackdrop";value:pageBackdrop}
             Item {
                 id: pageSurface;objectName:"pageSurface";width:parent.width;height:parent.height
                 StackLayout {
@@ -674,6 +698,7 @@ ApplicationWindow {
                                 requested: appBridge.page === 3 && root.settingsSection === "ai"
                                 sourceComponent: ScrollView {
                                     id:aiScroll;objectName:"aiSettingsScroll";contentWidth:availableWidth;clip:true
+                                    SmoothWheelHandler { flickable: aiScroll.contentItem as Flickable }
                                     leftPadding:34;rightPadding:34;topPadding:28;bottomPadding:16
                                     AiPage {
                                         id:aiPage;width:aiScroll.availableWidth
@@ -709,6 +734,10 @@ ApplicationWindow {
                                 sourceComponent: VersionLogPage{onBackRequested:root.changePage(function(){root.settingsSection="settings"})}
                             }
                         }
+                    }
+                    DeferredPage {
+                        requested:appBridge.page===4
+                        sourceComponent:DiscoverPage {backdropSource:paper}
                     }
                 }
             }
@@ -746,7 +775,7 @@ ApplicationWindow {
         }
     }
     PlayerBar {
-        id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:98
+        id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:implicitHeight
         visible:!root.bulkActive&&!root.workspaceOpened;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling||root.miniFlightActive;miniControlsTravelling:root.miniFlightActive
         backgroundCanvasHeight: normalShell.height; backgroundOffsetY: playerBar.y
         onExpandRequested:root.animatePlayer(!root.lyricsOpen)
@@ -821,9 +850,15 @@ ApplicationWindow {
             ShellButton{visible:importBridge.busy;text:"取消导入";implicitHeight:28;onClicked:importBridge.cancel()}
         }
     }
-    TapHandler {
-        gesturePolicy:TapHandler.DragThreshold
-        onPressedChanged:if(pressed&&upcoming.panelExpanded&&!upcoming.contains(upcoming.mapFromItem(root.contentItem,point.position.x,point.position.y)))upcoming.panelExpanded=false
+    MouseArea {
+        objectName:"upcomingOutsidePress";parent:root.contentItem;anchors.fill:parent;z:3
+        enabled:upcoming.panelExpanded&&!root.narrowLayout&&!root.workspaceOpened&&!root.miniMode&&!root.miniSwitching
+        acceptedButtons:Qt.AllButtons
+        onPressed:mouse=>{
+            if(!upcoming.contains(upcoming.mapFromItem(this,mouse.x,mouse.y)))upcoming.panelExpanded=false
+            // Let the same press reach the button or list beneath this observer.
+            mouse.accepted=false
+        }
     }
     Item {
         objectName:"upcomingWindowClip";anchors.fill:parent;clip:true;z:2;visible:!root.workspaceOpened
@@ -833,11 +868,13 @@ ApplicationWindow {
             secondaryBackdrop:playerBar;secondaryOffset:Qt.point(playerBar.x-contentHost.x,playerBar.y-contentHost.y)
             backdropRect:Qt.rect(x,y,width,height)
             expandedPlayer:root.upcomingAtLeft
+            readonly property real edgeMargin:root.upcomingAtLeft?8:playerBar.coverMargin
+            dockedHeight:Math.max(0,playerBar.height-2*edgeMargin)
             width:root.upcomingAtLeft?Math.min(implicitWidth,Math.max(160,playerBar.wideCenterX-24))
                 :Math.min(implicitWidth,Math.max(0,playerBar.wideRightSpace-24))
-            x:root.upcomingAtLeft?8+(playerBar.x+playerBar.queueControlX-8)*root.narrowProgress:normalShell.width-playerBar.coverMargin-width
+            x:root.upcomingAtLeft?edgeMargin+(playerBar.x+playerBar.queueControlX-edgeMargin)*root.narrowProgress:normalShell.width-playerBar.coverMargin-width
             y:root.upcomingAtLeft
-                ?(normalShell.height-4-height)*(1-root.narrowProgress)+(playerBar.y+playerBar.queueControlY)*root.narrowProgress+(height+4)*root.upcomingTravel
+                ?(normalShell.height-edgeMargin-height)*(1-root.narrowProgress)+(playerBar.y+playerBar.queueControlY)*root.narrowProgress+(height+edgeMargin)*root.upcomingTravel
                 :normalShell.height-playerBar.coverMargin-height+(height+playerBar.coverMargin)*root.upcomingTravel+(height+playerBar.coverMargin)*root.narrowProgress
             opacity:1-root.narrowProgress
             transform:Scale {
@@ -862,36 +899,43 @@ ApplicationWindow {
         y:root.coverFrom.y+(root.coverTo.y-root.coverFrom.y)*root.coverProgress
         width:root.coverFrom.width+(root.coverTo.width-root.coverFrom.width)*root.coverProgress
         height:root.coverFrom.height+(root.coverTo.height-root.coverFrom.height)*root.coverProgress
+        radius:root.coverFrom.radius+(root.coverTo.radius-root.coverFrom.radius)*root.coverProgress
         MouseArea {anchors.fill:parent;acceptedButtons:Qt.AllButtons;onWheel:wheel=>{wheel.accepted=true}}
     }
 
     UiText {
         id:titleFlight;objectName:"sharedTitleFlight";z:4;visible:root.metadataTravelling&&!root.workspaceOpened
+        // font.pixelSize is integral. Keep glyph layout at the larger endpoint
+        // size and interpolate a real-valued transform instead of reshaping it.
+        readonly property real flightScale:(root.titleFrom.pixelSize+(root.titleTo.pixelSize-root.titleFrom.pixelSize)*root.coverProgress)/font.pixelSize
         opacity:root.narrowLayout&&!playerBar.metadataTitle.visible?(root.lyricsOpen?root.coverProgress:1-root.coverProgress):1
         text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideNone;color:Theme.text
         x:root.titleFrom.x+(root.titleTo.x-root.titleFrom.x)*root.coverProgress
         y:root.titleFrom.y+(root.titleTo.y-root.titleFrom.y)*root.coverProgress
-        width:!root.lyricsOpen&&root.narrowLayout?root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress:Math.max(root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress,titleExpandedMetrics.advanceWidth<=(root.lyricsOpen?root.titleTo.width:root.titleFrom.width)?titleFlightMetrics.advanceWidth+2:0)
+        width:(!root.lyricsOpen&&root.narrowLayout?root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress:Math.max(root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress,titleExpandedMetrics.advanceWidth<=(root.lyricsOpen?root.titleTo.width:root.titleFrom.width)?titleFlightMetrics.advanceWidth*flightScale+2:0))/flightScale
         clip:true
-        height:root.titleFrom.height+(root.titleTo.height-root.titleFrom.height)*root.coverProgress
-        font.pixelSize:root.titleFrom.pixelSize+(root.titleTo.pixelSize-root.titleFrom.pixelSize)*root.coverProgress
+        height:(root.titleFrom.height+(root.titleTo.height-root.titleFrom.height)*root.coverProgress)/flightScale
+        font.pixelSize:Math.max(1,Math.ceil(Math.max(root.titleFrom.pixelSize,root.titleTo.pixelSize)))
         font.family:root.titleTo.family;font.weight:root.titleTo.weight
+        transform:Scale {xScale:titleFlight.flightScale;yScale:titleFlight.flightScale}
         MouseArea {anchors.fill:parent;acceptedButtons:Qt.AllButtons;onWheel:wheel=>{wheel.accepted=true}}
     }
     UiText {
         id:artistFlight;objectName:"sharedArtistFlight";z:4;visible:root.metadataTravelling&&!root.workspaceOpened
+        readonly property real flightScale:(root.artistFrom.pixelSize+(root.artistTo.pixelSize-root.artistFrom.pixelSize)*root.coverProgress)/font.pixelSize
         opacity:root.narrowLayout&&!playerBar.metadataArtist.visible?(root.lyricsOpen?root.coverProgress:1-root.coverProgress):1
         text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideNone;color:Theme.secondary
         x:root.artistFrom.x+(root.artistTo.x-root.artistFrom.x)*root.coverProgress
         y:root.artistFrom.y+(root.artistTo.y-root.artistFrom.y)*root.coverProgress
-        width:!root.lyricsOpen&&root.narrowLayout?root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress:Math.max(root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress,artistExpandedMetrics.advanceWidth<=(root.lyricsOpen?root.artistTo.width:root.artistFrom.width)?artistFlightMetrics.advanceWidth+2:0)
+        width:(!root.lyricsOpen&&root.narrowLayout?root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress:Math.max(root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress,artistExpandedMetrics.advanceWidth<=(root.lyricsOpen?root.artistTo.width:root.artistFrom.width)?artistFlightMetrics.advanceWidth*flightScale+2:0))/flightScale
         clip:true
-        height:root.artistFrom.height+(root.artistTo.height-root.artistFrom.height)*root.coverProgress
-        font.pixelSize:root.artistFrom.pixelSize+(root.artistTo.pixelSize-root.artistFrom.pixelSize)*root.coverProgress
-        font.family:root.artistTo.family
+        height:(root.artistFrom.height+(root.artistTo.height-root.artistFrom.height)*root.coverProgress)/flightScale
+        font.pixelSize:Math.max(1,Math.ceil(Math.max(root.artistFrom.pixelSize,root.artistTo.pixelSize)))
+        font.family:root.artistTo.family;font.weight:root.artistTo.weight
+        transform:Scale {xScale:artistFlight.flightScale;yScale:artistFlight.flightScale}
         MouseArea {anchors.fill:parent;acceptedButtons:Qt.AllButtons;onWheel:wheel=>{wheel.accepted=true}}
     }
-    // Measure the animated font independently of the clipped Text item's width.
+    // Measure the fixed glyph layout independently of the animated clip width.
     TextMetrics { id:titleFlightMetrics; text:titleFlight.text; font:titleFlight.font }
     TextMetrics { id:artistFlightMetrics; text:artistFlight.text; font:artistFlight.font }
     TextMetrics {
@@ -987,12 +1031,12 @@ ApplicationWindow {
             Column {
                 Layout.fillWidth:true;spacing:5
                 Repeater {
-                    model:["本地音乐","歌单","个人","设置","我喜欢"]
+                    model:["本地音乐","发现","个人","设置","我喜欢"]
                     NavigationButton {
                         required property int index;required property string modelData
                         objectName:"compactNavigate-"+index;width:parent.width;text:modelData
-                        marker:["music","playlist","person","settings","heart"][index]
-                        selected:index===4?appBridge.page===0&&libraryBridge.playlistId==="-1":index===0?appBridge.page===0&&libraryBridge.playlistId==="0":appBridge.page===index
+                        marker:["music","mark-compass","person","settings","heart"][index]
+                        selected:index===4?appBridge.page===0&&libraryBridge.playlistId==="-1":index===0?appBridge.page===0&&libraryBridge.playlistId==="0":index===1?appBridge.page===4:appBridge.page===index
                         onClicked:{compactNavigationMenu.close();root.navigateOriginal(index)}
                     }
                 }
@@ -1019,6 +1063,7 @@ ApplicationWindow {
             }
             ListView {
                 id:compactPlaylists;objectName:"compactPlaylistNavigation"
+                SmoothWheelHandler { flickable: compactPlaylists }
                 Layout.fillWidth:true;Layout.fillHeight:true
                 Layout.preferredHeight:count*36+Math.max(0,count-1)*spacing
                 Layout.minimumHeight:0

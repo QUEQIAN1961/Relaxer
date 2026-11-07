@@ -48,6 +48,17 @@ public:
     }
     HWND handle;QList<QRect> rectangles;
 };
+QImage nativeClientImage(HWND handle) {
+    RECT client{};GetClientRect(handle,&client);POINT origin{};ClientToScreen(handle,&origin);
+    const int width=client.right,height=client.bottom;
+    const auto screen=GetDC(nullptr),memory=CreateCompatibleDC(screen);
+    BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=width;
+    info.bmiHeader.biHeight=-height;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;
+    void *pixels=nullptr;const auto bitmap=CreateDIBSection(screen,&info,DIB_RGB_COLORS,&pixels,nullptr,0);
+    const auto old=SelectObject(memory,bitmap);BitBlt(memory,0,0,width,height,screen,origin.x,origin.y,SRCCOPY|CAPTUREBLT);
+    GdiFlush();QImage image(static_cast<uchar *>(pixels),width,height,QImage::Format_RGB32);auto copy=image.copy();
+    SelectObject(memory,old);DeleteObject(bitmap);DeleteDC(memory);ReleaseDC(nullptr,screen);return copy;
+}
 bool nativeDrag(QQuickWindow *window,QPoint start,const QList<QPoint> &path){
     const auto handle=reinterpret_cast<HWND>(window->winId());
     SetForegroundWindow(handle);window->requestActivate();QTest::qWait(150);
@@ -116,9 +127,145 @@ void miniHover(QQuickWindow *w,bool hover){
 class AdaptiveLayoutTests final:public QObject {
     Q_OBJECT
 private slots:
+    void nativeTaskbarMinimizeWorksForNormalAndMiniWindows(){
+#ifdef Q_OS_WIN
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();
+        const auto handle=reinterpret_cast<HWND>(w->winId());const auto queue=f.shell->facade()->queue().items;
+        for(const bool mini:{false,true}){
+            if(mini){QVERIFY(QMetaObject::invokeMethod(w,"enterMiniPlayer"));QVERIFY(miniSettled(w));}
+            const auto style=GetWindowLongPtr(handle,GWL_STYLE);QVERIFY(style&WS_MINIMIZEBOX);QVERIFY(style&WS_SYSMENU);
+            SendMessage(handle,WM_SYSCOMMAND,SC_MINIMIZE,0);QTRY_COMPARE(w->visibility(),QWindow::Minimized);QVERIFY(IsIconic(handle));
+            ShowWindow(handle,SW_RESTORE);QTRY_VERIFY(w->visibility()!=QWindow::Minimized);QCOMPARE(w->winId(),WId(handle));
+        }
+        QCOMPARE(f.shell->facade()->queue().items,queue);QCOMPARE(f.shell->facade()->current().id,f.a.id);
+#endif
+    }
+    void coverHandoffKeepsTheSameCornerMask() {
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();
+        const auto queue=f.shell->facade()->queue().items;
+        auto *flight=visual(root,"sharedArtworkFlight");QVERIFY(flight);
+        bool radiiMatch=true,masksMatch=true;
+        const auto crop=[&](QQuickItem *item){
+            const auto frame=w->grabWindow();const qreal scale=qreal(frame.width())/w->width();
+            const auto bounds=rect(item);return frame.copy(QRectF(bounds.x()*scale,bounds.y()*scale,bounds.width()*scale,bounds.height()*scale).toAlignedRect());
+        };
+        for(const int width:{1240,460}) {
+            w->resize(width,790);QTest::qWait(420);
+            // Render the terminal flight at its exact landing geometry, then
+            // reveal the real cover to compare their four corner masks.
+            for(const bool open:{true,false}) {
+                QVERIFY(QMetaObject::invokeMethod(w,open?"showLyrics":"closeLyrics"));
+                QTRY_VERIFY(!w->property("coverTravelling").toBool());
+                QCOMPARE(w->property("playerProgress").toReal(),open?1.:0.);
+                auto *landed=visual(root,open?"currentArtwork":"bottomCover");QVERIFY(landed);
+                w->setProperty("coverTravelling",true);QTest::qWait(100);crop(flight);QTest::qWait(30);
+                const auto moving=crop(flight);const auto movingRadius=flight->property("radius").toReal();
+                const auto movingBounds=rect(flight);shot(w,QString("cover-handoff-%1-%2-flight").arg(width).arg(open?"expanded":"collapsed"));
+                w->setProperty("coverTravelling",false);QTest::qWait(100);crop(landed);QTest::qWait(30);
+                const auto stationary=crop(landed);const auto radius=landed->property("radius").toReal();
+                shot(w,QString("cover-handoff-%1-%2-landed").arg(width).arg(open?"expanded":"collapsed"));
+                QCOMPARE(movingBounds,rect(landed));QCOMPARE(moving.size(),stationary.size());
+                const int edge=qMin(moving.width()/2,qCeil((radius+2)*moving.width()/landed->width()));
+                qint64 difference=0;int pixels=0;
+                for(int y=0;y<moving.height();++y)for(int x=0;x<moving.width();++x) {
+                    if((x>=edge&&x<moving.width()-edge)||(y>=edge&&y<moving.height()-edge))continue;
+                    const auto a=moving.pixelColor(x,y),b=stationary.pixelColor(x,y);
+                    difference+=qAbs(a.red()-b.red())+qAbs(a.green()-b.green())+qAbs(a.blue()-b.blue());++pixels;
+                }
+                const double mean=double(difference)/(3*pixels);
+                qInfo()<<"cover handoff width"<<width<<"expanded"<<open<<"flight radius"<<movingRadius<<"landed radius"<<radius<<"corner pixel difference"<<mean;
+                radiiMatch&=qAbs(movingRadius-radius)<.001;masksMatch&=mean<1.;
+            }
+        }
+        QVERIFY2(radiiMatch,"The cover radius changes at the flight handoff");
+        QVERIFY2(masksMatch,"The four rendered corners change when the flight hands off to the real cover");
+        QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTest::qWait(120);
+        const auto interruptedRadius=flight->property("radius").toReal();
+        QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QCOMPARE(flight->property("radius").toReal(),interruptedRadius);
+        QTRY_VERIFY(!w->property("coverTravelling").toBool());
+        QCOMPARE(f.shell->facade()->queue().items,queue);QCOMPARE(f.shell->facade()->current().id,f.a.id);
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void tableSortingIndicatorsOnlyAppearOnHover() {
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();
+        auto *bridge=f.shell->libraryBridge();auto *model=f.shell->libraryModel();
+        const auto playlist=bridge->createPlaylist("Sorting fixture");QVERIFY(playlist!="0");
+        QVERIFY(bridge->addTracksToPlaylist(playlist,{QString::number(f.b.id),QString::number(f.a.id)}));
+        for(const int width:{1240,460}) {
+            w->resize(width,790);QTest::qWait(420);
+            for(const auto &scope:QStringList{"0","-1",playlist,"-2","-3"}) {
+                const bool profile=scope=="-2"||scope=="-3";
+                QVERIFY(f.shell->appBridge()->navigate(profile?2:0));QVERIFY(bridge->openPlaylist(scope));QTest::qWait(260);w->grabWindow();
+                auto *table=visual(root,profile?"recentTable":"libraryListContainer");QVERIFY(table&&table->isVisible());
+                QCOMPARE(table->property("headerHeight").toInt(),30);
+                QTest::mouseMove(w,QPoint(10,10));QTest::qWait(30);
+                for(const int column:{2,3}) {
+                    auto *heading=visual(table,"trackHeading-"+QString::number(column));
+                    auto *indicator=visual(table,"trackSort-"+QString::number(column));QVERIFY(heading&&indicator);
+                    QCOMPARE(heading->height(),30.);QVERIFY(!indicator->isVisible());
+                    QTest::mouseMove(w,rect(heading).center().toPoint());QTRY_VERIFY(indicator->isVisible());
+                    QCOMPARE(indicator->property("name").toString(),QString("sort-default"));
+                    QVERIFY(click(w,heading));QCOMPARE(model->sortKey(),column-1);QVERIFY(!model->descending());
+                    QCOMPARE(indicator->property("name").toString(),QString("sort-ascending"));
+                    if(width==1240&&scope=="0"&&column==2)shot(w,"sort-heading-hover-ascending");
+                    QTest::mouseMove(w,QPoint(10,10));QTRY_VERIFY(!indicator->isVisible());
+                    QCOMPARE(model->sortKey(),column-1);
+                    QTest::mouseMove(w,rect(heading).center().toPoint());QTRY_VERIFY(indicator->isVisible());
+                    QVERIFY(click(w,heading));QVERIFY(model->descending());
+                    QCOMPARE(indicator->property("name").toString(),QString("sort-descending"));
+                    QVERIFY(click(w,heading));QCOMPARE(model->sortKey(),0);QVERIFY(!model->descending());
+                    QCOMPARE(indicator->property("name").toString(),QString("sort-default"));
+                    QTest::mouseMove(w,QPoint(10,10));QTRY_VERIFY(!indicator->isVisible());
+                }
+                auto *list=visual(table,"trackListView");QVERIFY(list);
+                QVERIFY(qAbs(rect(list).top()-rect(visual(table,"trackHeading-2")).bottom()-1)<1);
+                if(width==460&&scope==playlist)shot(w,"sort-heading-narrow-idle");
+            }
+        }
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
     void miniTransitionNaturalFrames_data(){
         QTest::addColumn<int>("width");
         QTest::newRow("wide")<<1240;QTest::newRow("narrow")<<460;
+    }
+    void miniRestoreNativeBordersStayPainted() {
+#ifdef Q_OS_WIN
+        if(QGuiApplication::platformName()!="windows")QSKIP("Native desktop composition evidence");
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();w->raise();w->requestActivate();QTest::qWait(150);
+        const auto brush=CreateSolidBrush(RGB(80,180,120));
+        WNDCLASSW backdropClass{};backdropClass.lpfnWndProc=DefWindowProcW;backdropClass.hInstance=GetModuleHandleW(nullptr);
+        backdropClass.hbrBackground=brush;backdropClass.lpszClassName=L"RelaxerBorderTestBackdrop";RegisterClassW(&backdropClass);
+        const auto backdrop=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,backdropClass.lpszClassName,L"",WS_POPUP,0,0,GetSystemMetrics(SM_CXSCREEN),GetSystemMetrics(SM_CYSCREEN),nullptr,nullptr,backdropClass.hInstance,nullptr);
+        const auto cleanup=qScopeGuard([&]{DestroyWindow(backdrop);UnregisterClassW(backdropClass.lpszClassName,backdropClass.hInstance);DeleteObject(brush);});
+        SetWindowPos(backdrop,reinterpret_cast<HWND>(w->winId()),0,0,GetSystemMetrics(SM_CXSCREEN),GetSystemMetrics(SM_CYSCREEN),SWP_NOACTIVATE|SWP_SHOWWINDOW);
+        bool clean=true;
+        for(int mode:{0,1,3,4}) {
+            auto *settings=f.shell->settingsBridge();settings->beginAppearance();QVERIFY(settings->setAppearanceMode(mode));
+            if(mode>=3)QVERIFY(settings->editAppearance("right","#557799"));
+            if(mode==4)QVERIFY(settings->editAppearance("sourceRight",f.dir.filePath("cover.png")));
+            QTest::qWait(100);QTest::keyClick(w,Qt::Key_M,Qt::ControlModifier|Qt::ShiftModifier);QVERIFY(miniSettled(w));
+            double worst=0;QImage evidence;int count=0;
+            std::atomic<bool> sampling=true;const auto handle=reinterpret_cast<HWND>(w->winId());
+            std::thread samples([&]{while(sampling){
+                const auto image=nativeClientImage(handle);int black=0,total=0;
+                for(int y=2;y<image.height()-2;y+=2)for(int x=2;x<image.width()-2;x+=2){
+                    if(x>10&&x<image.width()-11&&y>10&&y<image.height()-11)continue;
+                    const auto c=image.pixelColor(x,y);++total;if(c.red()<8&&c.green()<8&&c.blue()<8)++black;
+                }
+                const double ratio=total?double(black)/total:0;++count;if(ratio>worst){worst=ratio;evidence=image;}
+                Sleep(8);
+            }});
+            QTest::keyClick(w,Qt::Key_M,Qt::ControlModifier|Qt::ShiftModifier);
+            const bool finished=QTest::qWaitFor([&]{return !w->property("miniSwitching").toBool();},4000);
+            sampling=false;samples.join();QVERIFY(finished);
+            qInfo()<<"native restore border mode"<<mode<<"samples"<<count<<"black fraction"<<worst<<"alpha bits"<<w->format().alphaBufferSize();
+            QVERIFY(count>=2);clean&=worst<.01;
+            const auto folder=qEnvironmentVariable("RELAXER_ADAPTIVE_SCREENSHOTS");
+            if(!folder.isEmpty()&&!evidence.isNull()){QDir().mkpath(folder);evidence.save(folder+QString("/native-restore-border-%1.png").arg(mode));}
+        }
+        QVERIFY(clean);
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+#endif
     }
     void miniTransitionNaturalFrames(){
         QFETCH(int,width);Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();
@@ -1029,13 +1176,13 @@ private slots:
         auto *sidebarMenu=w->findChild<QObject *>("playlistNavigationOptions");QVERIFY(sidebarMenu);QCOMPARE(sidebarMenu->property("width").toInt(),144);shot(w,"playlist-navigation-menu-144");
         QVERIFY(QMetaObject::invokeMethod(sidebarMenu,"close"));QTest::qWait(190);
         QVERIFY(click(w,visual(root,"playlistOptions")));QTest::qWait(270);
-        auto *menu=w->findChild<QObject *>("playlistOptionsMenu");QVERIFY(menu);QCOMPARE(menu->property("width").toInt(),192);
+        auto *menu=w->findChild<QObject *>("playlistOptionsMenu");QVERIFY(menu);QCOMPARE(menu->property("width").toInt(),244);
         auto *entry=visual(root,"deletePlaylistEntry");QVERIFY(entry);QVERIFY(entry->property("destructive").toBool());shot(w,"playlist-options-delete");
         QVERIFY(click(w,entry));QTest::qWait(270);
         auto *confirmation=w->findChild<QObject *>("playlistDeletionConfirmation");QVERIFY(confirmation);QVERIFY(confirmation->property("opened").toBool());
         QCOMPARE(confirmation->property("background").value<QObject *>()->property("radius").toInt(),12);shot(w,"playlist-delete-confirmation");
         auto *footer=confirmation->property("footer").value<QQuickItem *>();QVERIFY(footer);QVERIFY(click(w,visual(footer,"confirmationButton1")));QTest::qWait(240);QCOMPARE(f.library.playlists().size(),1);
-        QVERIFY(click(w,visual(root,"playlistOptions")));QTest::qWait(260);QVERIFY(click(w,visual(root,"playlistMarkerEntry")));QTest::qWait(280);
+        QVERIFY(click(w,visual(root,"playlistOptions")));QTest::qWait(260);QVERIFY(click(w,visual(root,"playlistEditEntry")));QTest::qWait(280);
         auto *editor=w->findChild<QObject *>("playlistEditor");QVERIFY(editor);QVERIFY(editor->property("opened").toBool());
         for(auto *object:editor->findChildren<QObject *>())QVERIFY(!object->property("text").toString().startsWith("删除此歌单"));
         QVERIFY(QMetaObject::invokeMethod(editor,"reject"));QTest::qWait(230);
@@ -1137,7 +1284,7 @@ private slots:
         QVERIFY(f.shell->appBridge()->navigate(0));QTest::qWait(280);QVERIFY(!visual(table,"trackFavorite-"+QString::number(f.a.id))->isVisible());QCOMPARE(rect(visual(table,"trackHeading-2")).left(),titleStart-32);
         for(const QString id:{QString("-1"),QString("-2"),QString("0")}) {QVERIFY(f.shell->libraryBridge()->openPlaylist(id));QTest::qWait(120);QCOMPARE(visual(table,"trackHeading-1")->width(),0.);}
         w->resize(414,790);QTest::qWait(400);QCOMPARE(visual(table,"trackHeading-1")->width(),0.);
-        QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(320);QVERIFY(visual(root,"dataRootRow")->property("columns").toInt()==1);QVERIFY(rect(visual(root,"openDataRoot")).top()>rect(visual(root,"dataRootText")).bottom());shot(w,"settings-directory-narrow");
+        QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(320);QVERIFY(visual(root,"dataRootRow")->property("columns").toInt()==2);QVERIFY(qAbs(rect(visual(root,"openDataRoot")).center().y()-rect(visual(root,"dataRootText")).center().y())<1);shot(w,"settings-directory-narrow");
         QVERIFY(click(w,visual(root,"showFavoritesSetting")));QVERIFY(settings->values().value("showFavorites").toBool());QCOMPARE(visual(table,"trackHeading-1")->width(),32.);
         QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(260);QVERIFY(click(w,visual(root,"lyricColorFollow")));QVERIFY(!picker->isEnabled());QVERIFY(click(w,visual(root,"saveLyricColor")));QTRY_VERIFY(settings->values().value("lyricColor").toString().isEmpty());
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
@@ -1319,11 +1466,15 @@ private slots:
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();auto *bridge=f.shell->libraryBridge();
         const auto key=bridge->createPlaylist("夜间音乐"),second=bridge->createPlaylist("晨间音乐");QVERIFY(key!="0");
         QVERIFY(bridge->addTracksToPlaylist(key,{QString::number(f.a.id)}));QVERIFY(bridge->openPlaylist(key));QTest::qWait(350);
-        auto *picker=w->findChild<QObject *>("playlistCoverPicker");QVERIFY(picker);QSignalSpy coverOpened(picker,SIGNAL(visibleChanged()));QVERIFY(coverOpened.isValid());
-        QVERIFY(click(w,visual(root,"playlistCover")));QTest::qWait(180);QVERIFY(!picker->property("visible").toBool());QCOMPARE(coverOpened.count(),0);
-        QVERIFY(click(w,visual(root,"playlistOptions")));QTest::qWait(260);QVERIFY(visual(root,"playlistCoverEntry")->isEnabled());
-        QVERIFY(click(w,visual(root,"playlistMarkerEntry")));QTest::qWait(280);
-        auto *editor=w->findChild<QObject *>("playlistEditor");QVERIFY(editor);QVERIFY(editor->property("opened").toBool());QCOMPARE(bridge->playlistMarkerIcons().size(),16);
+        QVERIFY(click(w,visual(root,"playlistCover")));QTest::qWait(180);QVERIFY(!w->findChild<QObject *>("playlistEditor"));
+        auto *metadata=w->findChild<QObject *>("playlistMetadataDialog");QVERIFY(metadata);
+        QVERIFY(click(w,visual(root,"playlistStatisticsContent")));QVERIFY(click(w,visual(root,"playlistDescriptionRow")));QVERIFY(!metadata->property("visible").toBool());
+        QVERIFY(click(w,visual(root,"playlistOptions")));QTest::qWait(260);QVERIFY(visual(root,"playlistMetadataEntry"));QVERIFY(visual(root,"playlistFilterEntry"));QVERIFY(!visual(root,"playlistCoverEntry"));QVERIFY(!visual(root,"playlistMarkerEntry"));
+        QVERIFY(click(w,visual(root,"playlistEditEntry")));QTest::qWait(280);
+        auto *editor=w->findChild<QObject *>("playlistEditor");QVERIFY(editor);QVERIFY(editor->property("opened").toBool());QCOMPARE(bridge->playlistMarkerIcons().size(),48);
+        auto *picker=editor->findChild<QObject *>("playlistCoverPicker");QVERIFY(picker);QVERIFY(!picker->property("visible").toBool());
+        QImage newCover(32,32,QImage::Format_RGB32);newCover.fill(QColor("#35a5ba"));const auto coverFile=f.dir.filePath("playlist-draft.png");QVERIFY(newCover.save(coverFile));
+        const auto originalCover=bridge->playlistDetailsFor(key).value("cover").toUrl();QVERIFY(editor->setProperty("pendingCover",QUrl::fromLocalFile(coverFile)));QCOMPARE(bridge->playlistDetailsFor(key).value("cover").toUrl(),originalCover);
         relaxer::UiImages images;
         for(const auto &name:bridge->playlistMarkerIcons()) {
             QVERIFY(visual(root,"playlistMarker-"+name));
@@ -1332,12 +1483,14 @@ private slots:
             QVERIFY2(colored>40,qPrintable(name+" did not render"));
         }
         shot(w,"playlist-marker-icons");
-        QVERIFY(click(w,visual(root,"playlistMarker-moon")));QVERIFY(QMetaObject::invokeMethod(editor,"reject"));QTest::qWait(230);QVERIFY(!bridge->playlistMarkers().contains(key));
+        QVERIFY(click(w,visual(root,"playlistMarker-moon")));QVERIFY(QMetaObject::invokeMethod(editor,"reject"));QTest::qWait(230);QVERIFY(!bridge->playlistMarkers().contains(key));QCOMPARE(bridge->playlistDetailsFor(key).value("cover").toUrl(),originalCover);
         QVERIFY(QMetaObject::invokeMethod(editor,"edit",Q_ARG(QVariant,key),Q_ARG(QVariant,QString("夜间音乐"))));QTest::qWait(280);
         QVERIFY(click(w,visual(root,"playlistMarker-star")));
         QSignalSpy resets(f.shell->libraryModel()->sourceModel(),&QAbstractItemModel::modelReset);
         const auto track=f.shell->facade()->current().id;const auto queue=f.shell->facade()->queue().items;
         QVERIFY(QMetaObject::invokeMethod(editor,"accept"));QTest::qWait(250);QCOMPARE(bridge->playlistMarkers().value(key).toString(),QString("icon:star"));QCOMPARE(resets.count(),0);
+        QVERIFY(QMetaObject::invokeMethod(editor,"edit",Q_ARG(QVariant,key),Q_ARG(QVariant,QString("夜间音乐"))));QTest::qWait(280);QVERIFY(editor->setProperty("pendingCover",QUrl::fromLocalFile(coverFile)));
+        QVERIFY(QMetaObject::invokeMethod(editor,"accept"));QTRY_VERIFY(bridge->playlistDetailsFor(key).value("cover").toUrl().toLocalFile()!=originalCover.toLocalFile());QCOMPARE(QImage(bridge->playlistDetailsFor(key).value("cover").toUrl().toLocalFile()).pixelColor(0,0),QColor("#35a5ba"));
         QVERIFY(QMetaObject::invokeMethod(editor,"edit",Q_ARG(QVariant,second),Q_ARG(QVariant,QString("晨间音乐"))));QTest::qWait(280);
         QVERIFY(click(w,visual(root,"playlistTextMarkMode")));QTest::qWait(80);QVERIFY(visual(root,"playlistMarkerText")->setProperty("text","晨"));shot(w,"playlist-marker-text");
         QVERIFY(QMetaObject::invokeMethod(editor,"accept"));QTest::qWait(250);QCOMPARE(bridge->playlistMarkers().value(second).toString(),QString("text:晨"));
@@ -1348,6 +1501,9 @@ private slots:
         QVERIFY(click(w,other));QTest::qWait(400);QCOMPARE(bridge->playlistId(),second);QCOMPARE(f.shell->facade()->current().id,track);QCOMPARE(f.shell->facade()->queue().items,queue);
         w->resize(414,540);QTest::qWait(400);QVERIFY(QMetaObject::invokeMethod(editor,"edit",Q_ARG(QVariant,key),Q_ARG(QVariant,QString("夜间音乐"))));QTest::qWait(280);
         auto *dialogItem=qvariant_cast<QQuickItem *>(editor->property("background"));QVERIFY(dialogItem);QVERIFY(rect(dialogItem).top()>=0);QVERIFY(rect(dialogItem).bottom()<=w->height());shot(w,"playlist-marker-minimum");
+        auto *scroll=editor->property("contentItem").value<QQuickItem *>();QVERIFY(scroll);auto *lastMarker=visual(root,"playlistMarker-balloon");QVERIFY(lastMarker);
+        wheel(w,rect(scroll).center().toPoint(),-240);QVERIFY(QTest::qWaitFor([&]{w->grabWindow();return rect(lastMarker).bottom()<=rect(scroll).bottom()+1;}));
+        QVERIFY(click(w,lastMarker));QCOMPARE(editor->property("iconMark").toString(),QString("balloon"));shot(w,"playlist-marker-minimum-scrolled");
         QVERIFY(QMetaObject::invokeMethod(editor,"reject"));QTest::qWait(230);w->resize(1240,790);QTest::qWait(380);
         QCOMPARE(qRound(visual(root,"sidebar")->width()),84);QVERIFY(other->isVisible());QCOMPARE(other->property("textMarker").toString(),QString("晨"));
         {Library reopened(f.library.root());QVERIFY(reopened.open());QCOMPARE(reopened.setting("qml.playlistMarkers").toObject().value(key).toString(),QString("icon:star"));QCOMPARE(reopened.setting("qml.playlistMarkers").toObject().value(second).toString(),QString("text:晨"));}
@@ -1472,6 +1628,85 @@ private slots:
             auto *item=visual(root,name);QVERIFY(item);QVERIFY2(rect(item).right()<=w->width()+1,name);QVERIFY2(rect(item).bottom()<=w->height()+1,name);
         }
         QVERIFY(rect(table).bottom()<=rect(bulk).top()+1);shot(w,"bulk-460");
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void libraryPlaylistAndDiscoveryUseTheSameHeadingGap(){
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();auto *bridge=f.shell->libraryBridge();QVERIFY(bridge->openPlaylist("0"));QVERIFY(f.shell->appBridge()->navigate(0));QTest::qWait(100);
+        const auto localGap=rect(visual(root,"librarySummary")).top()-rect(visual(root,"libraryHeading")).bottom();
+        const auto key=bridge->createPlaylist("Heading spacing fixture");QVERIFY(key!="0");QVERIFY(bridge->openPlaylist(key));QTest::qWait(180);const auto playlistGap=rect(visual(root,"playlistHeader")).top()-rect(visual(root,"libraryHeading")).bottom();shot(w,"heading-gap-playlist");
+        QVERIFY(f.shell->appBridge()->navigate(4));QTest::qWait(150);const auto discoveryGap=rect(visual(root,"onlineFeatured")).top()-rect(visual(root,"discoverHeading")).bottom();shot(w,"heading-gap-discovery");
+        qInfo()<<"Heading gaps: local"<<localGap<<"playlist"<<playlistGap<<"discovery"<<discoveryGap;QVERIFY(qAbs(localGap-14)<.1);QVERIFY(qAbs(playlistGap-14)<.1);QVERIFY(qAbs(discoveryGap-14)<.1);QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void upcomingPanelsCloseOnBlankPressAndKeepControlsWorking(){
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();auto *panel=visual(root,"nextQueuePanel");QVERIFY(panel);
+        for(bool expanded:{false,true}){
+            if(expanded){QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTest::qWait(600);}
+            QVERIFY(click(w,visual(panel,"upcomingToggle")));QTRY_VERIFY(panel->property("panelExpanded").toBool());QTest::qWait(320);
+            QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,QPoint(w->width()/2,450));QTRY_VERIFY(!panel->property("panelExpanded").toBool());QTest::qWait(320);
+            QVERIFY(click(w,visual(panel,"upcomingToggle")));QTRY_VERIFY(panel->property("panelExpanded").toBool());QTest::qWait(320);const bool playing=f.shell->playbackBridge()->playing();QVERIFY(click(w,visual(root,"playPauseButton")));QTRY_VERIFY(!panel->property("panelExpanded").toBool());QTRY_COMPARE(f.shell->playbackBridge()->playing(),!playing);QVERIFY(click(w,visual(root,"playPauseButton")));QTRY_COMPARE(f.shell->playbackBridge()->playing(),playing);
+        }
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void profileAvatarAndEditorUseFullResolutionAndDirectEditing(){
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *bridge=f.shell->libraryBridge();QVERIFY(bridge->saveProfile("Saved listener","Saved biography"));
+        QImage image(512,512,QImage::Format_RGB32);for(int y=0;y<512;++y)for(int x=0;x<512;++x)image.setPixelColor(x,y,x%16<8?Qt::black:Qt::white);const auto imagePath=f.dir.filePath("avatar-detail.png");QVERIFY(image.save(imagePath));QVERIFY(bridge->setProfileAvatar(QUrl::fromLocalFile(imagePath)));
+        QVERIFY(QMetaObject::invokeMethod(w,"navigateOriginal",Q_ARG(QVariant,2)));QTRY_COMPARE(f.shell->appBridge()->page(),2);QTest::qWait(450);auto *root=w->contentItem();auto *avatar=visual(root,"profileAvatar");QVERIFY(avatar);QTest::qWait(200);
+        auto *nativeImage=avatar->property("imageItem").value<QQuickItem *>();QVERIFY(nativeImage);QTRY_COMPARE(nativeImage->property("status").toInt(),1);QCOMPARE(nativeImage->property("sourceSize").toSize(),QSize(512,512));
+        QVERIFY(!visual(root,"profileEdit"));auto *identity=visual(root,"profileIdentityMouse");QVERIFY(identity);auto *editor=w->findChild<QObject *>("profileEditDialog");QVERIFY(editor);
+        for(const auto size:{QSize(1240,790),QSize(800,790),QSize(414,540)}){
+            w->resize(size);QTest::qWait(450);auto *recent=visual(root,"profileRecent"),*longest=visual(root,"profileFrequent");QVERIFY(recent&&longest);QVERIFY(rect(longest).top()>rect(recent).bottom());QVERIFY(rect(longest).right()<=w->width());
+            auto *card=visual(root,"profileIdentity"),*tabs=visual(root,"profileTabs"),*header=visual(root,"profileHeader");QVERIFY(card&&tabs&&header);QCOMPARE(recent->height(),36.);QCOMPARE(longest->height(),36.);QVERIFY(qAbs(rect(card).center().y()-rect(tabs).center().y())<.1);
+            if(visual(root,"profilePage")->property("compactHeader").toBool()){QCOMPARE(card->height(),62.);QVERIFY(qAbs(rect(tabs).top()-(rect(card).top()-8))<.1);QCOMPARE(header->height(),118.);}
+            QTest::mouseMove(w,rect(identity).center().toPoint());QTest::qWait(80);shot(w,QString("profile-aligned-%1").arg(size.width()));
+            QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(identity).center().toPoint());QVERIFY(!editor->property("visible").toBool());QTest::mouseDClick(w,Qt::LeftButton,Qt::NoModifier,rect(identity).center().toPoint());QTRY_VERIFY(editor->property("opened").toBool());QTest::qWait(300);
+            auto *left=visual(root,"profileEditorAvatarRegion"),*name=visual(root,"profileEditorNameRegion"),*bio=visual(root,"profileEditorDescriptionRegion");QVERIFY(left&&name&&bio);QVERIFY(qAbs(left->width()/left->parentItem()->width()-.35)<.001);QVERIFY(qAbs(name->height()/left->height()-.35)<.001);QVERIFY(qAbs(bio->height()/left->height()-.65)<.001);
+            auto *nickname=visual(root,"profileNicknameEdit"),*description=visual(root,"profileDescriptionEdit");QVERIFY(nickname&&description);QCOMPARE(nickname->property("placeholderText").toString(),QString("用户名"));QCOMPARE(description->property("placeholderText").toString(),QString("简介"));
+            shot(w,size.width()>500?"profile-editor-wide":"profile-editor-narrow");nickname->setProperty("text","Cancelled draft");QVERIFY(click(w,visual(root,"profileCancel")));QTRY_VERIFY(!editor->property("visible").toBool());QCOMPARE(bridge->profile().value("nickname").toString(),QString("Saved listener"));
+        }
+        QTest::mouseDClick(w,Qt::LeftButton,Qt::NoModifier,rect(identity).center().toPoint());QTRY_VERIFY(editor->property("opened").toBool());visual(root,"profileNicknameEdit")->setProperty("text","Updated listener");visual(root,"profileDescriptionEdit")->setProperty("text","Updated biography");QVERIFY(click(w,visual(root,"profileSave")));QTRY_VERIFY(!editor->property("visible").toBool());QCOMPARE(bridge->profile().value("nickname").toString(),QString("Updated listener"));QCOMPARE(bridge->profile().value("description").toString(),QString("Updated biography"));
+        QVERIFY(click(w,visual(root,"profileFrequent")));QCOMPARE(f.shell->libraryModel()->sortKey(),0);QVERIFY(!f.shell->libraryModel()->descending());QVERIFY(click(w,visual(root,"profileRecent")));QCOMPARE(f.shell->libraryModel()->sortKey(),0);QVERIFY(!f.shell->libraryModel()->descending());QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void instrumentalLyricsAreFixedAndExpandedQueueFitsTheFooter(){
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();auto *model=f.shell->lyricsModel();
+        QVERIFY(f.library.saveLyrics(f.a.id,"[00:00.00]Original lyric\n[00:00.00]Translated lyric\n[00:10.00]Next line\n"));QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTest::qWait(650);QTRY_VERIFY(visual(root,"lyricTranslation"));QCOMPARE(visual(root,"lyricTranslation")->property("font").value<QFont>().weight(),QFont::DemiBold);
+        auto *panel=visual(root,"lyricsPanel");QVERIFY(panel);QVERIFY(QMetaObject::invokeMethod(panel,"takeOver"));QVERIFY(panel->property("manualScroll").toBool());QVERIFY(f.library.saveLyrics(f.a.id,QString("纯音乐，请欣赏").toUtf8()));QTRY_VERIFY(model->instrumental());QTRY_VERIFY(!panel->property("manualScroll").toBool());QTest::qWait(120);w->grabWindow();
+        auto *message=visual(root,"instrumentalMessage"),*list=visual(root,"lyricsList");QVERIFY(message&&list);QVERIFY(message->isVisible());QVERIFY(!list->isVisible());QVERIFY(!list->property("interactive").toBool());QVERIFY(qAbs(rect(message).center().x()-rect(message->parentItem()).center().x())<1);QVERIFY(qAbs(rect(message).center().y()-rect(message->parentItem()).center().y())<1);QCOMPARE(message->property("font").value<QFont>().pixelSize(),26);QCOMPARE(message->opacity(),1.);
+        const auto position=rect(message);for(int i=0;i<3;++i){wheel(w,position.center().toPoint(),-120);QTest::qWait(40);}QCOMPARE(rect(message),position);QVERIFY(!panel->property("manualScroll").toBool());
+        auto *queue=visual(root,"nextQueuePanel"),*bar=visual(root,"playerBar");QVERIFY(queue&&bar);QTRY_VERIFY(w->property("upcomingAtLeft").toBool());const auto qr=rect(queue),br=rect(bar);QVERIFY(qAbs(qr.left()-(w->height()-qr.bottom()))<.1);QVERIFY(qr.top()>=br.top());QVERIFY(qr.bottom()<=br.bottom());QVERIFY(queue->property("coverSize").toInt()<=32);auto *row=visual(queue,"upcomingDelegate");QVERIFY(row);auto *cover=row->property("artwork").value<QQuickItem *>();QVERIFY(cover);QVERIFY(rect(cover).top()>=qr.top());QVERIFY(rect(cover).bottom()<=qr.bottom());shot(w,"instrumental-and-next-queue");
+        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+    }
+    void firstVisitHeadersAndCustomHighlightsStartSettled() {
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();
+        QVERIFY(f.shell->appBridge()->navigate(2));
+        auto *profile=visual(root,"profilePage");QVERIFY(profile);
+        for(int i=0;i<12;++i){w->grabWindow();QCOMPARE(profile->property("collapseProgress").toReal(),1.);QTest::qWait(16);}
+        const auto key=f.shell->libraryBridge()->createPlaylist("初次进入");QVERIFY(!key.isEmpty());
+        QVERIFY(f.shell->libraryBridge()->openPlaylist(key));QVERIFY(f.shell->appBridge()->navigate(0));
+        auto *header=visual(root,"playlistHeader");QVERIFY(header);
+        for(int i=0;i<12;++i){w->grabWindow();QCOMPARE(header->property("layoutProgress").toReal(),0.);QCOMPARE(header->property("collapseProgress").toReal(),0.);QTest::qWait(16);}
+        QVERIFY(f.shell->libraryBridge()->openPlaylist("0"));
+        auto *settings=f.shell->settingsBridge();settings->beginAppearance();
+        for(int mode:{3,4}) {
+            QVERIFY(settings->setAppearanceMode(mode));QVERIFY(settings->editAppearance("right","#335577"));
+            if(mode==4){
+                QImage pattern(1024,768,QImage::Format_RGB32);
+                for(int y=0;y<pattern.height();++y)for(int x=0;x<pattern.width();++x)pattern.setPixelColor(x,y,((x/12+y/12)%2)?QColor("#4488bb"):QColor("#7799bb"));
+                const auto path=f.dir.filePath("backdrop.png");QVERIFY(pattern.save(path));
+                QVERIFY(settings->editAppearance("sourceRight",path));QVERIFY(settings->editAppearance("sourceLeft",path));
+            }
+            auto *row=visual(root,"trackDelegate");QVERIFY(row);
+            f.shell->libraryModel()->setSelectedId(row->property("trackKey").toString());
+            QTRY_VERIFY(row->property("selected").toBool());
+            QTest::mouseMove(w,{w->width()-5,5});w->grabWindow();
+            auto *glass=visual(row,"highlightBackdrop");QVERIFY(glass);QVERIFY(glass->isVisible());QCOMPARE(row->property("color").value<QColor>().alpha(),0);
+            const auto selectedTint=glass->property("tintOpacity").toReal();shot(w,QString("custom-selected-%1").arg(mode));
+            f.shell->libraryModel()->setSelectedId("0");QTest::mouseMove(w,rect(row).center().toPoint());
+            QTRY_VERIFY(row->property("hovered").toBool());w->grabWindow();glass=visual(row,"highlightBackdrop");QVERIFY(glass);QVERIFY(glass->property("tintOpacity").toReal()<selectedTint);shot(w,QString("custom-hover-%1").arg(mode));
+            auto *nav=visual(root,"navigation0");QVERIFY(visual(nav,"highlightBackdrop"));
+            QTest::mouseMove(w,rect(visual(root,"playerMetadata")).center().toPoint());w->grabWindow();QVERIFY(visual(visual(root,"playerMetadataHover"),"highlightBackdrop"));
+            shot(w,QString("custom-highlight-%1").arg(mode));
+            QTest::mouseMove(w,{w->width()-5,5});f.shell->libraryModel()->setSelectedId("0");w->grabWindow();QVERIFY(!visual(row,"highlightBackdrop"));
+        }
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void profileStartsCollapsedAndRequiresAnExplicitPull() {

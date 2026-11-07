@@ -1,4 +1,4 @@
-#include "bass-midi-backend.h"
+#include "fluid-midi-backend.h"
 #include "playback.h"
 #include "importer.h"
 #include <QDir>
@@ -53,14 +53,25 @@ double energy(const QByteArray &pcm) {
     return sum;
 }
 }
-class BassMidiTests : public QObject {
+class FluidMidiTests : public QObject {
     Q_OBJECT
 private slots:
+    void tempoChangesKeepMillisecondSeeksAndEndRewindsAccurate() {
+        QTemporaryDir dir;const auto path=dir.filePath("tempo.mid");
+        const auto midi=QByteArray::fromHex("4d546864000000060000000101e0")+chunk(QByteArray::fromHex(
+            "00ff510307a12000c00000903c648360803c0000ff51030f424000903e648360803e0000ff2f00"));
+        QVERIFY(write(path,midi));FluidMidiBackend backend;
+        QVERIFY2(backend.open(path,true),qPrintable(backend.error()));QCOMPARE(backend.duration(),qint64(1500));
+        QVERIFY(backend.seek(1200));QCOMPARE(backend.position(),qint64(1200));
+        QCOMPARE(backend.readPcm(4800).size(),4800*8);QCOMPARE(backend.position(),qint64(1300));
+        backend.readPcm(48000);QCOMPARE(backend.position(),qint64(1500));QVERIFY(backend.readPcm(64).isEmpty());
+        QVERIFY(backend.seek(0));QCOMPARE(backend.position(),qint64(0));QVERIFY(energy(backend.readPcm(12000))>.001);
+    }
     void realPcmRenderingAndSeekUseUnicodeLongPaths() {
         QTemporaryDir dir;
         const auto path=dir.filePath(QString(90,'a')+"/"+QString(90,'b')+"/中文 日本語 " + QString(80,'c')+".mid");
         const auto original=score(); QVERIFY(write(path,original));
-        BassMidiBackend backend;
+        FluidMidiBackend backend;
         QVERIFY2(backend.open(path,true),qPrintable(backend.error()));
         QCOMPARE(backend.duration(),qint64(1000));
         QVERIFY(backend.setVolume(30));
@@ -70,13 +81,13 @@ private slots:
         QVERIFY(energy(backend.readPcm(12000))>0.001);
         QVERIFY(backend.close()); QVERIFY(backend.close());
 #ifdef Q_OS_WIN
-        QVERIFY(!GetModuleHandleW(L"bassmidi.dll")); QVERIFY(!GetModuleHandleW(L"bass.dll"));
+        QVERIFY(!GetModuleHandleW(L"libfluidsynth-3.dll"));
 #endif
         QFile input(path); QVERIFY(input.open(QIODevice::ReadOnly)); QCOMPARE(input.readAll(),original);
     }
     void simultaneousStreamsHaveIndependentOwnership() {
         QTemporaryDir dir; const auto path=dir.filePath("sample.mid"); QVERIFY(write(path,score()));
-        BassMidiBackend first,second;
+        FluidMidiBackend first,second;
         QVERIFY2(first.open(path,true),qPrintable(first.error()));
         QVERIFY2(second.open(path,true),qPrintable(second.error()));
         QVERIFY(energy(first.readPcm(4800))>0.001); QCOMPARE(second.position(),qint64(0));
@@ -86,19 +97,19 @@ private slots:
     }
     void denseScoreRendersWithinRealtimeBudget() {
         QTemporaryDir dir; const auto path=dir.filePath("dense.mid"); QVERIFY(write(path,score(true)));
-        BassMidiBackend backend; QElapsedTimer clock; clock.start();
+        FluidMidiBackend backend; QElapsedTimer clock; clock.start();
         QVERIFY2(backend.open(path,true),qPrintable(backend.error()));
         const auto prepare=clock.elapsed(); clock.restart(); qint64 bytes=0; double sum=0;
         for(;;) { const auto pcm=backend.readPcm(4096); if(pcm.isEmpty())break; bytes+=pcm.size(); const auto e=energy(pcm); QVERIFY(e>=0);sum+=e; }
         const auto render=clock.elapsed(); const double seconds=double(bytes)/(48000*8);
         QVERIFY(seconds>7); QVERIFY(sum>0.01); QVERIFY(render<seconds*1000);
         QCOMPARE(qRound64(seconds*1000),backend.duration());
-        qInfo().noquote()<<"BASS_MIDI_RENDER_EVIDENCE"<<QJsonDocument(QJsonObject{{"prepareMs",double(prepare)},{"renderMs",double(render)},{"audioSeconds",seconds},{"energy",sum}}).toJson(QJsonDocument::Compact);
+        qInfo().noquote()<<"FLUID_MIDI_RENDER_EVIDENCE"<<QJsonDocument(QJsonObject{{"prepareMs",double(prepare)},{"renderMs",double(render)},{"audioSeconds",seconds},{"energy",sum}}).toJson(QJsonDocument::Compact);
         QVERIFY(backend.close());
     }
     void invalidFileAndFailedOpenRemainClosable() {
         QTemporaryDir dir; const auto path=dir.filePath("bad.mid"); QVERIFY(write(path,"not a MIDI file"));
-        BassMidiBackend backend; QVERIFY(!backend.open(path,true)); QVERIFY(!backend.error().isEmpty());
+        FluidMidiBackend backend; QVERIFY(!backend.open(path,true)); QVERIFY(!backend.error().isEmpty());
         QVERIFY(backend.close()); QVERIFY(write(path,score()));
         QVERIFY2(backend.open(path,true),qPrintable(backend.error())); QVERIFY(backend.close());
         QVERIFY(!backend.play()); QVERIFY(!backend.error().isEmpty()); QVERIFY(backend.close());
@@ -106,7 +117,7 @@ private slots:
     void nativePlaybackPauseSeekResume() {
         if (!qEnvironmentVariableIsSet("RELAXER_MIDI_AUDIO_TEST")) QSKIP("Explicit native output test; offline PCM tests run above");
         QTemporaryDir dir; const auto path=dir.filePath("native.mid"); QVERIFY(write(path,score(true)));
-        BassMidiBackend backend; QVERIFY2(backend.open(path),qPrintable(backend.error()));
+        FluidMidiBackend backend; QVERIFY2(backend.open(path),qPrintable(backend.error()));
         QVERIFY(backend.setVolume(0)); QVERIFY(backend.play()); QTest::qWait(450);
         QVERIFY(backend.position()>100); QVERIFY(backend.pause()); const auto paused=backend.position();
         QTest::qWait(120); const auto afterPause=backend.position();
@@ -140,12 +151,12 @@ private slots:
         player.next(); QTRY_COMPARE(player.current().id,audioId);
         QTRY_VERIFY(player.media()->source().toLocalFile().endsWith(".wav"));
 #ifdef Q_OS_WIN
-        QVERIFY(!GetModuleHandleW(L"bassmidi.dll")); QVERIFY(!GetModuleHandleW(L"bass.dll"));
+        QVERIFY(!GetModuleHandleW(L"libfluidsynth-3.dll"));
 #endif
         player.previous(); QCOMPARE(player.current().id,secondId); QVERIFY(player.playing());
         QVERIFY(player.save()); QVERIFY(player.shutdown()); QVERIFY(!player.playing()); QCOMPARE(errors.size(),0);
         QFile original(first); QVERIFY(original.open(QIODevice::ReadOnly)); QCOMPARE(original.readAll(),score());
     }
 };
-QTEST_GUILESS_MAIN(BassMidiTests)
-#include "bass-midi-tests.moc"
+QTEST_GUILESS_MAIN(FluidMidiTests)
+#include "fluid-midi-tests.moc"

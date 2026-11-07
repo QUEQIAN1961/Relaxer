@@ -147,6 +147,36 @@ void AiRuntime::initialize(std::unique_ptr<CredentialStore> credentials, QUrl de
         }
         if (alive) emit modelCatalogFinished(taskId, providerId, models, resultError);
     });
+    connect(this,&AiRuntime::modelCatalogFinished,this,[this](quint64 task,const QString &provider,const QList<ModelInfo> &,const ProviderError &error){
+        if (!m_startupTasks.remove(task)) return;
+        QString problem=error.message;
+        const QList<AiTaskConfiguration> configurations{m_configuration.defaults,translationConfiguration()};
+        if (problem.isEmpty()) for (const auto &configuration:configurations) {
+            if (configuration.providerId!=provider) continue;
+            problem=validateConfiguration(configuration);
+            if (!problem.isEmpty()) break;
+        }
+        if (!problem.isEmpty()) emit startupConfigurationFailed(problem);
+    });
+}
+
+void AiRuntime::restoreSavedConfiguration() {
+    if (m_startupRestored) return;
+    m_startupRestored=true;
+    QSet<QString> providers;
+    const QList<AiTaskConfiguration> configurations{m_configuration.defaults,translationConfiguration()};
+    for (const auto &configuration:configurations) {
+        if (configuration.providerId.isEmpty() && configuration.modelId.isEmpty()) continue;
+        if (providers.contains(configuration.providerId)) continue;
+        providers.insert(configuration.providerId);
+        if (validateConfiguration(configuration).isEmpty()) continue;
+        QString error;
+        if (!hasCredential(configuration.providerId,&error)) {
+            emit startupConfigurationFailed(error.isEmpty()?QStringLiteral("上次使用的 AI API Key 不可用，请在 AI 设置中重新保存"):error);
+            continue;
+        }
+        m_startupTasks.insert(m_requests->fetchModels(configuration.providerId));
+    }
 }
 
 bool AiRuntime::saveConfiguration(const AiServiceConfiguration &configuration, QString *error) {

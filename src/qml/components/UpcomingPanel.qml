@@ -12,11 +12,13 @@ Item {
     property point secondaryOffset:Qt.point(0,0)
     property rect backdropRect:Qt.rect(x,y,width,height)
     property bool panelExpanded:popupPresentation
+    property real dockedHeight:94
+    readonly property bool dockedPreview:expandedPlayer&&!panelExpanded&&!popupPresentation
     property bool initialized: false
     property bool relocating: false
-    readonly property int headerHeight:showHeader?34:0
-    readonly property int rowHeight:popupPresentation?56:panelExpanded?46:56
-    readonly property int coverSize:popupPresentation?40:panelExpanded?36:40
+    readonly property int headerHeight:showHeader?(dockedPreview?28:34):0
+    readonly property real rowHeight:popupPresentation?56:dockedPreview?Math.max(0,dockedHeight-headerHeight-4):panelExpanded?46:56
+    readonly property int coverSize:popupPresentation?40:dockedPreview?Math.min(32,Math.max(0,Math.floor(rowHeight-6))):panelExpanded?36:40
     readonly property bool roomyHeader:expandedPlayer||panelExpanded
     readonly property bool inlinePreview:!expandedPlayer&&!panelExpanded
     readonly property real inlineContentX:upcomingModel.count?70:38
@@ -26,7 +28,7 @@ Item {
     signal activated(int row)
     signal dismissRequested()
     implicitWidth: preferredWidth
-    implicitHeight: !panelExpanded ? (expandedPlayer ? 94 : 34) : headerHeight + (upcomingModel.count ? Math.min(5, upcomingModel.count) * rowHeight : 28) + (showHeader?4:8)
+    implicitHeight: !panelExpanded ? (expandedPlayer ? dockedHeight : 34) : headerHeight + (upcomingModel.count ? Math.min(5, upcomingModel.count) * rowHeight : 28) + (showHeader?4:8)
     width: popupPresentation?parent.width:implicitWidth
     height: popupPresentation?parent.height:implicitHeight
     clip: true
@@ -46,7 +48,7 @@ Item {
         if(expandedPlayer&&!popupPresentation)panelExpanded=false
         activated(index)
     }
-    function resetScroll() { if (!initialized) return; wheelMotion.stop(); rows.contentY = 0; rows.scrollTarget = 0 }
+    function resetScroll() { if (!initialized) return; queueWheel.stop(); rows.contentY = 0 }
     onPopupPresentationChanged:if(popupPresentation)panelExpanded=true
     onPanelExpandedChanged: resetScroll()
     onExpandedPlayerChanged: { panelExpanded = popupPresentation; resetScroll() }
@@ -116,7 +118,7 @@ Item {
         Item {
             id: arrow
             x:parent.width-width
-            width:34
+            width:panel.dockedPreview?28:34
             height: parent.height
             Rectangle { anchors.fill: parent; anchors.margins: 1; radius: 7; color: arrowMouse.containsMouse ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.08) : "transparent" }
             UiText { fontRegion: "next"; anchors.centerIn: parent; text: panel.panelExpanded ? "⌄" : "⌃"; color: Theme.text; font.pixelSize: 15 }
@@ -129,8 +131,6 @@ Item {
         visible: panel.expandedPlayer || panel.panelExpanded
         clip: true; boundsBehavior: Flickable.StopAtBounds; interactive: panel.panelExpanded
         cacheBuffer: 0; reuseItems: true; model: upcomingModel
-        property real scrollTarget: 0
-        onMovementEnded: scrollTarget = contentY
         delegate: Item {
             id: row
             required property int index
@@ -143,7 +143,7 @@ Item {
             objectName: "upcomingDelegate"
             width: rows.width; height: panel.rowHeight
             Rectangle {
-                x: 7; y: 1; width: parent.width - 14; height: parent.height - 3; radius: 7
+                x: 6; y: 1; width: parent.width - 12; height: parent.height - 3; radius: 7
                 color: rowMouse.containsMouse ? Qt.rgba(Theme.text.r, Theme.text.g, Theme.text.b, 0.08) : "transparent"
                 border.width: rowMouse.containsMouse ? 1 : 0; border.color: Theme.accent
             }
@@ -165,19 +165,6 @@ Item {
         }
         UiText { fontRegion: "next"; visible: upcomingModel.count === 0; x: 12; y: 0; width: rows.width - 24; height: rows.height; text: "暂无待播放歌曲"; color: Theme.text; font.pixelSize: 15; verticalAlignment: Text.AlignVCenter }
         ScrollBar.vertical: ScrollBar { width: 5; policy: panel.panelExpanded && upcomingModel.count > 5 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
-        WheelHandler {
-            target: null
-            onWheel: event => {
-                if (panel.panelExpanded) {
-                    const pixels = event.pixelDelta.y !== 0
-                    const distance = pixels ? event.pixelDelta.y : event.angleDelta.y / 120 * panel.rowHeight
-                    rows.scrollTarget = Math.max(0, Math.min(Math.max(0, rows.contentHeight - rows.height), rows.scrollTarget - distance))
-                    wheelMotion.stop(); wheelMotion.from = rows.contentY; wheelMotion.to = rows.scrollTarget
-                    wheelMotion.duration = settingsBridge.values.reduceMotion ? 0 : pixels ? 85 : 170; wheelMotion.start()
-                }
-                event.accepted = true
-            }
-        }
+        SmoothWheelHandler { id: queueWheel; flickable: rows }
     }
-    NumberAnimation { id: wheelMotion; target: rows; property: "contentY"; easing.type: Easing.OutCubic }
 }

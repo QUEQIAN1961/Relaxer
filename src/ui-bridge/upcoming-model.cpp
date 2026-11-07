@@ -19,6 +19,7 @@ UpcomingModel::UpcomingModel(Library *library, PlaybackFacade *facade, QObject *
     connect(library, &Library::changed, this, [this] { schedule(false, true); });
     connect(facade, &PlaybackFacade::snapshotChanged, this, [this] { observe(); });
     connect(facade, &PlaybackFacade::trackChanged, this, [this] { schedule(true); });
+    connect(facade, &PlaybackFacade::onlineTrackUpdated, this, [this] { schedule(false,true); });
     // A mode command can rebuild the existing shuffle plan even when its enum
     // value is unchanged. State notifications cover that command; the ordinary
     // position notifications and progress snapshots never forecast or query.
@@ -57,11 +58,13 @@ QVariant UpcomingModel::data(const QModelIndex &index, int role) const {
     }
 }
 QUrl UpcomingModel::artwork(const Track &track) const {
+    const QUrl source(track.cover);if(source.scheme()=="https"||source.scheme()=="http")return source;
     return m_library && !track.cover.isEmpty() ? QUrl::fromLocalFile(m_library->absolute(track.cover)) : QUrl();
 }
 QString UpcomingModel::artworkRevision(const Track &track) const {
     const auto url = artwork(track);
     if (url.isEmpty()) return {};
+    if(!url.isLocalFile())return url.toString();
     const QFileInfo image(url.toLocalFile());
     return QString::number(image.lastModified().toMSecsSinceEpoch()) + ':' + QString::number(image.size());
 }
@@ -100,10 +103,10 @@ void UpcomingModel::refresh() {
     QVector<QString> revisions;
     if (alive && !ids.isEmpty() && (orderChanged || m_metadataDirty)) {
         ++m_metadataReads;
-        const auto selected = m_library->tracksByIds(ids);
+        const auto selected = m_facade->onlineActive() ? QHash<qint64,Track>{} : m_library->tracksByIds(ids);
         tracks.reserve(ids.size());
         for (const auto id : ids) {
-            auto track = selected.value(id);
+            auto track = m_facade->onlineActive() ? m_facade->track(id) : selected.value(id);
             if (!track.id) { track.id = id; track.title = "歌曲已从曲库移除"; }
             revisions.append(artworkRevision(track));
             tracks.append(std::move(track));
@@ -132,7 +135,7 @@ bool UpcomingModel::activate(int row) {
     if (!m_library || !m_facade || m_facade->isShutdown() || row < 0 || row >= count()) return false;
     const auto expected = m_ids[row];
     const auto current = m_facade->upcoming();
-    if (row >= current.size() || current[row] != expected || !m_library->track(expected).id) {
+    if (row >= current.size() || current[row] != expected || !m_facade->track(expected).id) {
         schedule(true, true); return false;
     }
     emit aboutToActivate(row, QString::number(expected), artwork(m_tracks[row]));

@@ -24,11 +24,15 @@ class TrackListModel final : public QAbstractListModel {
     bool matches(int row, const QString &text) const;
     qint64 playlist() const { return m_playlist; }
     void setPlaylist(qint64 playlist);
+    void setCloudTracks(qint64 playlist,const QVector<Track> &tracks);
+    void updateCloudTrack(const Track &track);
     void refresh();
     void refreshStatistics(qint64 trackId = 0);
   private:
     QPointer<Library> m_library;
     QVector<Track> m_tracks;
+    QVector<Track> m_cloudTracks;
+    bool m_cloud=false;
     QHash<qint64, int> m_rows;
     QTimer m_refresh;
     mutable QHash<QString, qint64> m_fileSizes;
@@ -57,6 +61,8 @@ class TrackFilterModel final : public QSortFilterProxyModel {
     void setSortKey(int key);
     bool descending() const { return m_descending; }
     void setDescending(bool value);
+    void setSorting(int key,bool descending);
+    Q_INVOKABLE void cycleSort(int key);
     QString selectedId() const { return QString::number(m_selected); }
     void setSelectedId(const QString &id);
     int selectedRow() const;

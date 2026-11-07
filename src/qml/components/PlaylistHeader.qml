@@ -1,16 +1,22 @@
 import QtQuick
+import QtQuick.Window
 import "../theme"
 
 Item {
     id: header
     objectName: "playlistHeader"
+    property bool firstFramePresented:false
+    Connections {
+        target:header.Window.window
+        function onFrameSwapped(){if(header.visible)header.firstFramePresented=true}
+    }
     property var details: ({})
     property string playlistName: ""
     property bool hasTracks: false
     property bool reorderEnabled: false
     readonly property bool compactLayout:Theme.compact||width<620
     property real layoutProgress:compactLayout?1:0
-    Behavior on layoutProgress {enabled:header.visible;NumberAnimation{duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.OutCubic}}
+    Behavior on layoutProgress {enabled:header.firstFramePresented&&header.visible;NumberAnimation{duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.OutCubic}}
     function reflow(wide,narrow){return wide+(narrow-wide)*layoutProgress}
     property bool collapsed: false
     property real collapseProgress: collapsed ? 1 : 0
@@ -29,14 +35,13 @@ Item {
     signal playModeRequested(int mode)
     signal optionsRequested(var anchor)
     signal moveRequested(int direction)
-    signal metadataRequested()
     implicitHeight:Math.max(coverSize,compactLayout?78:0)
     function blend(expanded, compact) { return expanded + (compact - expanded) * collapseProgress }
     function metadataRowX(contentWidth,availableWidth) {
         const aligned=Math.max(0,availableWidth-contentWidth)*(metadataDocked?1:layoutProgress)
         return aligned+(metadataDocked?contentWidth*(1-metadataEnter)*(1-layoutProgress):0)
     }
-    Behavior on collapseProgress {
+    Behavior on collapseProgress {enabled:header.firstFramePresented&&header.visible;
         NumberAnimation { duration: settingsBridge.values.reduceMotion ? 0 : 320; easing.type: Easing.InOutCubic }
     }
     Artwork {
@@ -89,8 +94,6 @@ Item {
                     }
                     UiText {
                         id: tagsLink; text: "标签"; color: Theme.secondary; font.pixelSize: 13
-                        TapHandler { onTapped: header.metadataRequested() }
-                        Accessible.name: "编辑歌单标签"
                     }
                     UiText {
                         width: Math.min(implicitWidth, Math.max(0, statistics.width - counts.width - tagsLink.width - 16))
@@ -115,8 +118,6 @@ Item {
                         maximumLineCount: 2; elide: Text.ElideRight
                     }
                 }
-                TapHandler { onTapped: header.metadataRequested() }
-                Accessible.name: "编辑歌单简介"
             }
         }
     }

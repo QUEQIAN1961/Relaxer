@@ -38,6 +38,10 @@ QString LyricsModel::status() const {
     if(m_timeline.instrumental)return "纯音乐，请欣赏";
     if(m_rows.isEmpty())return "暂无歌词，可导入本地歌词或手动检索";
     if(m_preview)return "未保存的翻译预览 · 仅在明确保存后写入";
+    if(m_facade&&m_facade->onlineActive()){
+        const auto platform=m_facade->current().hash.startsWith("qqmusic:")?QString("QQ 音乐"):QString("网易云");
+        return platform+(timed()?"时间轴歌词":"文本歌词");
+    }
     return timed()?"本地时间轴歌词":"文本歌词 · 无有效时间轴";
 }
 void LyricsModel::clear() {
@@ -53,6 +57,9 @@ void LyricsModel::schedule(){
 void LyricsModel::reload(){m_force=true;schedule();}
 void LyricsModel::readCurrent() {
     if(!m_library||!m_facade){clear();return;}
+    if(m_facade->onlineActive()){
+        m_track=m_facade->current();m_loading=false;m_force=false;emit documentChanged();return;
+    }
     Q_ASSERT(QThread::currentThread()==thread());
     const auto live=m_facade->current();const auto track=m_library->track(live.id);
     if(!track.id){clear();return;}
@@ -100,6 +107,7 @@ void LyricsModel::position(qint64 ms) {
     emit currentIndexChanged();
 }
 bool LyricsModel::setOffsetMs(int value) {
+    if(m_facade&&m_facade->onlineActive())return false;
     if(!m_library||!m_facade||!m_track.id||m_facade->current().id!=m_track.id||value < -5000||value>5000)return false;
     if(!m_library->setLyricOffset(m_track.id,value))return false;
     m_offset=value;emit offsetChanged();position(m_facade->position());return true;
@@ -117,5 +125,9 @@ void LyricsModel::presentTranslation(const TranslationSummary &summary) {
         QString error;const auto bytes=ai::lyrics::merge(m_source,summary.prepared,summary.translations,&error);
         if(error.isEmpty())present(bytes,true);
     }else if(m_preview){readCurrent();present(m_source,false);}
+}
+void LyricsModel::setOnlineLyrics(qint64 id,const QByteArray &bytes){
+    if(!m_facade||!m_facade->onlineActive()||m_facade->current().id!=id)return;
+    m_track=m_facade->current();m_offset=0;m_error.clear();m_loading=false;m_source=bytes;present(bytes,false);emit offsetChanged();emit documentChanged();
 }
 }

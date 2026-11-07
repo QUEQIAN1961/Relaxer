@@ -1,4 +1,6 @@
-# Relaxer V0.2.4-GA
+# Relaxer V0.2.5-RC
+
+候选预发行版：[下载 V0.2.5-RC](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.5-RC) · [更新说明](docs/releases/v0.2.5-RC/RELEASE-NOTES.md)。稳定版仍为 V0.2.4-GA。
 
 **简体中文** · [English](README.en.md)
 
@@ -30,7 +32,7 @@ Windows x64 便携包名称为 `Relaxer-V0.2.4-GA-Win64.zip`。完整解压到�
 |0.2.0-rc2|[历史预发行版](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.0-rc2)|
 
 
-MIDI 使用 BASS/BASSMIDI 与 GeneralUser GS。构建 MIDI 支持前运行 `python scripts/prepare-midi-runtime.py`。BASS 的免费条款限非商业用途，与现有 GPL 组合的兼容性仍未确认，依赖准备与许可范围见 [MIDI-BASS.md](docs/MIDI-BASS.md)。
+V0.2.5-RC 的 MIDI 使用开源 FluidSynth 与 GeneralUser GS。准备命令为 `python scripts/prepare-midi-runtime.py`，来源、构建及许可见 [MIDI-BASS.md](docs/MIDI-BASS.md)。
 
 ## 校验与源码
 

@@ -13,6 +13,7 @@ struct Track {
     bool favorite = false;
     QString coverOrigin;
     QString importedAt;
+    qint64 matchedLocalId=0;
 };
 struct Playlist {
     qint64 id = 0;
@@ -21,6 +22,7 @@ struct Playlist {
     qint64 plays = 0;
     QStringList tags;
     QString description;
+    QString provider,remoteId;
 };
 inline QStringList playlistTagOptions() {
     return {"华语", "流行", "摇滚", "民谣", "电子", "另类/独立", "轻音乐", "综艺", "影视原声", "ACG"};

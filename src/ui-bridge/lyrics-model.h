@@ -13,6 +13,7 @@ class LyricsModel final : public QAbstractListModel {
     Q_PROPERTY(int currentIndex READ currentIndex NOTIFY currentIndexChanged)
     Q_PROPERTY(QString trackKey READ trackKey NOTIFY documentChanged)
     Q_PROPERTY(bool timed READ timed NOTIFY documentChanged)
+    Q_PROPERTY(bool instrumental READ instrumental NOTIFY documentChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY documentChanged)
     Q_PROPERTY(bool preview READ preview NOTIFY documentChanged)
     Q_PROPERTY(QString status READ status NOTIFY documentChanged)
@@ -29,6 +30,7 @@ public:
     int currentIndex() const {return m_current;}
     QString trackKey() const {return QString::number(m_track.id);}
     bool timed() const {return m_timeline.timed&&!m_timeline.instrumental;}
+    bool instrumental() const {return m_timeline.instrumental;}
     bool loading() const {return m_loading;}
     bool preview() const {return m_preview;}
     QString status() const;
@@ -42,6 +44,7 @@ public:
     Q_INVOKABLE qint64 timestampAt(int row) const { return row>=0&&row<m_rows.size()?m_rows[row].time:0; }
     Q_INVOKABLE void reload();
     void presentTranslation(const TranslationSummary &summary);
+    void setOnlineLyrics(qint64 id,const QByteArray &bytes);
 signals:
     void documentChanged();
     void currentIndexChanged();

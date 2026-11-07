@@ -264,7 +264,14 @@ private slots:
         auto *header=visual(root,"playlistHeader"),*cover=visual(root,"playlistCover");QVERIFY(header);QVERIFY(cover);
         QVERIFY(f.shell->settingsBridge()->setPreference("reduceMotion",true));
         wheel(w,cover,-120);QTRY_COMPARE(cover->width(),78.);
-        QVERIFY(f.shell->libraryBridge()->openPlaylist(QString::number(second)));QTRY_COMPARE(cover->width(),160.);
+        QVERIFY(f.shell->libraryBridge()->openPlaylist(QString::number(second)));QTRY_COMPARE(cover->width(),78.);
+        auto *table=visual(root,"libraryListContainer");QVERIFY(table);
+        // The page must receive the header gesture even with the pointer over
+        // the list's smooth wheel handler, including an empty playlist.
+        wheel(w,table,120);QTRY_COMPARE(cover->width(),160.);
+        wheel(w,table,-120);QTRY_COMPARE(cover->width(),78.);
+        QVERIFY(f.shell->libraryBridge()->openPlaylist(QString::number(first)));QTRY_COMPARE(cover->width(),78.);
+        wheel(w,table,120);QTRY_COMPARE(cover->width(),160.);
         QVERIFY(f.shell->libraryBridge()->openPlaylist("0"));QTRY_VERIFY(!header->isVisible());
         QVERIFY(visual(root,"librarySummary")->isVisible());QVERIFY(visual(root,"playAllButton")->isVisible());
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));

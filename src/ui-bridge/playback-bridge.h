@@ -9,6 +9,7 @@ class PlaybackBridge final : public QObject {
     Q_PROPERTY(QString title READ title NOTIFY trackChanged)
     Q_PROPERTY(QString artist READ artist NOTIFY trackChanged)
     Q_PROPERTY(QString trackId READ trackId NOTIFY trackChanged)
+    Q_PROPERTY(QString matchedLocalTrackId READ matchedLocalTrackId NOTIFY trackChanged)
     Q_PROPERTY(bool hasTrack READ hasTrack NOTIFY trackChanged)
     Q_PROPERTY(QUrl coverUrl READ coverUrl NOTIFY artworkChanged)
     Q_PROPERTY(QString artworkRevision READ artworkRevision NOTIFY artworkChanged)
@@ -30,6 +31,7 @@ class PlaybackBridge final : public QObject {
     QString title() const { return m_metadata.id == m_state.track.id ? m_metadata.title : m_state.track.title; }
     QString artist() const { return m_metadata.id == m_state.track.id ? m_metadata.artist : m_state.track.artist; }
     QString trackId() const { return QString::number(m_state.track.id); }
+    QString matchedLocalTrackId() const { return QString::number(m_state.track.matchedLocalId); }
     bool hasTrack() const { return m_state.track.id != 0; }
     QUrl coverUrl() const { return m_coverUrl; }
     QString artworkRevision() const { return m_artworkRevision; }
@@ -61,6 +63,7 @@ class PlaybackBridge final : public QObject {
     Q_INVOKABLE void setMode(int mode);
     Q_INVOKABLE void playQueued(const QString &id);
     Q_INVOKABLE void removeFromQueue(const QString &id);
+    Q_INVOKABLE void setHighResolutionArtwork(bool visible) { emit onlineArtworkDetailRequested(visible); }
   signals:
     void trackChanged();
     void artworkChanged();
@@ -78,6 +81,8 @@ class PlaybackBridge final : public QObject {
     void errorChanged();
     void failure(quint64 operation, const QString &target, const QString &title, const QString &message, int code);
     void persistenceFailure(const QString &message);
+    void onlineFavoriteRequested(qint64 id);
+    void onlineArtworkDetailRequested(bool visible);
     void recovered();
   public:
     void refreshArtwork(qint64 trackId) {if(m_state.track.id==trackId)refreshMetadata();}

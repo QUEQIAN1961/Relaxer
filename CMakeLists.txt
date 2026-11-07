@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Relaxer VERSION 0.2.4 LANGUAGES CXX)
+project(Relaxer VERSION 0.2.5 LANGUAGES CXX)
 include(CTest)
 set(RELAXER_QT_TEST_COMPONENT)
 if(BUILD_TESTING)
@@ -195,14 +195,14 @@ relaxer_add_qt_test(relaxer_lyrics_replacement_policy relaxer_lyrics_replacement
 endif()
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Sql Multimedia ${RELAXER_QT_TEST_COMPONENT})
 add_library(relaxer_core src/artwork-recovery.cpp src/library.cpp src/storage/settings-store.cpp src/storage/appearance-store.cpp src/appearance-image.cpp src/importer.cpp src/import-coordinator.cpp src/lyrics.cpp src/lyrics-document-reader.cpp src/lyric-text.cpp src/playback.cpp src/midi-transport.cpp)
-target_sources(relaxer_core PRIVATE src/bass-midi-backend.cpp src/bass-midi-backend.h)
-set(RELAXER_MIDI_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.dependencies/midi" CACHE PATH "Prepared local BASS MIDI runtime")
+target_sources(relaxer_core PRIVATE src/fluid-midi-backend.cpp src/fluid-midi-backend.h)
+set(RELAXER_MIDI_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.dependencies/midi" CACHE PATH "Prepared local FluidSynth MIDI runtime")
 if(WIN32 AND EXISTS "${RELAXER_MIDI_RUNTIME_DIR}/runtime-midi.json")
   add_custom_target(relaxer_midi_runtime
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/midi" "${CMAKE_BINARY_DIR}/licenses/midi"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/bass.dll" "${RELAXER_MIDI_RUNTIME_DIR}/bassmidi.dll" "${RELAXER_MIDI_RUNTIME_DIR}/runtime-midi.json" "${CMAKE_BINARY_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/libfluidsynth-3.dll" "${RELAXER_MIDI_RUNTIME_DIR}/runtime-midi.json" "${CMAKE_BINARY_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/midi/GeneralUser-GS.sf2" "${CMAKE_BINARY_DIR}/midi"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/BASS.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/BASSMIDI.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GeneralUser-GS-License.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GeneralUser-GS-README.md" "${CMAKE_BINARY_DIR}/licenses/midi")
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/FluidSynth-LGPL-2.1.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GCEM-MIT.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GeneralUser-GS-License.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GeneralUser-GS-README.md" "${CMAKE_BINARY_DIR}/licenses/midi")
   add_dependencies(relaxer_core relaxer_midi_runtime)
 elseif(WIN32)
   message(STATUS "MIDI runtime not staged: run python scripts/prepare-midi-runtime.py before MIDI playback")
@@ -218,7 +218,7 @@ else()
   target_compile_options(relaxer_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 if(RELAXER_PLAYBACK_FACADE_ONLY OR NOT (RELAXER_IMPORT_ONLY OR RELAXER_TRANSLATION_ONLY OR RELAXER_LYRICS_SEARCH_ONLY OR RELAXER_STORAGE_ONLY))
-add_library(relaxer_playback_facade STATIC src/playback-facade.cpp src/playback-facade.h)
+add_library(relaxer_playback_facade STATIC src/playback-facade.cpp src/online-playback.cpp src/online-track-matcher.cpp src/online-track-matcher.h src/playback-facade.h)
 target_include_directories(relaxer_playback_facade PUBLIC src)
 target_link_libraries(relaxer_playback_facade PUBLIC relaxer_core)
 if(BUILD_TESTING)
@@ -424,9 +424,9 @@ endif()
 if(WIN32)
   if(BUILD_TESTING)
   add_executable(relaxer_midi_tests tests/midi-tests.cpp)
-  add_executable(relaxer_bass_midi_tests tests/bass-midi-tests.cpp)
-  target_link_libraries(relaxer_bass_midi_tests PRIVATE relaxer_core Qt6::Test)
-  relaxer_add_qt_test(relaxer_bass_midi relaxer_bass_midi_tests)
+  add_executable(relaxer_fluid_midi_tests tests/fluid-midi-tests.cpp)
+  target_link_libraries(relaxer_fluid_midi_tests PRIVATE relaxer_core Qt6::Test)
+  relaxer_add_qt_test(relaxer_fluid_midi relaxer_fluid_midi_tests)
   target_link_libraries(relaxer_midi_tests PRIVATE relaxer_core Qt6::Test)
   relaxer_add_qt_test(relaxer_midi relaxer_midi_tests)
   add_executable(relaxer_midi_runtime_probe tests/midi-runtime-probe.cpp)
@@ -524,6 +524,11 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/ai-bridge.cpp src/ui-bridge/ai-bridge.h
     src/ui-bridge/translation-bridge.cpp src/ui-bridge/translation-bridge.h
     src/ui-bridge/lyrics-search-bridge.cpp src/ui-bridge/lyrics-search-bridge.h
+    src/ui-bridge/online-music-bridge.cpp src/ui-bridge/online-music-bridge.h
+    src/ui-bridge/online-artwork-cache.cpp src/ui-bridge/online-artwork-cache.h
+    src/ui-bridge/online-download-bridge.cpp src/ui-bridge/online-download-bridge.h src/ncm-restore.cpp src/ncm-restore.h
+    src/ui-bridge/qq-music-bridge.cpp src/ui-bridge/qq-music-bridge.h
+    third_party/qrcodegen/qrcodegen.cpp third_party/qrcodegen/qrcodegen.hpp
     src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
     src/qml/qml.qrc)
   target_include_directories(relaxer_qml PUBLIC src)
@@ -534,7 +539,7 @@ if(RELAXER_ENABLE_QML)
   target_link_libraries(relaxer_qml PUBLIC relaxer_shortcut_rules relaxer_lyrics_translation_classification relaxer_library_models relaxer_playback_facade relaxer_translation relaxer_lyrics_search relaxer_services Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2)
   target_link_libraries(relaxer_qml PRIVATE Qt6::Svg)
   if(WIN32)
-    target_link_libraries(relaxer_qml PRIVATE user32 dwmapi)
+    target_link_libraries(relaxer_qml PRIVATE user32 dwmapi crypt32 bcrypt)
   endif()
   if(BUILD_TESTING)
   add_executable(relaxer_shortcut_integration_tests tests/shortcut-integration-tests.cpp)
@@ -581,6 +586,9 @@ if(RELAXER_ENABLE_QML)
     RELAXER_QML_MODULE_FILENAME="$<TARGET_FILE_NAME:relaxer_qml_runtime>")
   if(BUILD_TESTING)
   add_executable(relaxer_playlist_header_tests tests/playlist-header-tests.cpp)
+  # Explicit developer probe: real network/QR checks are opt-in, never a CTest gate.
+  add_executable(relaxer_online_music_probe EXCLUDE_FROM_ALL tests/online-music-probe.cpp)
+  target_link_libraries(relaxer_online_music_probe PRIVATE relaxer_qml Qt6::Test)
   target_link_libraries(relaxer_playlist_header_tests PRIVATE relaxer_qml Qt6::Test)
   relaxer_add_qt_test(relaxer_playlist_header relaxer_playlist_header_tests)
   relaxer_qml_test_environment(relaxer_playlist_header)

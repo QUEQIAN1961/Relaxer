@@ -4,6 +4,7 @@
   <file>components/ShellButton.qml</file><file>components/ToggleButton.qml</file><file>components/ColorSwatch.qml</file><file>components/NavigationButton.qml</file>
   <file>components/EmptyState.qml</file><file>components/PlayerBar.qml</file><file>components/PlayModeButton.qml</file><file>components/GlassSearch.qml</file>
   <file>components/TrackList.qml</file><file>pages/PlaylistsPage.qml</file>
+  <file>components/SmoothWheelHandler.qml</file>
   <file>pages/QueuePage.qml</file>
   <file>components/LyricsList.qml</file><file>pages/LyricsPage.qml</file>
   <file>components/ConfirmDialog.qml</file>
@@ -13,8 +14,9 @@
   <file>pages/LocalPage.qml</file><file>pages/TransitionPage.qml</file>
   <file>components/Symbol.qml</file><file>components/EntryField.qml</file><file>components/EntryArea.qml</file><file>components/EditingMenu.qml</file><file>components/ChoiceBox.qml</file>
   <file>components/IconButton.qml</file>
+  <file>components/DownloadGlyph.qml</file><file>components/OnlineDownloadButton.qml</file><file>components/DownloadList.qml</file>
   <file>components/VolumeButton.qml</file><file>components/MiniPlayer.qml</file>
-  <file>components/Artwork.qml</file>
+  <file>components/Artwork.qml</file><file>components/ProfileAvatar.qml</file>
   <file>components/PlaybackSlider.qml</file>
   <file>components/UpcomingPanel.qml</file>
   <file>components/LyricsWorkspace.qml</file>
@@ -27,6 +29,7 @@
   <file>components/LyricColorDialog.qml</file>
   <file>components/PlaylistHeader.qml</file>
   <file>components/GlassSurface.qml</file>
+  <file>components/HighlightSurface.qml</file>
   <file alias="translations/controls_zh_CN.qm">../../resources/translations/controls_zh_CN.qm</file>
   <file alias="controls/chevron-up.svg">../../resources/controls/chevron-up.svg</file>
   <file alias="controls/chevron-down.svg">../../resources/controls/chevron-down.svg</file>
@@ -46,8 +49,41 @@
   <file alias="marks/flame.svg">../../resources/playlist-marks/flame.svg</file>
   <file alias="marks/mountain.svg">../../resources/playlist-marks/mountain.svg</file>
   <file alias="marks/gamepad-2.svg">../../resources/playlist-marks/gamepad-2.svg</file>
+  <file alias="marks/bell.svg">../../resources/playlist-marks/bell.svg</file>
+  <file alias="marks/bookmark.svg">../../resources/playlist-marks/bookmark.svg</file>
+  <file alias="marks/briefcase.svg">../../resources/playlist-marks/briefcase.svg</file>
+  <file alias="marks/camera.svg">../../resources/playlist-marks/camera.svg</file>
+  <file alias="marks/clock.svg">../../resources/playlist-marks/clock.svg</file>
+  <file alias="marks/compass.svg">../../resources/playlist-marks/compass.svg</file>
+  <file alias="marks/cube.svg">../../resources/playlist-marks/cube.svg</file>
+  <file alias="marks/diamond.svg">../../resources/playlist-marks/diamond.svg</file>
+  <file alias="marks/flower.svg">../../resources/playlist-marks/flower.svg</file>
+  <file alias="marks/globe.svg">../../resources/playlist-marks/globe.svg</file>
+  <file alias="marks/graduation-cap.svg">../../resources/playlist-marks/graduation-cap.svg</file>
+  <file alias="marks/home.svg">../../resources/playlist-marks/home.svg</file>
+  <file alias="marks/key.svg">../../resources/playlist-marks/key.svg</file>
+  <file alias="marks/laptop.svg">../../resources/playlist-marks/laptop.svg</file>
+  <file alias="marks/lightbulb.svg">../../resources/playlist-marks/lightbulb.svg</file>
+  <file alias="marks/mail.svg">../../resources/playlist-marks/mail.svg</file>
+  <file alias="marks/map-pin.svg">../../resources/playlist-marks/map-pin.svg</file>
+  <file alias="marks/palette.svg">../../resources/playlist-marks/palette.svg</file>
+  <file alias="marks/paw-print.svg">../../resources/playlist-marks/paw-print.svg</file>
+  <file alias="marks/plane.svg">../../resources/playlist-marks/plane.svg</file>
+  <file alias="marks/rocket.svg">../../resources/playlist-marks/rocket.svg</file>
+  <file alias="marks/shield.svg">../../resources/playlist-marks/shield.svg</file>
+  <file alias="marks/smile.svg">../../resources/playlist-marks/smile.svg</file>
+  <file alias="marks/sparkles.svg">../../resources/playlist-marks/sparkles.svg</file>
+  <file alias="marks/trophy.svg">../../resources/playlist-marks/trophy.svg</file>
+  <file alias="marks/umbrella.svg">../../resources/playlist-marks/umbrella.svg</file>
+  <file alias="marks/video.svg">../../resources/playlist-marks/video.svg</file>
+  <file alias="marks/waves.svg">../../resources/playlist-marks/waves.svg</file>
+  <file alias="marks/wine.svg">../../resources/playlist-marks/wine.svg</file>
+  <file alias="marks/wrench.svg">../../resources/playlist-marks/wrench.svg</file>
+  <file alias="marks/zap.svg">../../resources/playlist-marks/zap.svg</file>
+  <file alias="marks/balloon.svg">../../resources/playlist-marks/balloon.svg</file>
   <file alias="licenses/playlist-marks.txt">../../resources/playlist-marks/LICENSE.txt</file>
   <file>pages/ProfilePage.qml</file><file>pages/VersionLogPage.qml</file>
+  <file>pages/DiscoverPage.qml</file>
   <file>pages/AppearancePage.qml</file>
   <file>pages/ShortcutsPage.qml</file>
   <file>pages/FontDialog.qml</file>

@@ -17,6 +17,7 @@ Item {
         }
         ScrollView {
             id:scroll;Layout.fillWidth:true;Layout.fillHeight:true;contentWidth:availableWidth;clip:true
+            SmoothWheelHandler { flickable: scroll.contentItem as Flickable }
             ColumnLayout {
                 width:scroll.availableWidth;spacing:12
                 Repeater {

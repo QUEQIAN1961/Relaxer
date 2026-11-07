@@ -8,11 +8,14 @@ Rectangle {
     readonly property bool presentationActive:visible&&mini.Window.window&&mini.Window.window.visible&&mini.Window.window.visibility!==Window.Minimized
     color:Theme.footer
     signal restoreRequested()
-    readonly property bool controlsVisible:miniHover.hovered||queue.visible||volumeControl.popupVisible
+    property bool modeTransitionActive:false
+    // Keep song and artist metadata throughout the mode animation, then
+    // resume the usual hover and lyric presentation, whether playing or paused.
+    readonly property bool controlsVisible:!modeTransitionActive&&(miniHover.hovered||queue.visible||volumeControl.popupVisible)
     property real controlsProgress:controlsVisible?1:0
-    Behavior on controlsProgress {NumberAnimation{duration:settingsBridge.values.reduceMotion?0:160;easing.type:Easing.OutCubic}}
+    Behavior on controlsProgress {enabled:!mini.modeTransitionActive;NumberAnimation{duration:settingsBridge.values.reduceMotion?0:160;easing.type:Easing.OutCubic}}
     property var lyricLine:({key:"",original:"",translation:"",start:0,end:0})
-    readonly property bool showingLyrics:playbackBridge.playing&&lyricLine.original.length>0
+    readonly property bool showingLyrics:!modeTransitionActive&&playbackBridge.playing&&lyricLine.original.length>0
     readonly property real lyricEnd:lyricLine.end>lyricLine.start?lyricLine.end:Math.max(lyricLine.start,Number(playbackBridge.duration))
     readonly property bool lyricOverflow:originalLine.implicitWidth>originalViewport.width||(translationViewport.visible&&translationLine.implicitWidth>translationViewport.width)
     readonly property bool marqueeActive:showingLyrics&&lyricOverflow&&presentationActive&&!controlsVisible&&!mini.Window.window.miniSwitching&&lyricEnd>lyricLine.start

@@ -24,6 +24,7 @@ class LibraryBridge final : public QObject {
     QVariantMap statistics() const { return m_statistics; }
     QVariantMap profile() const;
     QVariantMap playlistDetails() const;
+    Q_INVOKABLE QVariantMap playlistDetailsFor(const QString &id) const;
     QStringList playlistTags() const { return playlistTagOptions(); }
     QVariantMap playlistMarkers() const;
     QStringList playlistMarkerIcons() const;
@@ -42,6 +43,10 @@ class LibraryBridge final : public QObject {
     Q_INVOKABLE bool toggleFavorite(const QString &id);
     Q_INVOKABLE bool removeTrack(const QString &id);
     Q_INVOKABLE QString createPlaylist(const QString &name);
+    Q_INVOKABLE QString pinCloudPlaylist(const QVariantMap &playlist);
+    Q_INVOKABLE QVariantMap cloudPlaylist(const QString &key) const;
+    Q_INVOKABLE bool setCloudPlaylistRemark(const QString &key,const QString &remark);
+    void setCloudSongs(const QString &provider,const QVariantMap &playlist,const QVariantList &songs);
     Q_INVOKABLE bool renamePlaylist(const QString &id, const QString &name);
     Q_INVOKABLE bool deletePlaylist(const QString &id);
     Q_INVOKABLE bool addToPlaylist(const QString &playlist, const QString &track);
@@ -58,6 +63,9 @@ class LibraryBridge final : public QObject {
     void refreshStatistics();
     void forgetMissing(const QVector<qint64> &ids);
   signals:
+    void cloudPlaylistRequested(const QString &provider,const QString &id);
+    void cloudPlaylistPinned(const QString &provider,const QString &id);
+    void cloudPlayRequested(const QString &provider,const QStringList &ids,const QString &start);
     void playlistChanged();
     void playlistMarkersChanged();
     void errorChanged();
@@ -77,6 +85,9 @@ class LibraryBridge final : public QObject {
     quint64 m_queryRevision = 0;
     QVariantMap m_statistics;
     QTimer m_statisticsTimer;
+    bool m_restoringSort=false;
+    void restoreSorting();
+    void saveSorting();
     bool result(bool ok, const QString &fallback = {});
     bool hasPlaylist(qint64 id) const;
     QVector<qint64> checkedIds(const QStringList &keys) const;

@@ -28,6 +28,60 @@ struct Projection {
 class UiParityLibraryTests : public QObject {
     Q_OBJECT
 private slots:
+    void playlistSortingCyclesAndPersistsIndependently() {
+        QTemporaryDir dir; QString first,second,cloud; qint64 a=0,b=0,c=0;
+        {
+            Library library(dir.path()); QVERIFY(library.open());
+            a=addTrack(library,"C","First","One",3000);
+            b=addTrack(library,"A","Second","Two",1000);
+            c=addTrack(library,"B","Third","Three",2000); QVERIFY(a&&b&&c);
+            Projection p(library);
+            first=p.bridge.createPlaylist("First"); second=p.bridge.createPlaylist("Second");
+            QVERIFY(first!="0"&&second!="0");
+            QVERIFY(p.bridge.addTracksToPlaylist(first,{QString::number(c),QString::number(a),QString::number(b)}));
+            QVERIFY(p.bridge.addTracksToPlaylist(second,{QString::number(c),QString::number(b)}));
+            QVERIFY(p.bridge.openPlaylist(first)); QCoreApplication::processEvents();
+            const QVector<qint64> manual{c,a,b}; QCOMPARE(p.view.ids(),manual);
+            QSignalSpy resets(&p.source,&QAbstractItemModel::modelReset);
+            QSignalSpy changed(&p.view,&TrackFilterModel::sortChanged);
+            p.view.cycleSort(1); QCOMPARE(p.view.ids(),(QVector<qint64>{b,c,a}));
+            QCOMPARE(changed.size(),1); QCOMPARE(resets.size(),0);
+            auto saved=library.setting("qml.playlistSorting").toObject().value(first).toObject();
+            QCOMPARE(saved.value("key").toInt(),1); QVERIFY(!saved.value("descending").toBool());
+            p.view.cycleSort(1); QCOMPARE(p.view.ids(),(QVector<qint64>{a,c,b}));
+            p.view.cycleSort(1); QCOMPARE(p.view.sortKey(),0); QVERIFY(!p.view.descending()); QCOMPARE(p.view.ids(),manual);
+            QCOMPARE(changed.size(),3); QCOMPARE(resets.size(),0);
+            p.view.cycleSort(1); p.view.cycleSort(1);
+            QVERIFY(p.bridge.openPlaylist(second)); QCOMPARE(p.view.sortKey(),0);
+            p.view.cycleSort(4); QCOMPARE(p.view.ids(),(QVector<qint64>{b,c}));
+            QVERIFY(p.bridge.openPlaylist(first)); QCOMPARE(p.view.sortKey(),1); QVERIFY(p.view.descending());
+            QCOMPARE(p.view.ids(),(QVector<qint64>{a,c,b}));
+            QVERIFY(p.bridge.openPlaylist(second)); QCOMPARE(p.view.sortKey(),4); QVERIFY(!p.view.descending());
+            cloud=p.bridge.pinCloudPlaylist({{"provider","netease"},{"id","999"},{"name","Cloud"},{"count",2}});
+            QVERIFY(cloud!="0"); QVERIFY(p.bridge.openPlaylist(cloud));
+            p.bridge.setCloudSongs("netease",{{"id","999"},{"name","Cloud"},{"count",2}},
+                {QVariantMap{{"id","91"},{"title","Z"}},QVariantMap{{"id","92"},{"title","A"}}});
+            p.view.cycleSort(1); QCOMPARE(p.view.data(p.view.index(0,0),TrackListModel::Title).toString(),QString("A"));
+            p.view.cycleSort(1); QCOMPARE(p.view.data(p.view.index(0,0),TrackListModel::Title).toString(),QString("Z"));
+            QVERIFY(p.bridge.openPlaylist("0")); p.view.cycleSort(2);
+        }
+        {
+            Library library(dir.path()); QVERIFY(library.open()); Projection p(library);
+            QCOMPARE(p.view.sortKey(),2); QVERIFY(!p.view.descending());
+            QVERIFY(p.bridge.openPlaylist(first)); QCOMPARE(p.view.sortKey(),1); QVERIFY(p.view.descending());
+            QCOMPARE(p.view.ids(),(QVector<qint64>{a,c,b}));
+            QVERIFY(p.bridge.openPlaylist(second)); QCOMPARE(p.view.sortKey(),4); QVERIFY(!p.view.descending());
+            QCOMPARE(p.view.ids(),(QVector<qint64>{b,c}));
+            QVERIFY(p.bridge.openPlaylist(cloud)); QCOMPARE(p.view.sortKey(),1); QVERIFY(p.view.descending());
+            p.bridge.setCloudSongs("netease",{{"id","999"},{"name","Cloud"},{"count",2}},
+                {QVariantMap{{"id","91"},{"title","Z"}},QVariantMap{{"id","92"},{"title","A"}}});
+            QCOMPARE(p.view.data(p.view.index(0,0),TrackListModel::Title).toString(),QString("Z"));
+            p.view.cycleSort(1); QCOMPARE(p.view.sortKey(),0);
+            QCOMPARE(p.view.data(p.view.index(0,0),TrackListModel::Title).toString(),QString("Z"));
+            QVERIFY(p.bridge.deletePlaylist(second));
+            QVERIFY(!library.setting("qml.playlistSorting").toObject().contains(second));
+        }
+    }
     void recentAndFrequentUseExistingSessions() {
         QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open());
         const auto a = addTrack(library, "A", "Artist A", "One");
@@ -37,7 +91,7 @@ private slots:
         Projection p(library); QAbstractItemModelTester tester(&p.view, QAbstractItemModelTester::FailureReportingMode::QtTest);
         QVERIFY(p.bridge.openPlaylist("-2")); QCOMPARE(p.source.ids(), (QVector<qint64>{b, a}));
         QCOMPARE(p.bridge.playlistName(), QString("最近播放"));
-        QVERIFY(p.bridge.openPlaylist("-3")); QCOMPARE(p.source.idAt(0), a); QCOMPARE(p.bridge.playlistName(), QString("最常播放"));
+        QVERIFY(p.bridge.openPlaylist("-3")); QCOMPARE(p.source.idAt(0), a); QCOMPARE(p.bridge.playlistName(), QString("最长播放"));
         QVERIFY(p.bridge.openPlaylist("0")); p.view.setSortKey(5); p.view.setDescending(true);
         QCOMPARE(p.view.idAt(0), QString::number(a)); QCOMPARE(p.view.data(p.view.index(0, 0), TrackListModel::Plays).toLongLong(), 1);
         p.view.setSortKey(7); QCOMPARE(p.view.idAt(0), QString::number(a));

@@ -13,6 +13,8 @@ Item {
     property bool liquid:false
     property real radius:14
     property real tintOpacity:Theme.dark?.62:.55
+    property color tintColor:Theme.background
+    property real borderWidth:1
     property string effectName:"glassBackdropBlur"
     readonly property bool software:GraphicsInfo.api===GraphicsInfo.Software
     readonly property bool presentationActive:active&&visible&&(!Window.window||(Window.window.visible&&Window.window.visibility!==Window.Minimized))
@@ -41,8 +43,8 @@ Item {
     }
     Rectangle {
         anchors.fill:parent;radius:glass.radius
-        color:Qt.rgba(Theme.background.r,Theme.background.g,Theme.background.b,glass.software?.96:glass.tintOpacity)
-        border.color:Qt.rgba(Theme.border.r,Theme.border.g,Theme.border.b,.8);border.width:1
+        color:Qt.rgba(glass.tintColor.r,glass.tintColor.g,glass.tintColor.b,glass.software&&glass.borderWidth>0?.96:glass.tintOpacity)
+        border.color:Qt.rgba(Theme.border.r,Theme.border.g,Theme.border.b,.8);border.width:glass.borderWidth
     }
     Loader {
         anchors.fill:parent;active:glass.liquid&&glass.presentationActive

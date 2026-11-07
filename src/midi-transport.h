@@ -6,13 +6,13 @@
 #include <memory>
 
 namespace relaxer {
-class BassMidiBackend;
+class FluidMidiBackend;
 // One MIDI stream per Playback. Injected sequencer commands remain a legacy test seam.
 class MidiTransport final {
   public:
     using Sender = std::function<quint32(const QString &, QString *)>;
     using PathResolver = std::function<QString(const QString &)>;
-    enum class ErrorDomain { None, Local, NativeMci, NativeBass };
+    enum class ErrorDomain { None, Local, NativeMci, NativeFluid };
     enum class LocalError : quint32 { None=0, Read=1, Header=2, Cache=3, Duration=4, Cleanup=5, Runtime=6 };
     // Local encoding is interpreted only in ErrorDomain::Local. The separate
     // domain makes it unambiguous even for driver-specific native DWORDs.
@@ -32,7 +32,7 @@ class MidiTransport final {
     QString openedPath() const { return m_path; }
     quint32 errorCode() const { return m_code; }
     ErrorDomain errorDomain() const { return m_domain; }
-    quint32 nativeErrorCode() const { return m_domain==ErrorDomain::NativeMci||m_domain==ErrorDomain::NativeBass?m_code:0; }
+    quint32 nativeErrorCode() const { return m_domain==ErrorDomain::NativeMci||m_domain==ErrorDomain::NativeFluid?m_code:0; }
     LocalError localError() const { return m_domain==ErrorDomain::Local?LocalError(m_code&~LocalErrorBase):LocalError::None; }
     QString errorStage() const { return m_stage; }
     QString ownedTemporaryPath() const { return m_temporaryPath; }
@@ -49,7 +49,7 @@ class MidiTransport final {
     mutable qint64 m_position = 0;
     bool m_open = false;
     Sender m_sender;
-    std::unique_ptr<BassMidiBackend> m_bass;
+    std::unique_ptr<FluidMidiBackend> m_fluid;
     bool m_decodeOnly = false;
     PathResolver m_resolver;
     std::unique_ptr<QTemporaryFile> m_copy;
@@ -57,7 +57,7 @@ class MidiTransport final {
     bool fail(const QString &operation, const QString &message, quint32 code, ErrorDomain domain) const;
     bool localFailure(const QString &operation,const QString &message,LocalError code) const;
     bool cleanupCopy();
-    bool bassFailure() const;
+    bool fluidFailure() const;
     void clearError() const;
 };
 } // namespace relaxer

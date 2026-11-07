@@ -1,4 +1,7 @@
 #include "library-bridge.h"
+#include "online-music-bridge.h"
+#include "qq-music-bridge.h"
+#include "online-track-matcher.h"
 #include <QThread>
 #include <QDesktopServices>
 #include <QDir>
@@ -10,6 +13,8 @@
 #include <QSet>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QUrlQuery>
+#include <QDateTime>
 
 namespace relaxer {
 LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackListModel *source,
@@ -17,7 +22,7 @@ LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackList
     : QObject(parent), m_library(library), m_facade(facade), m_source(source), m_view(view), m_playlists(playlists) {
     Q_ASSERT(library->thread() == thread() && facade->thread() == thread());
     connect(playlists, &PlaylistListModel::countChanged, this, [this] {
-        if (m_source->playlist() > 0 && !m_playlists->contains(m_source->playlist())) m_source->setPlaylist(0);
+        if (m_source->playlist() > 0 && !m_playlists->contains(m_source->playlist())) {m_source->setPlaylist(0);restoreSorting();}
         emit playlistChanged();
     });
     connect(facade->backend(), &QObject::destroyed, this, [this] { m_facade = nullptr; });
@@ -31,6 +36,7 @@ LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackList
     });
     connect(library, &Library::settingsUpdated, this, [this](const QStringList &keys) {
         if (keys.contains("qml.playlistMarkers")) emit playlistMarkersChanged();
+        if(keys.contains("qml.cloudPlaylistRemarks"))emit playlistChanged();
     });
     connect(library, &QObject::destroyed, this, [this] {
         m_library = nullptr; m_statisticsTimer.stop(); refreshStatistics(); emit profileChanged(); emit playlistChanged();
@@ -49,7 +55,24 @@ LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackList
     connect(library,&Library::querySucceeded,this,[this](const QString &query){
         m_queryErrors.remove(query);m_queryRevisions.remove(query);
     });
+    restoreSorting();
+    connect(view,&TrackFilterModel::sortChanged,this,&LibraryBridge::saveSorting);
     refreshStatistics();
+}
+void LibraryBridge::restoreSorting() {
+    if (!m_library) return;
+    const auto state=m_library->setting("qml.playlistSorting").toObject().value(playlistId()).toObject();
+    m_restoringSort=true;
+    m_view->setSorting(state.value("key").toInt(),state.value("descending").toBool());
+    m_restoringSort=false;
+}
+void LibraryBridge::saveSorting() {
+    if (!m_library || m_restoringSort) return;
+    auto states=m_library->setting("qml.playlistSorting").toObject();
+    const QJsonObject state{{"key",m_view->sortKey()},{"descending",m_view->descending()}};
+    if (states.value(playlistId()).toObject()==state) return;
+    states.insert(playlistId(),state);
+    result(m_library->setSetting("qml.playlistSorting",states));
 }
 bool LibraryBridge::result(bool ok, const QString &fallback) {
     Q_ASSERT(QThread::currentThread() == thread());
@@ -64,8 +87,8 @@ QString LibraryBridge::playlistName() const {
     if (m_source->playlist() == 0) return "本地音乐";
     if (m_source->playlist() == -1) return "我喜欢";
     if (m_source->playlist() == -2) return "最近播放";
-    if (m_source->playlist() == -3) return "最常播放";
-    if (m_library) for (const auto &list : m_library->playlists()) if (list.id == m_source->playlist()) return list.name;
+    if (m_source->playlist() == -3) return "最长播放";
+    if (m_library) for (const auto &list : m_library->playlists()) if (list.id == m_source->playlist()){const auto remark=!list.provider.isEmpty()?m_library->setting("qml.cloudPlaylistRemarks").toObject().value(QString::number(list.id)).toString():QString();return remark.isEmpty()?list.name:remark;}
     return "歌单";
 }
 bool LibraryBridge::hasPlaylist(qint64 id) const {
@@ -77,7 +100,11 @@ QVariantMap LibraryBridge::playlistMarkers() const {
 }
 QStringList LibraryBridge::playlistMarkerIcons() const {
     return {"music", "headphones", "disc-3", "radio", "mic-vocal", "star", "heart", "sun",
-            "moon", "cloud-rain", "coffee", "book-open", "leaf", "flame", "mountain", "gamepad-2"};
+            "moon", "cloud-rain", "coffee", "book-open", "leaf", "flame", "mountain", "gamepad-2",
+            "bell", "bookmark", "briefcase", "camera", "clock", "compass", "cube", "diamond",
+            "flower", "globe", "graduation-cap", "home", "key", "laptop", "lightbulb", "mail",
+            "map-pin", "palette", "paw-print", "plane", "rocket", "shield", "smile", "sparkles",
+            "trophy", "umbrella", "video", "waves", "wine", "wrench", "zap", "balloon"};
 }
 bool LibraryBridge::setPlaylistOrder(const QStringList &ids) {
     if(!m_library)return result(false,"资料库不可用");
@@ -100,14 +127,35 @@ bool LibraryBridge::setPlaylistMarker(const QString &id, const QString &marker) 
 bool LibraryBridge::openPlaylist(const QString &id) {
     bool valid = false; const auto value = id.toLongLong(&valid);
     if (!m_library || !valid || value < -3 || (value > 0 && !hasPlaylist(value))) return result(false, "歌单不存在");
-    if (m_source->playlist() != value) m_view->clearFilters();
-    if (value == -2 || value == -3) { m_view->setSortKey(0); m_view->setDescending(false); }
-    m_source->setPlaylist(value); emit playlistChanged(); return result(true);
+    if (m_source->playlist() != value) {m_view->clearFilters();m_source->setPlaylist(value);restoreSorting();}
+    emit playlistChanged();const auto cloud=cloudPlaylist(id);if(!cloud.isEmpty())emit cloudPlaylistRequested(cloud.value("provider").toString(),cloud.value("id").toString());return result(true);
+}
+QString LibraryBridge::pinCloudPlaylist(const QVariantMap &playlist){
+    if(!m_library)return "0";const auto id=m_library->pinCloudPlaylist(playlist.value("provider").toString(),playlist.value("id").toString(),playlist.value("name").toString(),playlist.value("cover").toString(),playlist.value("count").toInt());
+    result(id>0,"云端歌单未能加入侧栏");if(id>0)emit cloudPlaylistPinned(playlist.value("provider").toString(),playlist.value("id").toString());return QString::number(id);
+}
+QVariantMap LibraryBridge::cloudPlaylist(const QString &key) const {
+    if(m_library)for(const auto &p:m_library->playlists())if(p.id==key.toLongLong()&&!p.provider.isEmpty())return {{"key",key},{"provider",p.provider},{"id",p.remoteId},{"name",p.name},{"remark",m_library->setting("qml.cloudPlaylistRemarks").toObject().value(key).toString()},{"cover",p.cover},{"count",p.count}};
+    return {};
+}
+bool LibraryBridge::setCloudPlaylistRemark(const QString &key,const QString &remark){
+    if(cloudPlaylist(key).isEmpty()||characterCount(remark)>120)return result(false,"请选择云端歌单，备注不能超过120字");auto remarks=m_library->setting("qml.cloudPlaylistRemarks").toObject();if(remark.trimmed().isEmpty())remarks.remove(key);else remarks.insert(key,remark.trimmed());return result(m_library->setSetting("qml.cloudPlaylistRemarks",remarks));
+}
+void LibraryBridge::setCloudSongs(const QString &provider,const QVariantMap &playlist,const QVariantList &songs){
+    if(playlist.value("kind")=="artist"||playlist.value("kind")=="album")return;
+    const auto cloud=cloudPlaylist(playlistId());if(cloud.value("provider").toString()!=provider||cloud.value("id")!=playlist.value("id"))return;
+    const auto base=provider=="qq"?QqMusicBridge::TrackBase:OnlineMusicBridge::TrackBase;QVector<Track> tracks;
+    const auto local=m_library->tracks();QHash<qint64,Track> localStats;for(const auto &t:local)localStats.insert(t.id,t);QHash<QString,Track> onlineStats;for(const auto &t:m_library->onlineTracks())onlineStats.insert(t.hash,t);
+    for(const auto &value:songs){const auto row=value.toMap();Track t;t.id=base+row.value("id").toLongLong();t.title=row.value("title").toString();t.artist=row.value("artist").toString();t.album=row.value("album").toString();t.duration=row.value("duration").toLongLong();t.cover=row.value("thumbnail",row.value("cover")).toString();t.hash=provider=="qq"?"qqmusic:"+row.value("mid").toString():"netease:"+row.value("id").toString();t.matchedLocalId=matchOnlineTrack(t,local);const auto stats=t.matchedLocalId?localStats.value(t.matchedLocalId):onlineStats.value(t.hash);t.plays=stats.plays;t.heard=stats.heard;tracks.append(t);}
+    m_source->setCloudTracks(m_source->playlist(),tracks);
+    const auto name=playlist.value("name").toString(),cover=playlist.value("cover").toString();const auto count=playlist.value("count").toInt();
+    if(!name.isEmpty()&&(name!=cloud.value("name").toString()||cover!=cloud.value("cover").toString()||count!=cloud.value("count").toInt()))m_library->pinCloudPlaylist(provider,cloud.value("id").toString(),name,cover,count);
 }
 void LibraryBridge::play(const QString &id) {
     if (!m_facade || m_facade->isShutdown()) return;
     const auto ids = m_view->ids(); const auto track = id.toLongLong();
     if (!ids.contains(track)) { result(false, "歌曲不在当前列表中"); return; }
+    const auto cloud=cloudPlaylist(playlistId());if(!cloud.isEmpty()){const auto base=cloud.value("provider").toString()=="qq"?QqMusicBridge::TrackBase:OnlineMusicBridge::TrackBase;QStringList remote;for(auto id:ids)remote.append(QString::number(id-base));result(true);emit cloudPlayRequested(cloud.value("provider").toString(),remote,QString::number(track-base));return;}
     result(true); m_facade->play(ids, track);
 }
 void LibraryBridge::playAll() {
@@ -117,7 +165,7 @@ void LibraryBridge::shuffleAll() {
     if (!m_facade || m_facade->isShutdown()) return;
     const auto ids = m_view->ids(); if (ids.isEmpty()) return;
     m_facade->setMode(Mode::Shuffle);
-    m_facade->play(ids, ids[QRandomGenerator::global()->bounded(ids.size())]); result(true);
+    play(QString::number(ids[QRandomGenerator::global()->bounded(ids.size())]));
 }
 QStringList LibraryBridge::visibleTrackKeys() const {
     QStringList keys;
@@ -149,14 +197,24 @@ QVariantMap LibraryBridge::profile() const {
             {"avatar", avatar.isEmpty() ? QUrl{} : QUrl::fromLocalFile(m_library->absolute(avatar))}};
 }
 QVariantMap LibraryBridge::playlistDetails() const {
-    if (!m_library || m_source->playlist() <= 0) return {};
-    for (const auto &playlist : m_library->playlists()) if (playlist.id == m_source->playlist()) {
+    return playlistDetailsFor(playlistId());
+}
+QVariantMap LibraryBridge::playlistDetailsFor(const QString &id) const {
+    const auto key = id.toLongLong();
+    if (!m_library || key <= 0) return {};
+    for (const auto &playlist : m_library->playlists()) if (playlist.id == key) {
         auto cover = playlist.cover;
-        if (cover.isEmpty() && m_source->rowCount())
+        if (cover.isEmpty() && key == m_source->playlist() && m_source->rowCount())
             cover = m_library->track(m_source->idAt(0)).cover;
+        auto coverUrl = !playlist.provider.isEmpty()?QUrl(cover):cover.isEmpty() ? QUrl{} : QUrl::fromLocalFile(m_library->absolute(cover));
+        if (!coverUrl.isEmpty()&&coverUrl.isLocalFile()) {
+            const QFileInfo info(coverUrl.toLocalFile());QUrlQuery query;
+            query.addQueryItem("revision", QString::number(info.lastModified().toMSecsSinceEpoch()) + ":" + QString::number(info.size()));
+            coverUrl.setQuery(query);
+        }
         return {{"playlistKey", QString::number(playlist.id)}, {"name", playlist.name}, {"trackCount", playlist.count},
                 {"plays", playlist.plays}, {"tags", playlist.tags}, {"description", playlist.description},
-                {"cover", cover.isEmpty() ? QUrl{} : QUrl::fromLocalFile(m_library->absolute(cover))}};
+                {"cover", coverUrl},{"cloud",!playlist.provider.isEmpty()},{"provider",playlist.provider},{"remoteId",playlist.remoteId},{"remark",m_library->setting("qml.cloudPlaylistRemarks").toObject().value(id).toString()}};
     }
     return {};
 }
@@ -221,10 +279,9 @@ bool LibraryBridge::deletePlaylist(const QString &id) {
     if (!m_library || !hasPlaylist(value)) return result(false,"歌单不存在");
     if (!m_library->deletePlaylist(value)) return result(false);
     auto markers = m_library->setting("qml.playlistMarkers").toObject();
-    if (markers.contains(QString::number(value))) {
-        markers.remove(QString::number(value));return result(m_library->setSetting("qml.playlistMarkers", markers));
-    }
-    return result(true);
+    markers.remove(QString::number(value));auto remarks=m_library->setting("qml.cloudPlaylistRemarks").toObject();remarks.remove(id);
+    auto sorts=m_library->setting("qml.playlistSorting").toObject();sorts.remove(id);
+    return result(m_library->setSettings({{"qml.playlistMarkers",markers},{"qml.cloudPlaylistRemarks",remarks},{"qml.playlistSorting",sorts}}));
 }
 bool LibraryBridge::addToPlaylist(const QString &playlist, const QString &track) {
     if (!m_library || !hasPlaylist(playlist.toLongLong()) || !m_library->track(track.toLongLong()).id) return result(false,"请选择有效歌单和歌曲");

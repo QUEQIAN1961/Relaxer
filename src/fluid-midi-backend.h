@@ -4,11 +4,10 @@
 #include <memory>
 
 namespace relaxer {
-// One MIDI stream; the lazily acquired engine/font are shared only while needed.
-class BassMidiBackend final {
+class FluidMidiBackend final {
 public:
-    BassMidiBackend();
-    ~BassMidiBackend();
+    FluidMidiBackend();
+    ~FluidMidiBackend();
     bool open(const QString &path, bool decodeOnly = false);
     bool play();
     bool pause();
@@ -17,10 +16,10 @@ public:
     bool close();
     qint64 position() const;
     qint64 duration() const;
-    QByteArray readPcm(int frames); // Float32 stereo, 48000 Hz; offline verification.
+    QByteArray readPcm(int frames);
     QString error() const;
     QString errorStage() const;
-    quint32 errorCode() const;
+    quint32 errorCode() const { return 0; }
 private:
     struct State;
     std::unique_ptr<State> m;

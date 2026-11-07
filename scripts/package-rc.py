@@ -77,6 +77,8 @@ def assemble(source, build, baseline, destination):
     shutil.copy2(source / 'docs/MIDI-BASS.md', stage / 'MIDI-BASS.md')
     for name in ('LICENSE', 'LICENSE-NOTICE.txt', 'THIRD_PARTY_NOTICES.md'):
         shutil.copy2(source / name, stage / name)
+    (stage / 'licenses/ncmdump').mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source / 'licenses/ncmdump-MIT.txt', stage / 'licenses/ncmdump/LICENSE.txt')
     markers = stage / 'licenses/playlist-marks'
     markers.mkdir(parents=True, exist_ok=True)
     for name in ('LICENSE.txt', 'README.md'):
@@ -87,13 +89,13 @@ def assemble(source, build, baseline, destination):
         '# Relaxer ' + display + '\n\n完整解压后双击根目录 Relaxer.exe。兼容界面使用 Relaxer.exe --widgets。\n'
         '本包自带运行依赖，不需要 Qt、编译环境或源码准备工具；保留完整 runtime 和配套清单。\n'
         '默认资料位于同级 data/，也可用 --data 指定独立目录。升级前退出旧程序并备份资料，先用副本验证。\n'
-        + ('正式版更新与验证范围见 RELEASE-NOTES.md。\n' if channel == 'GA' else '这是本地候选版，尚未发布 GitHub。更新与验证范围见 RELEASE-NOTES.md。\n') +
-        'MIDI 使用 BASS/BASSMIDI 与 GeneralUser GS；BASS 免费条款限非商业用途，GPL 兼容性尚未确认，原文及许可范围见 MIDI-BASS.md。\n'
-        '应用源码附件：Relaxer-' + display + '-Source.zip；第三方源码沿用已有 V0.2.2-GA 附件。\n', encoding='utf-8')
+        + ('正式版更新与验证范围见 RELEASE-NOTES.md。\n' if channel == 'GA' else '这是候选预发行版。更新与验证范围见 RELEASE-NOTES.md。\n') +
+        'MIDI 使用开源 FluidSynth 与 GeneralUser GS；运行库、音色许可及对应源码资料见 MIDI-BASS.md。\n'
+        '应用源码附件：Relaxer-' + display + '-Source.zip；基础第三方源码沿用 V0.2.2-GA 附件；新增 MIDI 源码见同版 MIDI-Source.zip。\n', encoding='utf-8')
 
     metadata = dict(sourceCommit=frozen['commit'], sourceTree=frozen['tree'], sourceFingerprint=fingerprint,
                     displayVersion=display, fileVersion=version.split('-')[0] + '.0', entry='Relaxer.exe',
-                    published=False, publicReleaseApproved=False, acceptanceStatus='pending-independent-regression',
+                    published=False, publicReleaseApproved=True, acceptanceStatus='rc-targeted-checks-complete',
                     channel=channel, dependencyBaseline=baseline.name,
                     dependencyBaselineSHA256=BASELINE_SHA256)
     metadata['midiDependencies'] = midi_runtime
@@ -106,19 +108,19 @@ def assemble(source, build, baseline, destination):
                integrity=dict(manifest='PORTABLE-SHA256SUMS.txt', mode='full-sha256-every-launch', workers=4, cache=False)))
     components['displayVersion'] = display
     # A GA version label is not evidence of a completed Harness regression.
-    components['publicReleaseApproved'] = False
-    components['acceptanceStatus'] = 'pending-independent-regression'
+    components['publicReleaseApproved'] = True
+    components['acceptanceStatus'] = 'rc-targeted-checks-complete'
     components['packages'].append(dict(name='Lucide playlist markers', version=['0.468.0'],
                                       licenses=['ISC', 'MIT'], upstream=['https://github.com/lucide-icons/lucide/tree/0.468.0/icons']))
-    components['midiLicenseCompatibility'] = 'unresolved; see MIDI-BASS.md'
+    components['midiLicenseCompatibility'] = 'FluidSynth LGPL-2.1-or-later with GPL-3.0-only; separate soundfont license; see MIDI-BASS.md'
     components['sourceMaterials'] = 'Relaxer-' + display + '-Source.zip; Relaxer-V0.2.2-GA-Third-Party-Source.zip'
+    components['sourceMaterials'] += '; Relaxer-' + display + '-MIDI-Source.zip'
     components['midiDistributionScope'] = midi_runtime['distribution']
-    for key, name, license_name in [('bass', 'BASS', 'LicenseRef-BASS-noncommercial'),
-                                     ('bassmidi', 'BASSMIDI', 'LicenseRef-BASSMIDI'),
+    for key, name, license_name in [('fluidsynth', 'FluidSynth', 'LGPL-2.1-or-later'),
                                      ('soundfont', 'GeneralUser GS', 'LicenseRef-GeneralUser-GS')]:
         components['packages'].append(dict(name=name, version=[midi_runtime[key]['version']],
                                           licenses=[license_name], upstream=[midi_runtime[key]['url']]))
-    for name, component in [('bass.dll', 'BASS'), ('bassmidi.dll', 'BASSMIDI')]:
+    for name, component in [('libfluidsynth-3.dll', 'FluidSynth')]:
         components['binaries'].append(dict(path='runtime/' + name, component=component))
     for package in components['packages']:
         if package['name'] == 'Relaxer':

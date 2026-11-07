@@ -60,9 +60,11 @@ class AiRuntime final : public QObject {
     DeepSeekProvider *deepSeekProvider() const { return m_deepSeek; }
     bool hasCredential(const QString &providerId, QString *error = nullptr) const;
     bool acceptModelCatalog(const QString &providerId, const QList<ModelInfo> &models, QString *error = nullptr);
+    void restoreSavedConfiguration();
 
   signals:
     void configurationChanged();
+    void startupConfigurationFailed(const QString &message);
     void modelCatalogFinished(quint64 taskId, const QString &providerId,
                               const QList<relaxer::ai::ModelInfo> &models,
                               const relaxer::ai::ProviderError &error);
@@ -76,6 +78,8 @@ class AiRuntime final : public QObject {
     ProviderRegistry m_providers;
     DeepSeekProvider *m_deepSeek = nullptr;
     AiRequestCoordinator *m_requests = nullptr;
+    bool m_startupRestored = false;
+    QSet<quint64> m_startupTasks;
     void initialize(std::unique_ptr<CredentialStore> credentials,
                     QUrl deepSeekBaseUrl = QUrl(QStringLiteral("https://api.deepseek.com")), bool mockEndpoint = false);
 };

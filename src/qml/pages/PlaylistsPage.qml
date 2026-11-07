@@ -33,6 +33,7 @@ Item {
             cellWidth:Theme.compact?width/2:Math.min(204,width);cellHeight:246-174*page.reflow
             clip: true; model: playlistModel; boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
+            SmoothWheelHandler { flickable: grid }
             delegate: Item {
                 id: card
                 required property string playlistKey
@@ -43,9 +44,9 @@ Item {
                 required property string description
                 required property real plays
                 width: grid.cellWidth; height: grid.cellHeight
-                Rectangle {
+                HighlightSurface {
                     objectName:"playlistCardBackground";x:0;y:0;width:card.width-14+10*page.reflow;height:grid.cellHeight-12+6*page.reflow
-                    radius:12;color:cardMouse.containsMouse?Theme.hover:"transparent"
+                    radius:12;positionRevision:grid.contentY+card.x+card.y;hovered:cardMouse.containsMouse
                 }
                 Artwork {
                     id:cardArt;objectName:"playlistCardCover-"+card.playlistKey

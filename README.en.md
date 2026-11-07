@@ -1,4 +1,6 @@
-# Relaxer V0.2.4-GA
+# Relaxer V0.2.5-RC
+
+Prerelease: [V0.2.5-RC](https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.5-RC). Stable release: V0.2.4-GA.
 
 A local music player for Windows, built with C++17, Qt 6 and QML. Includes a music library, playlists, queue, synced lyrics and custom themes, plus Widgets compatibility mode.
 
@@ -12,4 +14,4 @@ See the [Chinese guide](README.md), [release notes](docs/releases/v0.2.4-GA/RELE
 
 Relaxer-authored code is GPL-3.0-only. Third-party code retains its own licenses, copyrights and applicable exceptions; retain all notices and accompanying corresponding source. This grant does not cover external music, artwork, lyrics or service content.
 
-The MIDI backend uses BASS/BASSMIDI and GeneralUser GS. Run `python scripts/prepare-midi-runtime.py` before building MIDI support. BASS free-use terms are limited to non-commercial use. Compatibility with the existing GPL distribution remains unresolved; dependency preparation and licensing scope are described in [MIDI-BASS.md](docs/MIDI-BASS.md).
+V0.2.5-RC uses open-source FluidSynth with GeneralUser GS. Run `python scripts/prepare-midi-runtime.py` to build the pinned minimal engine; see [MIDI notes](docs/MIDI-BASS.md) for licensing and corresponding source.

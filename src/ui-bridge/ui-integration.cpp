@@ -194,6 +194,11 @@ void UiIntegration::setShortcutRecording(bool recording){if(m_recording==recordi
 bool UiIntegration::nativeEventFilter(const QByteArray &,void *message,qintptr *result){
 #ifdef Q_OS_WIN
     const auto *event=static_cast<MSG *>(message);
+    if(event->message==WM_ERASEBKGND&&m_window&&m_window->handle()&&event->hwnd==reinterpret_cast<HWND>(m_window->winId())&&m_window->property("miniSwitching").toBool()){
+        const auto color=m_window->color();const auto brush=CreateSolidBrush(RGB(color.red(),color.green(),color.blue()));
+        RECT client{};GetClientRect(event->hwnd,&client);FillRect(reinterpret_cast<HDC>(event->wParam),&client,brush);DeleteObject(brush);
+        if(result)*result=1;return true;
+    }
     if(event->message==WM_HOTKEY&&m_registered.contains(int(event->wParam))&&!m_recording){dispatch(int(event->wParam)-m_base);if(result)*result=0;return true;}
 #else
     Q_UNUSED(message);Q_UNUSED(result);

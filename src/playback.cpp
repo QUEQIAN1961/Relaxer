@@ -467,7 +467,7 @@ bool Playback::startMidi(const QString &path, bool autoplay) {
     Q_UNUSED(path);
     Q_UNUSED(autoplay);
     m_loading = false;
-    onError("MIDI 播放需要 Windows BASSMIDI 运行库。");
+    onError("MIDI 播放需要 Windows FluidSynth 运行库。");
     return false;
 #else
     if (!m_midiBackend->open(path)) {

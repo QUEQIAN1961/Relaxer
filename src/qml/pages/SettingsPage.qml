@@ -33,6 +33,7 @@ ColumnLayout {
         function stopAtEdges() { if (contentItem && contentItem.boundsBehavior !== undefined) { contentItem.boundsBehavior = Flickable.StopAtBounds; contentItem.boundsMovement = Flickable.StopAtBounds } }
         Component.onCompleted: Qt.callLater(stopAtEdges)
         onContentItemChanged: Qt.callLater(stopAtEdges)
+        SmoothWheelHandler { flickable: scroll.contentItem as Flickable }
         ColumnLayout {
             id: settingsContent
             width: scroll.availableWidth
@@ -152,17 +153,23 @@ ColumnLayout {
                     }
                     GridLayout {
                         objectName:"dataRootRow";Layout.fillWidth:true;columnSpacing:12;rowSpacing:8
-                        columns:Theme.compact&&directoryMetrics.advanceWidth+openDirectory.implicitWidth+columnSpacing>width?1:2
-                        TextMetrics {id:directoryMetrics;text:settingsBridge.dataRoot;font:directoryLabel.font}
+                        columns:2
                         UiText {
                             id:directoryLabel;objectName:"dataRootText";Layout.fillWidth:true;Layout.minimumWidth:0
                             text: settingsBridge.dataRoot
                             textFormat: Text.PlainText
-                            wrapMode:Text.WrapAnywhere
+                            elide:Text.ElideMiddle
                             color: Theme.secondary
                             font.pixelSize: 14
                         }
                         ShellButton {id:openDirectory;objectName:"openDataRoot";Layout.alignment:Qt.AlignRight;text:"打开本地音乐目录";onClicked:settingsBridge.openDataRoot()}
+                        UiText {
+                            objectName:"downloadDirectoryText";Layout.fillWidth:true;Layout.minimumWidth:0
+                            text:onlineDownloads.downloadDirectory;textFormat:Text.PlainText;elide:Text.ElideMiddle;color:Theme.secondary;font.pixelSize:14
+                            HoverHandler {id:downloadDirectoryHover}
+                            HintBubble {visible:downloadDirectoryHover.hovered;text:onlineDownloads.downloadDirectory}
+                        }
+                        ShellButton {objectName:"openDownloadDirectory";Layout.alignment:Qt.AlignRight;text:"打开默认下载目录";onClicked:onlineDownloads.openDownloadDirectory()}
                     }
                 }
             }

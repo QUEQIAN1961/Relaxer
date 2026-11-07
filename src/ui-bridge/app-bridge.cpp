@@ -24,7 +24,7 @@ QString AppBridge::version() const { return QString::fromLatin1(phaseC::Display)
 QString AppBridge::windowTitle() const { return QString::fromLatin1(phaseC::WindowTitle); }
 bool AppBridge::navigate(int page) {
     Q_ASSERT(QThread::currentThread() == thread());
-    if (page < 0 || page > 3) return false;
+    if (page < 0 || page > 4) return false;
     if (m_page != page) { m_page = page; emit pageChanged(); }
     return true;
 }

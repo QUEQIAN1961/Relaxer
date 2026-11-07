@@ -7,6 +7,7 @@ import "../theme"
 ScrollView {
     id: page
     objectName: "importPage"
+    SmoothWheelHandler { flickable: page.contentItem as Flickable }
     function submitFiles(urls) { return importBridge.start(urls, addToPlaylist.checked ? String(target.currentValue) : "0") }
     contentWidth: availableWidth
     ColumnLayout {

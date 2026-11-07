@@ -83,7 +83,16 @@ static QImage iconImage(const QString &name, const QColor &c) {
             p.drawLine(0, -10, 0, -13);
             p.restore();
         }
+    } else if (name=="sort-default"||name=="sort-ascending"||name=="sort-descending") {
+        p.setPen(QPen(c,1.6,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+        p.setBrush(name=="sort-ascending"?QBrush(c):Qt::NoBrush);p.drawPolygon(QPolygonF{{16,3},{7,13},{25,13}});
+        p.setBrush(name=="sort-descending"?QBrush(c):Qt::NoBrush);p.drawPolygon(QPolygonF{{7,19},{25,19},{16,29}});
+    } else if (name == "refresh") {
+        p.setPen(QPen(c, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.drawArc(QRectF(6,6,20,20),45*16,300*16);
+        p.drawPolyline(QPolygonF{{18,7},{24,7},{24,13}});
     } else if (name == "search") {
+        p.setPen(QPen(c, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         p.drawEllipse(QRectF(6, 6, 15, 15));
         p.drawLine(QPointF(19,19),QPointF(26.5,26.5));
     } else if (name == "close") {
@@ -156,6 +165,10 @@ static QImage iconImage(const QString &name, const QColor &c) {
     } else if (name == "collapse") {
         p.drawLine(7, 11, 16, 20);
         p.drawLine(16, 20, 25, 11);
+    } else if (name == "arrow-left") {
+        // Lucide arrow-left, also used by the Morphicons demo.
+        p.setPen(QPen(c,2.4,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+        p.drawPolyline(QPolygonF{{16,25},{7,16},{16,7}});p.drawLine(7,16,25,16);
     } else if (name == "back") {
         p.drawLine(20, 7, 11, 16);
         p.drawLine(11, 16, 20, 25);
@@ -179,6 +192,8 @@ static QImage iconImage(const QString &name, const QColor &c) {
         p.drawLine(16, 25, 16, 7);
         p.drawLine(9, 14, 16, 7);
         p.drawLine(16, 7, 23, 14);
+    } else if (name == "cloud") {
+        QPainterPath cloud;cloud.moveTo(9,24);cloud.cubicTo(1,24,1,13,8,13);cloud.cubicTo(9,3,24,3,25,14);cloud.cubicTo(33,15,31,24,25,24);cloud.closeSubpath();p.drawPath(cloud);
     } else if (name == "clock") {
         p.drawEllipse(QRectF(5, 5, 22, 22));
         p.drawLine(16, 10, 16, 16);

@@ -22,17 +22,19 @@ Item {
         return nearest
     }
     function takeOver() {
+        if(lyricsModel.instrumental)return
         followMotion.stop()
         manualScroll = true
         returnIdle.restart()
     }
     function returnCurrent() {
         returnIdle.stop()
+        manualWheel.stop(); list.cancelFlick()
         manualScroll = false
         panel.centerCurrent()
     }
     function centerCurrent() {
-        if (!visible || manualScroll || lyricsModel.currentIndex < 0) return
+        if (!visible || lyricsModel.instrumental || manualScroll || lyricsModel.currentIndex < 0) return
         followMotion.stop()
         const before = list.contentY
         list.forceLayout()
@@ -49,15 +51,15 @@ Item {
     Timer { id: returnIdle; interval: 3000; onTriggered: { if (list.dragging || list.flicking || lyricBar.pressed || previewTime.pressed) restart(); else panel.returnCurrent() } }
     Connections {
         target: lyricsModel
-        function onModelAboutToBeReset() { followMotion.stop(); list.cancelFlick() }
+        function onModelAboutToBeReset() { manualWheel.stop(); followMotion.stop(); list.cancelFlick() }
         function onCurrentIndexChanged() { panel.centerCurrent() }
-        function onDocumentChanged() { if (lyricsModel.trackKey !== list.documentKey) { list.documentKey = lyricsModel.trackKey; panel.manualScroll = false; returnIdle.stop() }; Qt.callLater(panel.centerCurrent) }
+        function onDocumentChanged() { if(lyricsModel.instrumental){panel.manualScroll=false;returnIdle.stop();manualWheel.stop();followMotion.stop();list.cancelFlick();return}; if (lyricsModel.trackKey !== list.documentKey) { list.documentKey = lyricsModel.trackKey; panel.manualScroll = false; returnIdle.stop() }; Qt.callLater(panel.centerCurrent) }
     }
     ColumnLayout {
         id: layout
-        anchors.fill: parent; anchors.leftMargin:panel.leadingInset; spacing: 8
+        anchors.fill: parent; anchors.leftMargin:lyricsModel.instrumental?0:panel.leadingInset; spacing: 8
         RowLayout {
-            visible: lyricsModel.preview || panel.manualScroll || lyricsModel.loading || lyricsModel.error.length > 0
+            visible: !lyricsModel.instrumental&&(lyricsModel.preview || panel.manualScroll || lyricsModel.loading || lyricsModel.error.length > 0)
             Layout.fillWidth: true
             UiText { Layout.fillWidth: true; text: lyricsModel.status; wrapMode: Text.Wrap; color: lyricsModel.preview ? Theme.accent : Theme.secondary; font.pixelSize: 14; textFormat: Text.PlainText }
             ShellButton { objectName: "lyricsReturnCurrent"; visible: panel.manualScroll && lyricsModel.timed; text: "回到当前歌词"; onClicked: panel.returnCurrent() }
@@ -71,8 +73,10 @@ Item {
             objectName: "lyricsList"
             property string documentKey: "0"
             anchors.fill: parent
-            clip: true; model: lyricsModel; cacheBuffer: 150
+            visible:!lyricsModel.instrumental;interactive:!lyricsModel.instrumental
+            clip: true; model:lyricsModel.instrumental?null:lyricsModel; cacheBuffer: 150
             spacing: 4; boundsBehavior: Flickable.StopAtBounds
+            SmoothWheelHandler { id: manualWheel; flickable: list;enabled:!lyricsModel.instrumental; onScrolling: panel.takeOver() }
             header: Item { width: 1; height: list.height / 2 }
             footer: Item { width: 1; height: list.height / 2 }
             onDraggingChanged: { if (dragging) panel.takeOver(); else if (panel.manualScroll) returnIdle.restart() }
@@ -114,7 +118,7 @@ Item {
                         width: parent.width; text: row.translation; textFormat: Text.PlainText
                         visible: settingsBridge.values.showLyricTranslation && text.length > 0
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
-                        color: row.scrollSelected ? Theme.text : Theme.secondary; font.pixelSize: 17
+                        objectName:"lyricTranslation";color: row.scrollSelected ? Theme.text : Theme.secondary; font.pixelSize: 17;font.weight:Font.DemiBold
                     }
                 }
             }
@@ -127,8 +131,14 @@ Item {
               height: 1; color: Theme.text; opacity: .28
           }
           // A viewport sibling: ListView's contentItem may have zero width.
-          MouseArea { anchors.fill: parent; acceptedButtons: Qt.NoButton; onWheel: wheel => { panel.takeOver(); wheel.accepted = false } }
-          EmptyState { anchors.centerIn: parent; width: Math.min(parent.width - 20, 420); visible: lyricsModel.count === 0; heading: lyricsModel.loading ? "正在读取" : "让音乐，留一点空白"; description: lyricsModel.status }
+          MouseArea { anchors.fill: parent; enabled:!lyricsModel.instrumental;acceptedButtons: Qt.NoButton; onWheel: wheel => { panel.takeOver(); wheel.accepted = false } }
+          UiText {
+              objectName:"instrumentalMessage";anchors.centerIn:parent;width:Math.max(0,Math.min(parent.width-24,420));visible:lyricsModel.instrumental
+              text:"纯音乐，请欣赏";fontRegion:"lyrics";font.pixelSize:26;font.weight:Font.DemiBold;textFormat:Text.PlainText
+              color:Theme.text
+              horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap
+          }
+          EmptyState { anchors.centerIn: parent; width: Math.min(parent.width - 20, 420); visible: lyricsModel.count === 0&&!lyricsModel.instrumental; heading: lyricsModel.loading ? "正在读取" : "让音乐，留一点空白"; description: lyricsModel.status }
         }
     }
     // Keep the left-side control inside its ancestors' pointer bounds.

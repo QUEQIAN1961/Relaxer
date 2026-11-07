@@ -1,6 +1,7 @@
 #pragma once
 #include "playback.h"
 #include <QSet>
+#include <QElapsedTimer>
 
 namespace relaxer {
 // A value read from the authoritative engine. Reading never forecasts shuffle bags.
@@ -22,17 +23,24 @@ class PlaybackFacade final : public QObject {
     PlaybackSnapshot snapshot() const;
     // Compatibility seam for existing consumers; production UI uses the facade.
     Playback *backend() const { return m_playback; }
-    Track current() const { return m_playback->current(); }
-    qint64 position() const { return m_playback->position(); }
-    qint64 duration() const { return m_playback->duration(); }
-    bool playing() const { return m_playback->playing(); }
-    bool seekable() const { return m_playback->seekable(); }
+    Track current() const { return m_onlineActive ? m_onlineTracks.value(m_onlineQueue.current()) : m_playback->current(); }
+    Track track(qint64 id) const { return m_onlineTracks.contains(id) ? m_onlineTracks.value(id) : m_library->track(id); }
+    bool onlineActive() const { return m_onlineActive; }
+    qint64 position() const { return m_onlineActive ? (m_onlinePlayer ? m_onlinePlayer->position() : 0) : m_playback->position(); }
+    qint64 duration() const { return m_onlineActive ? (m_onlinePlayer && m_onlinePlayer->duration() > 0 ? m_onlinePlayer->duration() : current().duration) : m_playback->duration(); }
+    bool playing() const { return m_onlineActive ? m_onlinePlayer && m_onlinePlayer->playbackState() == QMediaPlayer::PlayingState : m_playback->playing(); }
+    bool seekable() const { return m_onlineActive ? m_onlinePlayer && m_onlinePlayer->isSeekable() : m_playback->seekable(); }
     int volume() const { return m_playback->volume(); }
-    Mode mode() const { return m_playback->mode(); }
-    const Queue &queue() const { return m_playback->queue(); }
-    QString roundStatus() const { return m_playback->roundStatus(); }
+    Mode mode() const { return m_onlineActive ? m_onlineQueue.mode : m_playback->mode(); }
+    const Queue &queue() const { return m_onlineActive ? m_onlineQueue : m_playback->queue(); }
+    QString roundStatus() const { return m_onlineActive ? QStringLiteral("网易云在线播放") : m_playback->roundStatus(); }
     QVector<qint64> upcoming();
     void play(const QVector<qint64> &ids, qint64 start = 0);
+    void playOnline(const QVector<Track> &tracks, qint64 start);
+    void setOnlineSource(qint64 id, const QUrl &url);
+    void updateOnlineTrack(const Track &track);
+    void failOnlineSource(qint64 id, const QString &message);
+    void stopOnline();
     void toggle();
     void next();
     void previous();
@@ -63,10 +71,29 @@ class PlaybackFacade final : public QObject {
     void playbackFailure(quint64 operation, qint64 trackId, const QString &title,
                          const QString &message, int code);
     void playbackRecovered();
+    void onlineSourceRequested(qint64 id);
+    void onlineTrackUpdated(qint64 id);
 
   private:
     Playback *m_playback;
     Library *m_library;
+    bool m_onlineActive = false, m_onlinePending = false;
+    Queue m_onlineQueue;
+    QHash<qint64, Track> m_onlineTracks;
+    std::unique_ptr<QMediaPlayer> m_onlinePlayer;
+    std::unique_ptr<QAudioOutput> m_onlineAudio;
+    void requestOnlineCurrent();
+    void sampleOnline(bool finishing=false,bool flush=false);
+    void beginOnlineSession();
+    void finishOnlineSession();
+    Session m_onlineSession;
+    bool m_onlineSessionMatched=false;
+    int m_onlineThreshold=80;
+    QElapsedTimer m_onlineClock;
+    qint64 m_onlineLastWall=0,m_onlineLastPosition=0;
+    QVector<Track> m_matchCandidates;
+    bool m_matchCandidatesReady=false;
+    QHash<QString,qint64> m_onlineMatches;
     quint64 m_operation = 0;
     qint64 m_requestedTrack = 0, m_failedTrack = 0;
     QSet<QString> m_reportedFailures;

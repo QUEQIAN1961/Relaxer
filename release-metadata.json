@@ -4,6 +4,12 @@
   "repository": "https://github.com/QUEQIAN1961/Relaxer",
   "releases": [
     {
+      "tag": "v0.2.5-RC",
+      "status": "prerelease",
+      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.5-RC",
+      "notes": "docs/releases/v0.2.5-RC/RELEASE-NOTES.md"
+    },
+    {
       "tag": "v0.2.4-GA",
       "status": "stable",
       "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.4-GA",
@@ -46,5 +52,6 @@
       "notes": "docs/releases/v0.2.0-rc2/V0.2.0-RC2-ReleaseNotes.md"
     }
   ],
-  "midiLicenseCompatibility": "unresolved; see docs/MIDI-BASS.md"
+  "midiLicenseCompatibility": "FluidSynth LGPL-2.1-or-later with GPL-3.0-only; separate GeneralUser GS license",
+  "latestPrereleaseTag": "v0.2.5-RC"
 }

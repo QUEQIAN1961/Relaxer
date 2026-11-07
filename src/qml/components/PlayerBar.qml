@@ -41,14 +41,15 @@ Rectangle {
         const shown=Array.from(elided.replace(/[\s…]/g,"")).length
         return !(shown<=2 && total-shown>3)
     }
-    implicitHeight: 98
+    implicitHeight: 98*.9
     color: Theme.footer
     function timeText(ms) {
         const seconds = Math.floor(Math.max(0, ms) / 1000)
         return Math.floor(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + seconds % 60
     }
     Item {
-      anchors.fill: parent; clip: true
+      id:footerBackdrop;anchors.fill: parent; clip: true
+      Rectangle {anchors.fill:parent;color:Theme.footer}
       Image {
         objectName: "footerBackground"
         x: 0; y: settingsBridge.palette.shareFooter ? -bar.backgroundOffsetY : 0
@@ -56,12 +57,17 @@ Rectangle {
         source:!bar.presentationActive ? "" : String(settingsBridge.palette.footerImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.footerImage))+"&blur="+Number(settingsBridge.palette.blurFooter||0):"";fillMode:Image.PreserveAspectCrop;asynchronous:true
       }
     }
+    Binding {target:Theme;property:"footerBackdrop";value:footerBackdrop}
     Rectangle { width: parent.width; height: 1; color: Theme.border }
     Item {
         id: metadata
         objectName: "playerMetadata"
         x:bar.coverMargin;y:bar.coverMargin;width:bar.blend(bar.wideMetadataWidth,bar.compactMetadataWidth);height:bar.height-2*bar.coverMargin
         opacity:bar.artworkTravelling||bar.expanded?0:1
+        HighlightSurface {
+            objectName:"playerMetadataHover";anchors.fill:parent;anchors.margins:-5;radius:12
+            positionRevision:metadata.x+metadata.y;backdrop:Theme.footerBackdrop;hovered:metadataMouse.enabled&&metadataMouse.containsMouse;pressed:metadataMouse.enabled&&metadataMouse.pressed
+        }
         Artwork {
             id: art; objectName: "bottomCover"
             x: 0; anchors.verticalCenter: parent.verticalCenter; width:parent.height;height:width; radius: 10
@@ -89,7 +95,7 @@ Rectangle {
         TextMetrics {id:titleMetrics;text:title.text;font:title.font;elide:Qt.ElideRight;elideWidth:title.width}
         TextMetrics {id:artistMetrics;text:artist.text;font:artist.font;elide:Qt.ElideRight;elideWidth:artist.width}
         MouseArea {
-            anchors.fill: parent; enabled: !bar.expanded && !bar.artworkTravelling
+            id:metadataMouse;anchors.fill: parent; enabled: !bar.expanded && !bar.artworkTravelling;hoverEnabled:true
             cursorShape: Qt.PointingHandCursor
             onClicked: {metadata.forceActiveFocus();bar.expandRequested()}
         }
@@ -97,7 +103,7 @@ Rectangle {
     Item {
         id: center
         objectName: "playerCenter"
-        x:bar.blend(bar.wideCenterX,Math.min(112,bar.compactControlsLeft)*(1-bar.expansion)+18*bar.expansion);y:12;width:Math.max(0,bar.blend(bar.width-bar.wideCenterX-bar.wideRightSpace,bar.width-18-(Math.min(112,bar.compactControlsLeft)*(1-bar.expansion)+18*bar.expansion)));height:74
+        x:bar.blend(bar.wideCenterX,Math.min(112,bar.compactControlsLeft)*(1-bar.expansion)+18*bar.expansion);y:(bar.height-height)/2;width:Math.max(0,bar.blend(bar.width-bar.wideCenterX-bar.wideRightSpace,bar.width-18-(Math.min(112,bar.compactControlsLeft)*(1-bar.expansion)+18*bar.expansion)));height:74
         Row {
             id:transportRow
             visible:!bar.miniControlsTravelling
@@ -126,6 +132,7 @@ Rectangle {
             }
             IconButton {
                 id:playButton;objectName: "playPauseButton"; anchors.verticalCenter: parent.verticalCenter
+                implicitWidth:42*.9;implicitHeight:42*.9;padding:10*.9
                 circular: true; filled: true; symbol: playbackBridge.playing ? "pause" : "play"
                 text: playbackBridge.playing ? "暂停" : "播放"
                 enabled: playbackBridge.available && playbackBridge.hasTrack && playbackBridge.canPlay
@@ -176,7 +183,7 @@ Rectangle {
     Item {
         objectName: "playerRight"
         opacity:1-bar.compactProgress;visible:opacity>0;enabled:!Theme.compact
-        x: bar.width - 342; y: 12; width: 320; height: 74
+        x: bar.width - 342; y:(bar.height-height)/2; width: 320; height: 74
         Item {
             id: volumeHost; objectName: "volumeControls"; width: 320; height: 36
             y:19*bar.expansion
@@ -202,7 +209,7 @@ Rectangle {
         id:compactVolume;objectName:"muteButton";width:36;height:36
         visible:!bar.miniControlsTravelling
         x:bar.blend(bar.width-(bar.wideVolumeSlider?202:108),center.x+transportRow.x+compactVolumeSlot.x)
-        y:bar.blend(12+19*bar.expansion,center.y+transportRow.y+compactVolumeSlot.y)
+        y:bar.blend((bar.height-74)/2+19*bar.expansion,center.y+transportRow.y+compactVolumeSlot.y)
     }
     onExpandedChanged:compactVolume.closePopup()
 }

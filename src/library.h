@@ -50,6 +50,7 @@ class Library : public QObject {
     qint64 insertImportedTrack(const Track &t,bool *added);
     QVector<Playlist> playlists() const;
     qint64 createPlaylist(const QString &name);
+    qint64 pinCloudPlaylist(const QString &provider,const QString &remoteId,const QString &name,const QString &cover,int count);
     bool renamePlaylist(qint64 id, const QString &name);
     bool deletePlaylist(qint64 id);
     bool playlistCover(qint64 id, const QString &source);
@@ -84,6 +85,10 @@ class Library : public QObject {
     bool setSetting(const QString &key, const QJsonValue &value);
     bool setSettings(const QJsonObject &values);
     Session startSession(qint64 track, qint64 duration);
+    Session startOnlineSession(const Track &track);
+    QVector<Track> onlineTracks() const;
+    Track onlineTrack(const QString &key) const;
+    bool saveOnlineSession(Session &session,qint64 delta,int threshold,bool finished=false);
     Session session(qint64 id) const;
     bool saveSession(Session &s, qint64 delta, int threshold, bool finished = false);
     qint64 totalHeard() const;
@@ -112,5 +117,6 @@ class Library : public QObject {
     Track fromQuery(const QSqlQuery &q) const;
     bool copyImage(const QString &source, const QString &relative);
     bool playlistExists(qint64 id) const;
+    bool writablePlaylist(qint64 id) const;
 };
 } // namespace relaxer

@@ -1,9 +1,10 @@
-"""Stage pinned BASS/BASSMIDI and GeneralUser GS for local Windows MIDI playback."""
+"""Stage pinned FluidSynth and GeneralUser GS for local Windows MIDI playback."""
 import argparse
 import hashlib
 import json
 import urllib.request
 import zipfile
+import subprocess
 from pathlib import Path
 
 
@@ -22,7 +23,7 @@ def prepare(destination, cache):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         files[name] = sha(data)
-    for component in ('bass', 'bassmidi', 'soundfont'):
+    for component in ('gcem', 'fluidsynth', 'soundfont'):
         info = metadata[component]
         archive = cache / info['archive']
         if not archive.exists() or sha(archive.read_bytes()) != info['sha256']:
@@ -33,14 +34,30 @@ def prepare(destination, cache):
                 raise ValueError('Upstream archive changed; review the pinned dependency: ' + component)
             archive.write_bytes(data)
         with zipfile.ZipFile(archive) as package:
-            if component == 'soundfont':
+            if component == 'gcem':
+                package.extractall(destination.parent / 'fluidsynth-build')
+                save('licenses/midi/GCEM-MIT.txt', package.read('gcem-' + info['version'] + '/LICENSE'))
+            elif component == 'soundfont':
                 prefix = 'GeneralUser-GS-' + info['revision'] + '/'
                 save('midi/GeneralUser-GS.sf2', package.read(prefix + 'GeneralUser-GS.sf2'))
                 save('licenses/midi/GeneralUser-GS-License.txt', package.read(prefix + 'documentation/LICENSE.txt'))
                 save('licenses/midi/GeneralUser-GS-README.md', package.read(prefix + 'README.md'))
             else:
-                save(component + '.dll', package.read('x64/' + component + '.dll'))
-                save('licenses/midi/' + component.upper() + '.txt', package.read(component + '.txt'))
+                work = destination.parent / 'fluidsynth-build'
+                source_dir = work / ('fluidsynth-' + info['version'])
+                if not source_dir.exists():
+                    package.extractall(work)
+                build = work / 'build'
+                options = ['-Denable-cpp11=ON', '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF', '-Denable-signalsmith=OFF',
+                           '-DGCEM_INCLUDE_DIR=' + str(work / ('gcem-' + metadata['gcem']['version']) / 'include')]
+                for feature in ('libsndfile', 'sdl3', 'readline', 'jack', 'pipewire', 'pulseaudio',
+                                'portaudio', 'dbus', 'network', 'ipv6', 'dsound', 'wasapi',
+                                'waveout', 'winmidi', 'native-dls', 'aufile'):
+                    options.append('-Denable-' + feature + '=OFF')
+                subprocess.run(['cmake', '-S', str(source_dir), '-B', str(build), '-G', 'Ninja', *options], check=True)
+                subprocess.run(['cmake', '--build', str(build), '--target', 'libfluidsynth', '-j', '6'], check=True)
+                save('libfluidsynth-3.dll', (build / 'src/libfluidsynth-3.dll').read_bytes())
+                save('licenses/midi/FluidSynth-LGPL-2.1.txt', package.read('fluidsynth-' + info['version'] + '/LICENSE'))
     (destination / 'runtime-midi.json').write_text(json.dumps(dict(metadata, files=files), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return {'destination': str(destination), 'files': len(files), 'soundfont': metadata['soundfont']['version']}
 

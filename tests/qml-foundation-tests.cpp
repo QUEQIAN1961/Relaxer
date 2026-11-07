@@ -100,7 +100,7 @@ class QmlFoundationTests final : public QObject {
         }
         QCOMPARE(changes.size(), 3);
         QVERIFY(shell.appBridge()->navigate(3)); QCOMPARE(changes.size(), 3);
-        QVERIFY(!shell.appBridge()->navigate(-1)); QVERIFY(!shell.appBridge()->navigate(4));
+        QVERIFY(!shell.appBridge()->navigate(-1)); QVERIFY(!shell.appBridge()->navigate(5));
         QCOMPARE(shell.appBridge()->page(), 3);
         auto *theme = visualChild(root, "qmlThemeSetting"); QVERIFY(theme);
         auto *tokens=shell.window()->property("designTokens").value<QObject *>();QVERIFY(tokens);

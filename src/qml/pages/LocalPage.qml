@@ -21,8 +21,17 @@ Item {
     readonly property real filtersReveal:page.isPlaylist?playlistOptionsReveal:optionsReveal
     readonly property bool isPlaylist: Number(libraryBridge.playlistId)>0
     readonly property var details: libraryBridge.playlistDetails
+    readonly property bool isCloud:!!details.cloud
+    readonly property var cloudSource:details.provider==="qq"?qqMusic:onlineMusic
+    function cloudSong(key){if(!isCloud)return ({});const id=String(Number(key)-(details.provider==="qq"?2000000000000:1000000000000));for(const value of cloudSource.songs)if(String(value.id)===id)return value;return ({})}
     readonly property string shownPlaylist: libraryBridge.playlistId
-    onShownPlaylistChanged: { optionsExpanded=false;search.close();if(playlistHeader && trackList){ playlistHeader.collapsed=false; trackList.scrollToStart() }}
+    onShownPlaylistChanged: { optionsExpanded=false;search.close();if(trackList)trackList.scrollToStart() }
+    function handlePlaylistWheel(event) {
+        if(!page.isPlaylist||!page.visible)return
+        const delta=event.pixelDelta.y||event.angleDelta.y
+        if(delta<0&&!playlistHeader.collapsed){playlistHeader.collapsed=true;event.accepted=true}
+        else if(delta>0&&trackList.atScrollStart&&playlistHeader.collapsed){playlistHeader.collapsed=false;event.accepted=true}
+    }
     function editMetadata(){description.text=page.details.description||"";tagText.text=(page.details.tags||[]).join(" / ");metadata.open()}
     function focusSearch(){search.open()}
     function clearBulk(){trackList.clearBulk()}
@@ -30,12 +39,17 @@ Item {
     function sizeText(bytes){return bytes>=1073741824?(bytes/1073741824).toFixed(2)+" GB":(bytes/1048576).toFixed(1)+" MB"}
     onVisibleChanged:if(!visible){clearBulk();optionsExpanded=false;search.close()}
     ColumnLayout {
+        id:libraryLayout
         anchors.fill:parent
         anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:28;anchors.bottomMargin:0
         spacing:page.isPlaylist?16-8*Theme.layoutProgress:16
         RowLayout {
-            Layout.fillWidth:true;spacing:16
-            UiText { objectName:"libraryHeading";text:libraryBridge.playlistName;font.pixelSize:28;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true;Layout.minimumWidth:0;elide:Text.ElideRight }
+            Layout.fillWidth:true;Layout.bottomMargin:Theme.pageHeadingGap-libraryLayout.spacing;spacing:16
+            Item {
+                Layout.fillWidth:true;Layout.minimumWidth:0;Layout.preferredHeight:heading.implicitHeight
+                UiText {id:heading;objectName:"libraryHeading";width:Math.min(implicitWidth,Math.max(0,parent.width-(page.isCloud?sourceLabel.width+12:0)));text:libraryBridge.playlistName;font.pixelSize:28;font.weight:Font.DemiBold;color:Theme.text;elide:Text.ElideRight}
+                UiText {id:sourceLabel;objectName:"cloudPlaylistSource";visible:page.isCloud;x:heading.width+12;y:(heading.height-height)/2;width:implicitWidth;text:page.details.provider==="qq"?"QQ 音乐":"网易云音乐";textFormat:Text.PlainText;font.pixelSize:12;color:Theme.secondary}
+            }
             GlassSearch {
                 id:search;objectName:"librarySearchControl";Layout.preferredWidth:36;Layout.preferredHeight:36
                 backdrop:page.backdropSource;query:libraryModel.filterText
@@ -45,15 +59,14 @@ Item {
         }
         PlaylistHeader {
             id:playlistHeader;visible:page.isPlaylist
-            Layout.fillWidth:true;Layout.preferredHeight:implicitHeight;Layout.topMargin:16*(1-Theme.layoutProgress)
+            Layout.fillWidth:true;Layout.preferredHeight:implicitHeight
             details:page.details;playlistName:libraryBridge.playlistName;hasTracks:libraryModel.count>0
-            reorderEnabled:trackList.selectedKeys().length>0 && !libraryModel.filterText && !libraryModel.artistFilter && !libraryModel.albumFilter && libraryModel.sortKey===0 && !libraryModel.descending
+            reorderEnabled:!page.isCloud && trackList.selectedKeys().length>0 && !libraryModel.filterText && !libraryModel.artistFilter && !libraryModel.albumFilter && libraryModel.sortKey===0 && !libraryModel.descending
             onPlayRequested:libraryBridge.playAll()
             onShuffleRequested:libraryBridge.shuffleAll()
             onPlayModeRequested:mode=>{playbackBridge.setMode(mode);if(mode===3)libraryBridge.shuffleAll();else libraryBridge.playAll()}
             onOptionsRequested:anchor=>playlistOptions.popup(anchor,0,anchor.height+6)
             onMoveRequested:direction=>libraryBridge.moveTracksInPlaylist(trackList.selectedKeys(),direction)
-            onMetadataRequested:page.editMetadata()
         }
         UiText {
             objectName:"librarySummary";visible:!page.isPlaylist;Layout.fillWidth:true
@@ -104,33 +117,29 @@ Item {
             id:trackList;objectName:"libraryListContainer"
             Layout.fillWidth:true;Layout.fillHeight:true
             trackModel:libraryModel;selectedKey:libraryModel.selectedId;currentKey:playbackBridge.trackId
+            cloudMode:page.isCloud
+            downloadState:key=>onlineDownloads.isDownloaded(page.details.provider,page.cloudSong(key))
+            onDownloadRequested:key=>{const song=page.cloudSong(key);if(song.id)page.cloudSource.downloadSong(String(song.id))}
             statisticsMode:page.isPlaylist
-            emptyHeading:appBridge.trackCount===0?"音乐，从这里开始":"没有找到歌曲"
+            emptyHeading:page.isCloud?"没有找到歌曲":appBridge.trackCount===0?"音乐，从这里开始":"没有找到歌曲"
+            emptyDescription:page.isCloud?"可调整筛选，或稍后重新打开歌单。":"导入你喜欢的音乐，开始慢慢听。"
             onSelected:key=>libraryModel.selectedId=key
             onPlayRequested:key=>libraryBridge.play(key)
             onFavoriteRequested:key=>libraryBridge.toggleFavorite(key)
             onLyricsRequested:keys=>page.lyricsRequested(keys,false)
             onBulkChanged:(active,keys)=>page.bulkChanged(active,keys)
-            onScrollYChanged:if(page.isPlaylist && scrollY>0)playlistHeader.collapsed=true
+            onScrollYChanged:if(page.isPlaylist&&!trackList.atScrollStart)playlistHeader.collapsed=true
+            onWheelRequested:event=>page.handlePlaylistWheel(event)
         }
     }
     WheelHandler {
         target:null;blocking:true;enabled:page.isPlaylist && page.visible
-        onWheel:event=>{
-            const delta=event.angleDelta.y || event.pixelDelta.y
-            // Use the first step for the header, then let the list scroll.
-            // Otherwise a child can retain the wheel grab as the cover shrinks.
-            if(delta<0 && !playlistHeader.collapsed){playlistHeader.collapsed=true;event.accepted=true}
-            else if(delta>0 && trackList.scrollY<=0 && playlistHeader.collapsed){playlistHeader.collapsed=false;event.accepted=true}
-            else event.accepted=false
-        }
+        onWheel:event=>{event.accepted=false;page.handlePlaylistWheel(event)}
     }
     RoundMenu {
-        id:playlistOptions;objectName:"playlistOptionsMenu";parent:page.Overlay.overlay;width:Math.min(192,page.width-24)
-        RoundMenuItem {text:"编辑歌单信息…";onTriggered:page.editMetadata()}
-        RoundMenuItem {text:"修改歌单名称…";onTriggered:page.editRequested(libraryBridge.playlistId,libraryBridge.playlistName)}
-        RoundMenuItem {objectName:"playlistCoverEntry";text:"更换封面…";onTriggered:coverPicker.open()}
-        RoundMenuItem {objectName:"playlistMarkerEntry";text:"歌单标记…";onTriggered:page.editRequested(libraryBridge.playlistId,libraryBridge.playlistName)}
+        id:playlistOptions;objectName:"playlistOptionsMenu";parent:page.Overlay.overlay;width:Math.min(244,page.width-24)
+        RoundMenuItem {objectName:"playlistEditEntry";text:page.isCloud?"编辑备注/标记…":"编辑名称/图标/封面…";onTriggered:page.editRequested(libraryBridge.playlistId,libraryBridge.playlistName)}
+        RoundMenuItem {objectName:"playlistMetadataEntry";text:"编辑标签/简介…";onTriggered:page.editMetadata()}
         RoundMenuItem {objectName:"playlistFilterEntry";text:"歌手/专辑查找";onTriggered:page.optionsExpanded=true}
         MenuSeparator{visible:playlistHeader.compactLayout}
         RoundMenuItem {objectName:"playlistMoveUp";visible:playlistHeader.compactLayout;text:"上移";enabled:playlistHeader.reorderEnabled;onTriggered:libraryBridge.moveTracksInPlaylist(trackList.selectedKeys(),-1)}
@@ -145,12 +154,11 @@ Item {
         property string targetId:"0"
         property string targetName:""
         function review(){targetId=libraryBridge.playlistId;targetName=libraryBridge.playlistName;open()}
-        contentItem:UiText {text:"确认删除“"+playlistDeletion.targetName+"”？\n只删除歌单及关联，音乐仍保留在曲库。";textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.text}
+        contentItem:UiText {text:"确认删除“"+playlistDeletion.targetName+"”？\n"+(page.isCloud?"仅移出左侧列表，平台中的歌单和歌曲保留。":"只删除歌单及关联，音乐仍保留在曲库。");textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.text}
         onAccepted:libraryBridge.deletePlaylist(targetId)
     }
-    FileDialog{id:coverPicker;objectName:"playlistCoverPicker";title:"设置歌单封面";nameFilters:["图片 (*.png *.jpg *.jpeg *.webp *.bmp)"];onAccepted:libraryBridge.setPlaylistCover(libraryBridge.playlistId,selectedFile)}
     ConfirmDialog {
-        id:metadata;objectName:"playlistMetadataDialog";parent:page.Overlay.overlay;anchors.centerIn:parent;width:Math.min(460,parent.width-32);modal:true;title:"编辑歌单信息";standardButtons:Dialog.Ok|Dialog.Cancel
+        id:metadata;objectName:"playlistMetadataDialog";parent:page.Overlay.overlay;anchors.centerIn:parent;width:Math.min(460,parent.width-32);modal:true;title:"编辑标签/简介";standardButtons:Dialog.Ok|Dialog.Cancel
         contentItem:ColumnLayout {
             UiText {text:"标签（用 / 分隔）";color:Theme.secondary}
             EntryField {id:tagText;Layout.fillWidth:true}

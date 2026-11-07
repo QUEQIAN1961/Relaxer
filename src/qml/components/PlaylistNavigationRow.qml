@@ -6,6 +6,7 @@ Item {
     required property int index
     required property string playlistKey
     required property string name
+    required property bool cloud
     required property ListView listView
     required property var orderModel
     property bool sorting:false
@@ -53,7 +54,7 @@ Item {
     }
     NavigationButton {
         x:22*row.sortingReveal;width:parent.width-x;height:parent.height
-        compact:row.compact;text:row.name;selected:row.selected
+        compact:row.compact;compactWidth:48-x;text:row.name;selected:row.selected;cloud:row.cloud
         marker:row.marker;textMarker:row.textMarker
         onClicked:if(!row.sorting)row.activated()
     }

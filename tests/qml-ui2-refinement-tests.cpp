@@ -55,7 +55,7 @@ private slots:
         QVERIFY(click(w,visual(root,"navigation1")));QTRY_COMPARE(f.shell->appBridge()->page(),1);QTest::qWait(260);
         auto *create=visual(root,"createPlaylistButton");QVERIFY(create);QCOMPARE(create->height(),36.);shot(w,"03-playlists-header");
         QVERIFY(click(w,visual(root,"navigation2")));QTRY_COMPARE(f.shell->appBridge()->page(),2);QTest::qWait(260);
-        auto *edit=visual(root,"profileEdit");QVERIFY(edit);QCOMPARE(edit->height(),36.);
+        auto *recent=visual(root,"profileRecent"),*longest=visual(root,"profileFrequent");QVERIFY(recent&&longest);QCOMPARE(recent->height(),36.);QVERIFY(bounds(longest).top()>bounds(recent).bottom());QVERIFY(!visual(root,"profileEdit"));
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void bodyTypeIsReadableAndVisibleListActionsHaveBorders(){
@@ -142,7 +142,7 @@ private slots:
                 QTest::qWait(7);
             }
             QVERIFY(departed);QVERIFY(switched);QVERIFY(arrived);
-            QCOMPARE(w->property("upcomingAtLeft").toBool(),open);QVERIFY(qAbs(bounds(panel).bottom()-(w->height()-(open?4:11)))<1);
+            QCOMPARE(w->property("upcomingAtLeft").toBool(),open);QVERIFY(qAbs(bounds(panel).bottom()-(w->height()-(open?8:11)))<1);
         }
         const auto folder=qEnvironmentVariable("RELAXER_UI2_SCREENSHOTS");
         if(!folder.isEmpty()){QFile out(QDir(folder).filePath("upcoming-frames.json"));QVERIFY(out.open(QIODevice::WriteOnly));out.write(QJsonDocument(frames).toJson());}

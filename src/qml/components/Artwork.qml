@@ -5,11 +5,13 @@ Item {
     property url file
     property string seed: "Relaxer"
     property string revision: ""
+    property string contentKey:String(file)
+    property string displayedContentKey:""
     property int resolution: 640
     property bool animated: true
     property int direction: 0
     property real radius: Math.min(width, height) * 0.075
-    property url imageUrl: "image://relaxer/artwork?file=" + encodeURIComponent(String(file))
+    property url imageUrl: (String(file).startsWith("https://") || String(file).startsWith("http://")) ? file : "image://relaxer/artwork?file=" + encodeURIComponent(String(file))
         + "&seed=" + encodeURIComponent(seed) + "&rev=" + encodeURIComponent(revision)
         + "&resolution=" + resolution
         // Clip corners on the canvas; resizing must not reload or transition the image.
@@ -35,7 +37,10 @@ Item {
         const visibleImage = pocket.isImageLoaded(displayedUrl) ? displayedUrl : outgoingUrl
         motion.stop()
         outgoingUrl = visibleImage
-        activeDirection = direction
+        // A sharper version of the same cover fades in; only a track change
+        // uses the directional slide.
+        activeDirection = contentKey === displayedContentKey ? 0 : direction
+        displayedContentKey = contentKey
         displayedUrl = next
         if (String(previousDisplay).length && String(previousDisplay) !== String(outgoingUrl) && String(previousDisplay) !== next) pocket.unloadImage(previousDisplay)
         if (String(previousOutgoing).length && String(previousOutgoing) !== String(outgoingUrl) && String(previousOutgoing) !== next) pocket.unloadImage(previousOutgoing)

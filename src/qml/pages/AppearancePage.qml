@@ -66,6 +66,7 @@ Item {
     ScrollView {
         id: scroll
         objectName: "appearanceScroll"
+        SmoothWheelHandler { flickable: scroll.contentItem as Flickable }
         Layout.fillWidth: true
         Layout.fillHeight: true
         contentWidth: availableWidth

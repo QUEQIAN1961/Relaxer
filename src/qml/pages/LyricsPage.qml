@@ -24,6 +24,11 @@ Item {
     property bool toolsVisible:false
     property bool delayOpen:false
     readonly property bool presentationActive:visible&&(!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
+    function updateArtworkQuality(){playbackBridge.setHighResolutionArtwork(presentationActive&&!artworkTravelling)}
+    onPresentationActiveChanged:updateArtworkQuality()
+    onArtworkTravellingChanged:updateArtworkQuality()
+    Component.onCompleted:updateArtworkQuality()
+    Component.onDestruction:playbackBridge.setHighResolutionArtwork(false)
     signal collapseRequested()
     signal fullscreenRequested()
     signal translationRequested()
@@ -74,7 +79,7 @@ Item {
                     id:art;objectName:"currentArtwork"
                     x:Math.max(0,(page.wideColumnWidth-page.wideCoverSize)/2)*(1-page.reflow);y:0
                     width:page.wideCoverSize+(88-page.wideCoverSize)*page.shrink;height:width
-                    file:playbackBridge.coverUrl;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";revision:playbackBridge.artworkRevision;radius:page.blend(24,12)
+                    file:playbackBridge.coverUrl;contentKey:playbackBridge.trackId;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";revision:playbackBridge.artworkRevision;radius:page.blend(24,12)
                     animated:page.visible&&!page.artworkTravelling;direction:page.trackDirection;opacity:page.artworkTravelling?0:1
                 }
                 UiText {

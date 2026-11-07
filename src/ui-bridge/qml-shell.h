@@ -12,6 +12,10 @@
 #include "ai-bridge.h"
 #include "translation-bridge.h"
 #include "lyrics-search-bridge.h"
+#include "online-music-bridge.h"
+#include "qq-music-bridge.h"
+#include "online-artwork-cache.h"
+#include "online-download-bridge.h"
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QTranslator>
@@ -47,6 +51,10 @@ class QmlShell final : public QObject {
     TranslationBridge *translationBridge() { return &m_translationBridge; }
     TranslationCoordinator *translationCoordinator() { return &m_translation; }
     LyricsSearchBridge *lyricsSearchBridge() { return &m_searchBridge; }
+    OnlineMusicBridge *onlineMusicBridge() { return &m_onlineMusic; }
+    QqMusicBridge *qqMusicBridge() { return &m_qqMusic; }
+    OnlineArtworkCache *onlineArtworkCache() { return &m_onlineArtwork; }
+    OnlineDownloadBridge *onlineDownloadBridge() { return &m_onlineDownloads; }
     QStringList warnings() const { return m_warnings; }
   protected:
     bool eventFilter(QObject *object,QEvent *event) override;
@@ -73,6 +81,10 @@ class QmlShell final : public QObject {
     ImportBridge m_importBridge;
     LyricsSearchCoordinator m_search;
     LyricsSearchBridge m_searchBridge;
+    OnlineArtworkCache m_onlineArtwork;
+    OnlineDownloadBridge m_onlineDownloads;
+    OnlineMusicBridge m_onlineMusic;
+    QqMusicBridge m_qqMusic;
     QTranslator m_controlsTranslator;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QStringList m_warnings;

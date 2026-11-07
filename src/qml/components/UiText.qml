@@ -2,6 +2,7 @@ import QtQuick
 import "../theme"
 Text {
     property string fontRegion: "rest"
+    color: Theme.text
     font.family: {
         const saved = settingsBridge.values.uiFont
         return settingsBridge.fontFamilyFor(fontRegion) || "Microsoft YaHei UI"

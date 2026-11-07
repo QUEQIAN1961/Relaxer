@@ -7,6 +7,10 @@ QtObject {
     property real layoutProgress: 0
     readonly property real pageMargin: 34 - 16 * layoutProgress
     property var custom: ({})
+    property bool customHighlights: false
+    property Item sidebarBackdrop
+    property Item pageBackdrop
+    property Item footerBackdrop
     readonly property color background: custom.background || (dark ? "#19191e" : "#ffffff")
     readonly property color panel: custom.panel || (dark ? "#222228" : "#f5f5f7")
     readonly property color text: custom.text || (dark ? "#f0edf1" : "#25252b")
@@ -30,4 +34,5 @@ QtObject {
     readonly property int pageContentOffset: Math.round(controlHeight * 0.6)
     property string fontFamily: "Microsoft YaHei UI"
     readonly property int headingSize: 28
+    readonly property int pageHeadingGap: 14
 }

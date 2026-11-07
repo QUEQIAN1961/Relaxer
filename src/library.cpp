@@ -132,6 +132,12 @@ bool Library::open(QString *error) {
          !exec("ALTER TABLE playlists ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")) ||
         (!playlistColumns.contains("description") &&
          !exec("ALTER TABLE playlists ADD COLUMN description TEXT NOT NULL DEFAULT ''")) ||
+        (!playlistColumns.contains("provider")&&!exec("ALTER TABLE playlists ADD COLUMN provider TEXT NOT NULL DEFAULT ''")) ||
+        (!playlistColumns.contains("remote_id")&&!exec("ALTER TABLE playlists ADD COLUMN remote_id TEXT NOT NULL DEFAULT ''")) ||
+        (!playlistColumns.contains("remote_count")&&!exec("ALTER TABLE playlists ADD COLUMN remote_count INTEGER NOT NULL DEFAULT 0")) ||
+        !exec("CREATE UNIQUE INDEX IF NOT EXISTS cloud_playlist_source ON playlists(provider,remote_id) WHERE provider<>''") ||
+        !exec("CREATE TABLE IF NOT EXISTS online_tracks(id INTEGER PRIMARY KEY,provider_key TEXT UNIQUE NOT NULL,title TEXT,artist TEXT,album TEXT,duration INTEGER DEFAULT 0,plays INTEGER DEFAULT 0,heard INTEGER DEFAULT 0)") ||
+        !exec("CREATE TABLE IF NOT EXISTS online_sessions(id INTEGER PRIMARY KEY,track INTEGER REFERENCES online_tracks(id) ON DELETE CASCADE,heard INTEGER DEFAULT 0,duration INTEGER DEFAULT 0,sought INTEGER DEFAULT 0,counted INTEGER DEFAULT 0,finished INTEGER DEFAULT 0,updated TEXT DEFAULT CURRENT_TIMESTAMP)") ||
         !m_db.commit()) {
         if (m_error.isEmpty()) m_error = m_db.lastError().text();
         m_db.rollback();
@@ -330,7 +336,7 @@ qint64 Library::insertImportedTrack(const Track &t,bool *added) {
 }
 QVector<Playlist> Library::playlists() const {
     QSqlQuery q(m_db);
-    if (!q.exec("SELECT p.id,p.name,p.cover,COUNT(pt.track),COALESCE(SUM(t.plays),0),p.tags,p.description "
+    if (!q.exec("SELECT p.id,p.name,p.cover,CASE WHEN p.provider<>'' THEN p.remote_count ELSE COUNT(pt.track) END,COALESCE(SUM(t.plays),0),p.tags,p.description,p.provider,p.remote_id "
            "FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlist=p.id "
            "LEFT JOIN tracks t ON t.id=pt.track GROUP BY p.id ORDER BY p.id")) { m_error=q.lastError().text();emit queryFailed("playlists",m_error);return {}; }
     QVector<Playlist> r;
@@ -338,6 +344,7 @@ QVector<Playlist> Library::playlists() const {
         Playlist p;
         p.id=q.value(0).toLongLong();p.name=q.value(1).toString();p.cover=q.value(2).toString();
         p.count=q.value(3).toInt();p.plays=q.value(4).toLongLong();p.description=q.value(6).toString();
+        p.provider=q.value(7).toString();p.remoteId=q.value(8).toString();
         const auto saved=QJsonDocument::fromJson(q.value(5).toByteArray()).array();
         for (const auto &tag : playlistTagOptions())
             if (saved.contains(tag)) p.tags << tag;
@@ -351,6 +358,17 @@ bool Library::playlistExists(qint64 id) const {
     if (q.exec() && q.next()) return true;
     m_error="歌单不存在";
     return false;
+}
+bool Library::writablePlaylist(qint64 id) const {
+    QSqlQuery query(m_db);query.prepare("SELECT provider FROM playlists WHERE id=?");query.addBindValue(id);if(!query.exec()||!query.next()){m_error="歌单不存在";return false;}if(!query.value(0).toString().isEmpty()){m_error="云端歌单保留平台名称、封面及歌曲顺序";return false;}return true;
+}
+qint64 Library::pinCloudPlaylist(const QString &provider,const QString &remoteId,const QString &name,const QString &cover,int count){
+    if((provider!="netease"&&provider!="qq")||remoteId.trimmed().isEmpty()||name.trimmed().isEmpty())return 0;
+    QSqlQuery query(m_db);query.prepare("SELECT id FROM playlists WHERE provider=? AND remote_id=?");query.addBindValue(provider);query.addBindValue(remoteId);
+    if(!query.exec())return 0;qint64 id=0;if(query.next())id=query.value(0).toLongLong();query.finish();
+    if(id){if(!exec("UPDATE playlists SET name=?,cover=?,remote_count=? WHERE id=?",{name,cover,qMax(0,count),id}))return 0;}
+    else{if(!exec("INSERT INTO playlists(name,cover,provider,remote_id,remote_count) VALUES(?,?,?,?,?)",{name,cover,provider,remoteId,qMax(0,count)}))return 0;QSqlQuery inserted(m_db);inserted.exec("SELECT last_insert_rowid()");inserted.next();id=inserted.value(0).toLongLong();}
+    notifyChanged();return id;
 }
 bool Library::playlistTags(qint64 id, const QStringList &tags) {
     const auto options=playlistTagOptions();
@@ -382,6 +400,7 @@ qint64 Library::createPlaylist(const QString &name) {
     return id;
 }
 bool Library::renamePlaylist(qint64 id, const QString &n) {
+    if(!writablePlaylist(id))return false;
     if (n.trimmed().isEmpty())
         return false;
     bool ok = exec("UPDATE playlists SET name=? WHERE id=?", {n.trimmed(), id});
@@ -418,6 +437,7 @@ bool Library::copyImage(const QString &source, const QString &relative) {
     return true;
 }
 bool Library::playlistCover(qint64 id, const QString &path) {
+    if(!writablePlaylist(id))return false;
     auto r = QString("Artwork/playlist-%1.png").arg(id);
     if (!copyImage(path, r))
         return false;
@@ -427,6 +447,7 @@ bool Library::playlistCover(qint64 id, const QString &path) {
     return ok;
 }
 bool Library::addToPlaylist(qint64 p, const QVector<qint64> &ids) {
+    if(!writablePlaylist(p))return false;
     if (!m_db.transaction())
         return false;
     QSqlQuery max(m_db);
@@ -447,6 +468,7 @@ bool Library::addToPlaylist(qint64 p, const QVector<qint64> &ids) {
     return true;
 }
 bool Library::removeFromPlaylist(qint64 p, const QVector<qint64> &ids) {
+    if(!writablePlaylist(p))return false;
     if (!m_db.transaction())
         return false;
     for (auto id : ids)
@@ -460,6 +482,7 @@ bool Library::removeFromPlaylist(qint64 p, const QVector<qint64> &ids) {
     return ok;
 }
 bool Library::reorder(qint64 p, const QVector<qint64> &ids) {
+    if(!writablePlaylist(p))return false;
     auto old = tracks(p);
     QSet<qint64> expected, got;
     for (const auto &t : old)
@@ -802,6 +825,27 @@ Session Library::session(qint64 id) const {
                 q.value(3).toLongLong(), q.value(4).toBool(),     q.value(5).toBool()};
     return {};
 }
+QVector<Track> Library::onlineTracks() const {
+    QVector<Track> tracks;QSqlQuery query(m_db);if(!query.exec("SELECT provider_key,plays,heard FROM online_tracks"))return tracks;while(query.next()){Track track;track.hash=query.value(0).toString();track.plays=query.value(1).toLongLong();track.heard=query.value(2).toLongLong();tracks.append(track);}return tracks;
+}
+Track Library::onlineTrack(const QString &key) const {
+    Track track;QSqlQuery query(m_db);query.prepare("SELECT plays,heard FROM online_tracks WHERE provider_key=?");query.addBindValue(key);if(query.exec()&&query.next()){track.plays=query.value(0).toLongLong();track.heard=query.value(1).toLongLong();}return track;
+}
+Session Library::startOnlineSession(const Track &track){
+    if(track.hash.isEmpty())return {};
+    if(!exec("INSERT INTO online_tracks(provider_key,title,artist,album,duration) VALUES(?,?,?,?,?) ON CONFLICT(provider_key) DO UPDATE SET title=excluded.title,artist=excluded.artist,album=excluded.album,duration=excluded.duration",{track.hash,track.title,track.artist,track.album,track.duration}))return {};
+    QSqlQuery query(m_db);query.prepare("SELECT id FROM online_tracks WHERE provider_key=?");query.addBindValue(track.hash);if(!query.exec()||!query.next())return {};const auto id=query.value(0).toLongLong();query.finish();
+    if(!exec("INSERT INTO online_sessions(track,duration) VALUES(?,?)",{id,track.duration}))return {};query.exec("SELECT last_insert_rowid()");query.next();return {query.value(0).toLongLong(),id,0,track.duration,false,false};
+}
+bool Library::saveOnlineSession(Session &session,qint64 delta,int threshold,bool finished){
+    if(!session.id)return false;threshold=qBound(70,threshold,100);delta=qMax<qint64>(0,delta);
+    QSqlQuery query(m_db);query.prepare("SELECT heard,sought,counted FROM online_sessions WHERE id=?");query.addBindValue(session.id);if(!query.exec()||!query.next())return false;
+    const auto heard=query.value(0).toLongLong()+delta;const bool sought=session.sought||query.value(1).toBool(),previous=query.value(2).toBool();query.finish();
+    const bool counted=!sought&&session.duration>0&&(heard>=(session.duration*threshold+99)/100||(finished&&threshold==100&&heard>=session.duration-250));
+    if(!m_db.transaction())return false;
+    if(!exec("UPDATE online_sessions SET heard=?,duration=?,sought=?,counted=?,finished=?,updated=CURRENT_TIMESTAMP WHERE id=?",{heard,session.duration,sought,counted,finished,session.id})||!exec("UPDATE online_tracks SET heard=heard+?,plays=MAX(0,plays+?) WHERE id=?",{delta,int(counted)-int(previous),session.track})||!m_db.commit()){m_db.rollback();return false;}
+    session.heard=heard;session.sought=sought;session.counted=counted;if(delta||counted!=previous)emit statsChanged();return true;
+}
 bool Library::saveSession(Session &s, qint64 delta, int threshold, bool finished) {
     if (!s.id || !s.track)
         return false;
@@ -836,13 +880,13 @@ bool Library::saveSession(Session &s, qint64 delta, int threshold, bool finished
 }
 qint64 Library::totalHeard() const {
     QSqlQuery q(m_db);
-    q.exec("SELECT COALESCE(SUM(heard),0) FROM tracks");
+    q.exec("SELECT (SELECT COALESCE(SUM(heard),0) FROM tracks)+(SELECT COALESCE(SUM(heard),0) FROM online_tracks)");
     q.next();
     return q.value(0).toLongLong();
 }
 qint64 Library::totalPlays() const {
     QSqlQuery q(m_db);
-    q.exec("SELECT COALESCE(SUM(plays),0) FROM tracks");
+    q.exec("SELECT (SELECT COALESCE(SUM(plays),0) FROM tracks)+(SELECT COALESCE(SUM(plays),0) FROM online_tracks)");
     q.next();
     return q.value(0).toLongLong();
 }

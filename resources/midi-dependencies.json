@@ -1,17 +1,5 @@
 {
-  "backend": "BASSMIDI",
-  "bass": {
-    "version": "2.4.18.3",
-    "url": "https://www.un4seen.com/files/bass24.zip",
-    "archive": "bass24.zip",
-    "sha256": "3a03ec9a33d0f4f9d167660da51c8bb1432e8977496995455ab137277d69636e"
-  },
-  "bassmidi": {
-    "version": "2.4.16",
-    "url": "https://www.un4seen.com/files/bassmidi24.zip",
-    "archive": "bassmidi24.zip",
-    "sha256": "317ec770d71266b5294543d7c87cbbb39aba38bc8bc623af518a96c670392234"
-  },
+  "backend": "FluidSynth",
   "soundfont": {
     "version": "GeneralUser GS 2.0.3",
     "archive": "generaluser.zip",
@@ -19,5 +7,24 @@
     "url": "https://codeload.github.com/mrbumpy409/GeneralUser-GS/zip/684543d5e5efaef08d02be50dcda8d552478fa60",
     "sha256": "197207fffaf7bad496a1d5d9a44b0edd16efe97d53db42afb6c73cdbdefb4484"
   },
-  "distribution": "BASS proprietary non-commercial free-use terms; separate library licenses retained; GPL combination compatibility unresolved"
+  "distribution": "FluidSynth LGPL-2.1-or-later, built from pinned source without optional audio/codec libraries; GeneralUser GS separate soundfont license",
+  "fluidsynth": {
+    "version": "2.6.2",
+    "url": "https://codeload.github.com/FluidSynth/fluidsynth/zip/refs/tags/v2.6.2",
+    "archive": "fluidsynth-2.6.2-source.zip",
+    "sha256": "67386bba40ccba514025982e6639c1678dfc6726b26dd21a12b983f1c3d4aeb6"
+  },
+  "licenses": [
+    {
+      "name": "FluidSynth-LGPL-2.1.txt",
+      "url": "https://raw.githubusercontent.com/FluidSynth/fluidsynth/v2.6.2/LICENSE",
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    }
+  ],
+  "gcem": {
+    "version": "012ae73c6d0a2cb09ffe86475f5c6fba3926e200",
+    "url": "https://codeload.github.com/kthohr/gcem/zip/012ae73c6d0a2cb09ffe86475f5c6fba3926e200",
+    "archive": "gcem-source.zip",
+    "sha256": "28159274c54e9640354852e172d10d88eb159f4e7f2fea42edbcd20105ed3526"
+  }
 }

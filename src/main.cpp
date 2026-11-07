@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
     if (parser.isSet("quit-after") && (!quitValid || quitAfter < 1 || quitAfter > 60000 ||
         !parser.isSet("diagnostics") || !parser.isSet("data") || parser.isSet("screenshot")))
         return usageError("--quit-after requires 1..60000 ms, --diagnostics and --data, without --screenshot");
-    const QStringList qmlPages{"local", "playlists", "playing", "settings"};
+    const QStringList qmlPages{"local", "playlists", "playing", "settings", "discover"};
     const QStringList widgetsPages{"local", "playlists", "profile", "settings", "playing"};
     if (!(ui == "qml" ? qmlPages : widgetsPages).contains(parser.value("page")))
         return usageError("Unsupported --page for the selected UI");

@@ -6,6 +6,7 @@ import "../theme"
 ScrollView {
     id: page
     objectName: "translationPage"
+    SmoothWheelHandler { flickable: page.contentItem as Flickable }
     contentWidth: availableWidth
     ColumnLayout {
         width: page.availableWidth; spacing: 16
@@ -39,6 +40,8 @@ ScrollView {
         }
         UiText { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.secondary }
         ListView {
+            id: candidates
+            SmoothWheelHandler { flickable: candidates }
             Layout.fillWidth: true; Layout.preferredHeight: count ? 180 : 36; clip: true; model: lyricsSearchBridge
             delegate: ItemDelegate {
                 required property int index; required property string title; required property string artist; required property string source; required property bool timed

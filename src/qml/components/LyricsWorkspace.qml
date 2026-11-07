@@ -307,6 +307,7 @@ Page {
                 }
                 ListView {
                     id: tracks; objectName: "lyricsTargetTracks"
+                    SmoothWheelHandler { flickable: tracks }
                     Layout.fillWidth: true; Layout.fillHeight: true
                     clip: true; model: targetRows
                     boundsBehavior: Flickable.StopAtBounds
@@ -404,6 +405,7 @@ Page {
                 radius: 10; color: Theme.panel; border.color: Theme.border
                 ListView {
                     id: candidates; objectName: "lyricsCandidateList"; anchors.fill: parent; anchors.margins: 6
+                    SmoothWheelHandler { flickable: candidates }
                     clip: true; model: lyricsSearchBridge; boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
                     delegate: ItemDelegate {
