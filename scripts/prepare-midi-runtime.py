@@ -50,7 +50,7 @@ def prepare(destination, cache):
                 build = work / 'build'
                 options = ['-Denable-cpp11=ON', '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF', '-Denable-signalsmith=OFF',
                            '-DGCEM_INCLUDE_DIR=' + str(work / ('gcem-' + metadata['gcem']['version']) / 'include')]
-                for feature in ('libsndfile', 'sdl3', 'readline', 'jack', 'pipewire', 'pulseaudio',
+                for feature in ('libsndfile', 'sdl3', 'openmp', 'readline', 'jack', 'pipewire', 'pulseaudio',
                                 'portaudio', 'dbus', 'network', 'ipv6', 'dsound', 'wasapi',
                                 'waveout', 'winmidi', 'native-dls', 'aufile'):
                     options.append('-Denable-' + feature + '=OFF')
