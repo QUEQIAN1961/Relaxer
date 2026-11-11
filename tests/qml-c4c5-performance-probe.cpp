@@ -91,6 +91,7 @@ int main(int argc,char **argv) {
     parser.addOptions({{"data","Owned synthetic fixture root","path"},{"count","0/1000/10000","number"},
         {"output","Result JSON","file"},{"prepare","Create a new isolated fixture then exit"},{"screenshots","Save three window sizes","directory"},
         {"lifecycle","Measure startup, foreground, mini and minimized resources"},
+        {"lifecycle-cycles","Repeat expanded/mini round trips after warmup","number","0"},
         {"popup-lifecycle","Also open queue and volume windows before minimizing"}});
     parser.process(app);bool valid=false;const int count=parser.value("count").toInt(&valid);
     const auto root=parser.value("data");
@@ -153,7 +154,18 @@ int main(int argc,char **argv) {
         }
         window->showNormal();QTest::qWait(500);window->grabWindow();result["miniRestored"]=sample();
         QMetaObject::invokeMethod(window,"leaveMiniPlayer");if(!settled())return 42;QTest::qWait(500);window->grabWindow();result["normalRestored"]=sample();
-        result["warnings"]=QJsonArray::fromStringList(shell.warnings());result["workload"]="1000 synthetic tracks; decoded WAV paused after playback initialization; fresh process, OS cache retained";
+        bool cyclesValid=false;const int cycles=parser.value("lifecycle-cycles").toInt(&cyclesValid);
+        if(!cyclesValid||cycles<0||cycles>20)return 64;
+        QJsonArray rounds;
+        for(int cycle=0;cycle<cycles;++cycle){
+            QMetaObject::invokeMethod(window,"showLyrics");QTest::qWait(650);
+            QMetaObject::invokeMethod(window,"closeLyrics");QTest::qWait(550);
+            QMetaObject::invokeMethod(window,"enterMiniPlayer");if(!settled())return 41;
+            QMetaObject::invokeMethod(window,"leaveMiniPlayer");if(!settled())return 42;
+            QTest::qWait(800);rounds.append(sample());
+        }
+        result["warmRoundTrips"]=rounds;
+        result["warnings"]=QJsonArray::fromStringList(shell.warnings());result["workload"]=QString("%1 synthetic tracks; decoded WAV paused after playback initialization; fresh process, OS cache retained").arg(count);
         const bool ok=saveJson(parser.value("output"),result);shell.shutdown();return ok&&shell.warnings().isEmpty()?0:43;
     }
     auto *model=shell.libraryModel();if(count)model->setSelectedId(model->idAt(count/2));const auto selection=model->selectedId();

@@ -32,6 +32,7 @@ def assemble(source, build, baseline, destination):
     if not re.fullmatch(r'\d+\.\d+\.\d+-(?:RC\d*|GA)', version):
         raise ValueError('Expected an RC or GA version')
     channel = 'GA' if version.endswith('-GA') else 'RC'
+    acceptance = 'user-approved-ga-targeted-checks' if channel == 'GA' else 'rc-targeted-checks-complete'
     frozen = identity(source)
     fingerprint = (build / 'relaxer-source-fingerprint.txt').read_text().strip()
     if fingerprint != frozen['sourceFingerprint']:
@@ -95,7 +96,7 @@ def assemble(source, build, baseline, destination):
 
     metadata = dict(sourceCommit=frozen['commit'], sourceTree=frozen['tree'], sourceFingerprint=fingerprint,
                     displayVersion=display, fileVersion=version.split('-')[0] + '.0', entry='Relaxer.exe',
-                    published=False, publicReleaseApproved=True, acceptanceStatus='rc-targeted-checks-complete',
+                    published=False, publicReleaseApproved=True, acceptanceStatus=acceptance,
                     channel=channel, dependencyBaseline=baseline.name,
                     dependencyBaselineSHA256=BASELINE_SHA256)
     metadata['midiDependencies'] = midi_runtime
@@ -109,7 +110,7 @@ def assemble(source, build, baseline, destination):
     components['displayVersion'] = display
     # A GA version label is not evidence of a completed Harness regression.
     components['publicReleaseApproved'] = True
-    components['acceptanceStatus'] = 'rc-targeted-checks-complete'
+    components['acceptanceStatus'] = acceptance
     components['packages'].append(dict(name='Lucide playlist markers', version=['0.468.0'],
                                       licenses=['ISC', 'MIT'], upstream=['https://github.com/lucide-icons/lucide/tree/0.468.0/icons']))
     components['midiLicenseCompatibility'] = 'FluidSynth LGPL-2.1-or-later with GPL-3.0-only; separate soundfont license; see MIDI-BASS.md'
