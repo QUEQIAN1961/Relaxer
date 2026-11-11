@@ -130,6 +130,9 @@ private slots:
         QWheelEvent wheel(point,w->mapToGlobal(point.toPoint()),QPoint(),QPoint(0,-240),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
         wheel.setTimestamp(++QTest::lastMouseTimestamp);QCoreApplication::sendEvent(w,&wheel);QTRY_VERIFY(panel->property("manualScroll").toBool());
         QTest::qWait(100);QVERIFY(QMetaObject::invokeMethod(list,"cancelFlick"));QTRY_VERIFY(!list->property("moving").toBool());
+        auto *manualWheel=visual(panel,"lyricsManualWheel");QVERIFY(manualWheel);
+        auto *wheelMotion=manualWheel->property("motion").value<QObject *>();QVERIFY(wheelMotion);
+        QTRY_VERIFY(!wheelMotion->property("running").toBool());
         const auto manual=list->property("contentY").toReal();p->seek(12000);QTRY_COMPARE(m->currentIndex(),12);QTest::qWait(70);
         QCOMPARE(list->property("contentY").toReal(),manual);
         auto *back=visual(w->contentItem(),"lyricsReturnCurrent");QVERIFY(back);QVERIFY(QMetaObject::invokeMethod(back,"click"));
@@ -571,7 +574,7 @@ private slots:
             const auto path=QDir(output).filePath(QString("%1-page-interior-%2-%3.png").arg(++serial,4,10,QChar('0')).arg(reduced).arg(destination));
             QVERIFY(worst.save(path));
             record("sidebar-page-interior",{{"reduced",reduced},{"theme",theme},{"restoredDuringTransition",destination==3},{"destination",destination},{"minimumMean",minimumMean},{"maximumDarkRatio",maximumDark},{"frames",frames}});
-            QCOMPARE(f.shell->appBridge()->page(),destination);
+            QCOMPARE(f.shell->appBridge()->page(),destination==1?4:destination);
             QVERIFY2(minimumMean>(theme==1?17:190)&&maximumDark<.15,"Page interior flashed black during navigation or window restore");
         }
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));

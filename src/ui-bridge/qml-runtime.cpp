@@ -50,7 +50,9 @@ int runQml(QCoreApplication *app, const relaxer::QmlLaunchOptions *options,
     diagnostics->result["playbackInstances"] = shell.findChildren<relaxer::Playback *>().size();
     if (!options->diagnostics.isEmpty()) diagnostics->interactionProbe = [&shell, window, diagnostics] {
         const int original = shell.appBridge()->page();
-        const int target = original == 1 ? 0 : 1;
+        // Sidebar index 1 is discovery (page 4). Use settings/local so
+        // diagnostics neither assumes the old grid mapping nor starts networking.
+        const int target = original == 3 ? 0 : 3;
         std::function<QQuickItem *(QQuickItem *)> find = [&](QQuickItem *parent) -> QQuickItem * {
             if (parent->objectName() == QString("navigation%1").arg(target)) return parent;
             for (auto *child : parent->childItems()) if (auto *match = find(child)) return match;

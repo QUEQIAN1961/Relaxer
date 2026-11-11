@@ -62,7 +62,8 @@ private slots:
         Fixture f; QVERIFY2(prepare(f), qPrintable(f.shell->warnings().join('\n')));
         auto *w = f.shell->window(); auto *root = w->contentItem();
         if (!sidebar) {
-            QVERIFY(click(w, visual(root, "navigation1")));
+            // The retained grid is page 1; sidebar navigation1 is now discovery.
+            QVERIFY(f.shell->appBridge()->navigate(1));
             QTRY_COMPARE(f.shell->appBridge()->page(), 1); QTest::qWait(260);
         }
         const auto before = f.library.playlists().size();
@@ -78,6 +79,10 @@ private slots:
         QCOMPARE(accepted.count(), 1);
         QTest::qWait(100); QCOMPARE(f.library.playlists().size(), before + 1);
         QCOMPARE(f.library.playlists().last().name, QString("一次创建一份"));
+        // Both creation routes must land in the same local playlist detail.
+        QTRY_COMPARE(f.shell->appBridge()->page(),0);
+        QTRY_COMPARE(f.shell->libraryBridge()->playlistId(),QString::number(f.library.playlists().last().id));
+        auto *entry=visual(root,"sidebarPlaylist-"+QString::number(f.library.playlists().last().id));QVERIFY(entry);QVERIFY(click(w,entry));
         QVERIFY2(f.shell->warnings().isEmpty(), qPrintable(f.shell->warnings().join('\n')));
     }
     void cancelRenameAndIntentionalSameNames() {

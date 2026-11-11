@@ -95,8 +95,9 @@ class QmlFoundationTests final : public QObject {
         for (int page = 0; page < 4; ++page) {
             auto *button = visualChild(root, QString("navigation%1").arg(page)); QVERIFY(button);
             QVERIFY(QMetaObject::invokeMethod(button, "click"));
-            QTRY_COMPARE(shell.appBridge()->page(), page);
-            QCOMPARE(shell.window()->property("currentPage").toInt(), page);
+            const int destination=page==1?4:page;
+            QTRY_COMPARE(shell.appBridge()->page(), destination);
+            QCOMPARE(shell.window()->property("currentPage").toInt(), destination);
         }
         QCOMPARE(changes.size(), 3);
         QVERIFY(shell.appBridge()->navigate(3)); QCOMPARE(changes.size(), 3);

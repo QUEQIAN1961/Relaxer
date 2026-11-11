@@ -286,7 +286,7 @@ private slots:
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         int revision=w->property("navigationRevision").toInt(); QVERIFY(click(w,visual(root,"navigation0")));
         QCOMPARE(w->property("navigationRevision").toInt(),revision);
-        QVERIFY(click(w,visual(root,"navigation1"))); QTRY_COMPARE(f.shell->appBridge()->page(),1); QTest::qWait(220);
+        QVERIFY(click(w,visual(root,"navigation1"))); QTRY_COMPARE(f.shell->appBridge()->page(),4); QTest::qWait(220);
         revision=w->property("navigationRevision").toInt(); QVERIFY(click(w,visual(root,"navigation1"))); QCOMPARE(w->property("navigationRevision").toInt(),revision);
         const auto key=f.shell->libraryBridge()->createPlaylist("UX playlist"); QVERIFY(key!="0");
         QVERIFY(QMetaObject::invokeMethod(w,"openPlaylist",Q_ARG(QVariant,key))); QTRY_COMPARE(f.shell->libraryBridge()->playlistId(),key); QTest::qWait(220);

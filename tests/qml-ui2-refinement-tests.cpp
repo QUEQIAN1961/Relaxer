@@ -52,7 +52,8 @@ private slots:
             QVERIFY(QMetaObject::invokeMethod(menu,"close"));
             QTRY_VERIFY(!menu->property("visible").toBool());
         }
-        QVERIFY(click(w,visual(root,"navigation1")));QTRY_COMPARE(f.shell->appBridge()->page(),1);QTest::qWait(260);
+        QVERIFY(click(w,visual(root,"navigation1")));QTRY_COMPARE(f.shell->appBridge()->page(),4);
+        QVERIFY(f.shell->appBridge()->navigate(1));QTest::qWait(260);
         auto *create=visual(root,"createPlaylistButton");QVERIFY(create);QCOMPARE(create->height(),36.);shot(w,"03-playlists-header");
         QVERIFY(click(w,visual(root,"navigation2")));QTRY_COMPARE(f.shell->appBridge()->page(),2);QTest::qWait(260);
         auto *recent=visual(root,"profileRecent"),*longest=visual(root,"profileFrequent");QVERIFY(recent&&longest);QCOMPARE(recent->height(),36.);QVERIFY(bounds(longest).top()>bounds(recent).bottom());QVERIFY(!visual(root,"profileEdit"));

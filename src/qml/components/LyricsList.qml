@@ -76,7 +76,7 @@ Item {
             visible:!lyricsModel.instrumental;interactive:!lyricsModel.instrumental
             clip: true; model:lyricsModel.instrumental?null:lyricsModel; cacheBuffer: 150
             spacing: 4; boundsBehavior: Flickable.StopAtBounds
-            SmoothWheelHandler { id: manualWheel; flickable: list;enabled:!lyricsModel.instrumental; onScrolling: panel.takeOver() }
+            SmoothWheelHandler { id: manualWheel; objectName:"lyricsManualWheel"; flickable: list;enabled:!lyricsModel.instrumental; onScrolling: panel.takeOver() }
             header: Item { width: 1; height: list.height / 2 }
             footer: Item { width: 1; height: list.height / 2 }
             onDraggingChanged: { if (dragging) panel.takeOver(); else if (panel.manualScroll) returnIdle.restart() }

@@ -332,7 +332,7 @@ private slots:
         auto *button=visual(window->contentItem(),"navigation1");QVERIFY(button);const auto point=button->mapToScene(QPointF(button->width()/2,button->height()/2));
         QTest::mouseClick(window,Qt::LeftButton,Qt::NoModifier,point.toPoint());QElapsedTimer timer;timer.start();int frames=0;
         while(timer.elapsed()<400){QVERIFY2(correct(),"Shared image background disappeared or turned black during a page transition");++frames;QTest::qWait(10);}
-        QVERIFY(frames>5);QCOMPARE(fixture.shell->appBridge()->page(),1);QVERIFY(window->grabWindow().save(evidence+"/managed-background.png"));
+        QVERIFY(frames>5);QCOMPARE(fixture.shell->appBridge()->page(),4);QVERIFY(window->grabWindow().save(evidence+"/managed-background.png"));
         const auto state=fixture.library.setting("appearanceHistory").toObject();QVERIFY(!state.isEmpty());
         record("shared-managed-image",{{"frames",frames},{"actualImagePixels",true},{"transition",true},{"storedInExistingAppearanceHistory",true}});
         QVERIFY2(fixture.shell->warnings().isEmpty(),qPrintable(fixture.shell->warnings().join('\n')));

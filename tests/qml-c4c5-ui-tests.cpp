@@ -21,7 +21,8 @@ private slots:
     void lyricHighlightScaleManualScrollAndRealSeek(){
         Fixture f;QVERIFY(f.ok);auto *window=f.shell->window();auto *facade=f.shell->facade();QVERIFY(QMetaObject::invokeMethod(window,"showLyrics"));
         QTRY_COMPARE(f.shell->lyricsModel()->count(),80);QTRY_VERIFY(facade->seekable());f.shell->playbackBridge()->pause();facade->seek(3000);
-        QTRY_COMPARE(f.shell->lyricsModel()->currentIndex(),3);QTest::qWait(250);
+        QTRY_COMPARE(f.shell->lyricsModel()->currentIndex(),3);
+        QTRY_COMPARE(window->property("playerProgress").toReal(),1.);
         auto *panel=visual(window->contentItem(),"lyricsPanel");auto *list=visual(window->contentItem(),"lyricsList");QVERIFY(panel);QVERIFY(list);
         const auto rows=delegates(list);QVERIFY(!rows.isEmpty());QVERIFY(rows.size()<20);int active=0;
         for(auto *row:rows){if(row->property("current").toBool()){++active;QCOMPARE(row->property("activeScale").toDouble(),1.2);QVERIFY(qAbs(row->childItems().first()->scale()-1.2)<0.001);}else QCOMPARE(row->property("activeScale").toDouble(),1.0);}
@@ -34,6 +35,9 @@ private slots:
         QCoreApplication::sendEvent(window,&wheel);QTRY_VERIFY(panel->property("manualScroll").toBool());
         QTest::qWait(100);QVERIFY(QMetaObject::invokeMethod(list,"cancelFlick"));QTest::qWait(50);
         QTRY_VERIFY(!list->property("moving").toBool());
+        auto *manualWheel=visual(panel,"lyricsManualWheel");QVERIFY(manualWheel);
+        auto *wheelMotion=manualWheel->property("motion").value<QObject *>();QVERIFY(wheelMotion);
+        QTRY_VERIFY(!wheelMotion->property("running").toBool());
         const auto y=list->property("contentY").toReal();facade->seek(12000);QTRY_COMPARE(f.shell->lyricsModel()->currentIndex(),12);
         QTest::qWait(60);QCOMPARE(list->property("contentY").toReal(),y);
         auto *back=visual(window->contentItem(),"lyricsReturnCurrent");QVERIFY(back);QVERIFY(QMetaObject::invokeMethod(back,"click"));QVERIFY(!panel->property("manualScroll").toBool());

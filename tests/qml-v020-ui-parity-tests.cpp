@@ -77,7 +77,7 @@ private slots:
         Fixture f; QVERIFY2(prepare(f), qPrintable(f.shell->warnings().join('\n')));
         auto *window = f.shell->window(); auto *content = window->contentItem();
         auto *sidebar = visual(content, "sidebar"); QVERIFY(sidebar);
-        const QStringList names{"本地音乐", "歌单", "个人", "设置", "我喜欢"};
+        const QStringList names{"本地音乐", "发现", "个人", "设置", "我喜欢"};
         int navigationCount = 0;
         QList<QQuickItem *> all;std::function<void(QQuickItem *)> collect=[&](QQuickItem *item){all.append(item);for(auto *child:item->childItems())collect(child);};collect(sidebar);
         const QRegularExpression navigationButton("^navigation[0-9]+$");
@@ -94,7 +94,7 @@ private slots:
         auto *bar = visual(content, "playerBar"); auto *cover = visual(content, "bottomCover");
         auto *title = visual(content, "currentTitle"); auto *center = visual(content, "playerCenter");
         QVERIFY(bar); QVERIFY(cover); QVERIFY(title); QVERIFY(center);
-        QCOMPARE(bar->height(), 98.); QCOMPARE(cover->size(), QSizeF(76, 76));
+        QCOMPARE(bar->height(), 98.*.9); QCOMPARE(cover->size(), QSizeF(66.2, 66.2));
         QCOMPARE(sceneBounds(bar).bottom(), qreal(window->height()));
         QVERIFY(sceneBounds(cover).center().x() < window->width() / 3.);
         QVERIFY(sceneBounds(bar).contains(sceneBounds(cover)));
@@ -167,7 +167,7 @@ private slots:
                 sawIncomingMovement = sawIncomingMovement || (surface->y() < -.05 && surface->y() > -8);
                 QTest::qWait(7);
             }
-            QCOMPARE(f.shell->appBridge()->page(), destination);
+            QCOMPARE(f.shell->appBridge()->page(), destination==1?4:destination);
             QVERIFY2(sawOutgoingSnapshot, "Sidebar navigation never displayed an outgoing page snapshot");
             QVERIFY2(sawOutgoingFade, "Outgoing page did not visibly fade across native frames");
             QVERIFY2(sawIncomingFade, "New page appeared without an intermediate fade frame");
@@ -203,7 +203,7 @@ private slots:
         // can reach its endpoint before the incoming panel animation finishes.
         QTRY_VERIFY_WITH_TIMEOUT(!panel->property("relocating").toBool(), 1200);
         QTRY_VERIFY(qAbs(sceneBounds(panel).left() - 8.) < 2);
-        QTRY_VERIFY_WITH_TIMEOUT(qAbs(sceneBounds(panel).bottom() - (window->height() - 4)) < 2, 1200);
+        QTRY_VERIFY_WITH_TIMEOUT(qAbs(sceneBounds(panel).bottom() - (window->height() - 8)) < 2, 1200);
         QVERIFY(panel->property("expandedPlayer").toBool());
         const auto expandedExpected = f.shell->facade()->upcoming(); QVERIFY(!expandedExpected.isEmpty());
         QTRY_COMPARE(forecast->ids(), expandedExpected);
