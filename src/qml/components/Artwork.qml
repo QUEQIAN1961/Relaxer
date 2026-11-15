@@ -2,6 +2,8 @@ import QtQuick
 import QtQuick.Window
 Item {
     id: artwork
+    property bool videoCover:false
+    property real coverAspect:videoCover?4/3:1
     property url file
     property string seed: "Relaxer"
     property string revision: ""
@@ -15,7 +17,7 @@ Item {
         + "&seed=" + encodeURIComponent(seed) + "&rev=" + encodeURIComponent(revision)
         + "&resolution=" + resolution
         // Clip corners on the canvas; resizing must not reload or transition the image.
-        + "&radiusRatio=0"
+        + "&radiusRatio=0&aspect="+coverAspect
     property url displayedUrl
     property url outgoingUrl
     property int activeDirection: 0
@@ -73,6 +75,18 @@ Item {
     onAnimatedChanged: if (initialized && !animated) { motion.stop(); pendingTransition = false; transition = 1; if (pocket.isImageLoaded(displayedUrl)) retireOutgoing() }
     onReduceMotionChanged: if (initialized && reduceMotion) { motion.stop(); pendingTransition = false; transition = 1; if (pocket.isImageLoaded(displayedUrl)) retireOutgoing() }
     Component.onCompleted: { initialized = true; updateImage() }
+    Image {id:cropInfo;visible:false;source:artwork.videoCover?artwork.displayedUrl:"";asynchronous:true;onStatusChanged:pocket.requestPaint()}
+    Image {id:oldCropInfo;visible:false;source:artwork.videoCover?artwork.outgoingUrl:"";asynchronous:true;onStatusChanged:pocket.requestPaint()}
+    function drawCover(context,url,x){
+        if(width<=0||height<=0)return
+        const info=String(url)===String(displayedUrl)?cropInfo:oldCropInfo
+        if(videoCover){
+            if(info.status!==Image.Ready||String(info.source)!==String(url)||info.implicitWidth<=0||info.implicitHeight<=0)return
+            const factor=Math.max(width/info.implicitWidth,height/info.implicitHeight)
+            const w=info.implicitWidth*factor,h=info.implicitHeight*factor
+            context.drawImage(url,x+(width-w)/2,(height-h)/2,w,h)
+        }else context.drawImage(url,x,0,width,height)
+    }
     Canvas {
         id: pocket
         anchors.fill: parent
@@ -87,7 +101,7 @@ Item {
         }
         onPaint: {
             const context = getContext("2d")
-            context.clearRect(0, 0, width, height)
+            context.clearRect(0, 0,width,height)
             const radius = Math.min(artwork.radius, width / 2, height / 2)
             context.save()
             context.beginPath()
@@ -106,15 +120,15 @@ Item {
             const nextReady = String(artwork.displayedUrl).length && isImageLoaded(artwork.displayedUrl)
             const progress = nextReady ? artwork.transition : 0
             if (artwork.activeDirection < 0) {
-                if (nextReady) context.drawImage(artwork.displayedUrl, 0, 0, width, height)
-                if (oldReady && progress < 1) context.drawImage(artwork.outgoingUrl, width * progress, 0, width, height)
+                if (nextReady) artwork.drawCover(context,artwork.displayedUrl,0)
+                if (oldReady && progress < 1) artwork.drawCover(context,artwork.outgoingUrl,width*progress)
             } else if (artwork.activeDirection > 0) {
-                if (oldReady && progress < 1) context.drawImage(artwork.outgoingUrl, 0, 0, width, height)
-                if (nextReady) context.drawImage(artwork.displayedUrl, width * (1 - progress), 0, width, height)
+                if (oldReady && progress < 1) artwork.drawCover(context,artwork.outgoingUrl,0)
+                if (nextReady) artwork.drawCover(context,artwork.displayedUrl,width*(1-progress))
             } else {
-                if (oldReady && progress < 1) { context.globalAlpha = 1 - progress; context.drawImage(artwork.outgoingUrl, 0, 0, width, height) }
+                if (oldReady && progress < 1) { context.globalAlpha = 1 - progress; artwork.drawCover(context,artwork.outgoingUrl,0) }
                 context.globalAlpha = nextReady ? progress : 0
-                if (nextReady) context.drawImage(artwork.displayedUrl, 0, 0, width, height)
+                if (nextReady) artwork.drawCover(context,artwork.displayedUrl,0)
             }
             context.restore()
         }

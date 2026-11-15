@@ -1,4 +1,5 @@
 #include "importer.h"
+#include <QBuffer>
 #include "artwork-recovery.h"
 #include "midi-transport.h"
 #include "lyric-text.h"
@@ -49,7 +50,7 @@ QString toolPath(const QString &name) {
 QStringList Importer::extensions() {
     return {"mp3",  "flac", "wav", "m4a", "aac", "ogg", "opus", "oga", "aiff", "aif", "wma", "ape",
             "wv",   "tta",  "mpc", "mp+", "mp2", "mka", "ac3",  "amr", "caf",  "m4b", "mid", "midi",
-            "kar"};
+            "kar", "mp4", "mkv", "webm", "mov", "m4v", "avi", "mpeg", "mpg", "ts", "m2ts", "wmv"};
 }
 static QByteArray process(const QString &exe, const QStringList &args, int timeout,
                           QString *error = nullptr,std::atomic_bool *cancel = nullptr) {
@@ -175,8 +176,11 @@ static ArtworkResult readArtwork(const QString &root, const QString &source, con
         for (const auto &suffix : QStringList{".png", ".jpg", ".jpeg", ".webp"}) {
             // A shared folder cover is ambiguous in a directory containing unrelated songs.
             const auto image=readArtworkImage(audio.dir().filePath(audio.completeBaseName()+suffix),QSize(800,800));
+            if(!writeCache&&!image.isNull()){
+                QBuffer buffer(&result.png);buffer.open(QIODevice::WriteOnly);if(image.save(&buffer,"PNG")){result.cover=relative;result.origin="sidecar";result.outcome=ArtworkOutcome::Recovered;result.error.clear();return result;}
+            }
             QSaveFile out(destination);
-            if (!image.isNull() && out.open(QIODevice::WriteOnly) && image.save(&out, "PNG") &&
+            if (writeCache&&!image.isNull() && out.open(QIODevice::WriteOnly) && image.save(&out, "PNG") &&
                 out.commit()) {
                 result.cover = relative;
                 result.origin = "sidecar";
@@ -185,13 +189,20 @@ static ArtworkResult readArtwork(const QString &root, const QString &source, con
             }
         }
     }
+    // A real video without artwork uses its first visual frame. Audio files
+    // keep the existing embedded-picture/sidecar behavior.
+    if(isVideoFile(source))for(const auto &value:json["streams"].toArray()){
+        const auto stream=value.toObject();if(stream["codec_type"]!="video"||stream["disposition"].toObject()["attached_pic"].toInt()==1)continue;
+        const auto png=process(toolPath("ffmpeg"),{"-v","error","-i",source,"-map","0:"+QString::number(stream["index"].toInt()),"-frames:v","1","-vf","scale=800:800:force_original_aspect_ratio=decrease","-f","image2pipe","-vcodec","png","pipe:1"},20000,&result.error,cancel);
+        if(!decodeRecoveredArtwork(png).isNull()&&(!writeCache||atomicWrite(destination,png))){result.cover=relative;result.origin="video-frame";result.outcome=ArtworkOutcome::Recovered;result.error.clear();if(!writeCache)result.png=png;return result;}break;
+    }
     return result;
 }
 ArtworkResult Importer::repairArtwork(const QString &root, const Track &track, std::atomic_bool *cancel) {
     ArtworkResult result;result.id=track.id;result.hash=track.hash;result.previousCover=track.cover;result.trackFile=track.file;
     const auto source=QDir(root).filePath(track.file);
     result.sourceVersion=artworkFileVersion(source);
-    result.previousVersion=artworkFileVersion(QDir(root).filePath(track.cover));
+    result.previousVersion=artworkFileVersion(track.cover.isEmpty()?QString():QDir(root).filePath(track.cover));
     auto stop=[&]{return cancel&&cancel->load();};
     if(stop()){result.outcome=ArtworkOutcome::Cancelled;result.error="已取消";return result;}
     result.previousUsable=!readArtworkImage(QDir(root).filePath(track.cover),QSize(64,64)).isNull();
@@ -208,7 +219,7 @@ ArtworkResult Importer::repairArtwork(const QString &root, const Track &track, s
         if(stop())result.outcome=ArtworkOutcome::Cancelled;
         return result;
     }
-    auto artwork=readArtwork(root,source,track.hash,document.object(),false,cancel,false);
+    auto artwork=readArtwork(root,source,track.hash,document.object(),isVideoFile(track.file),cancel,false);
     result.cover=artwork.cover;result.origin=artwork.origin;result.error=artwork.error;
     result.png=std::move(artwork.png);result.outcome=artwork.outcome;
     if(stop()){result.png.clear();result.outcome=ArtworkOutcome::Cancelled;result.error="已取消";}
@@ -243,7 +254,7 @@ ImportResult Importer::importOne(const QString &root, const QString &source, std
     if (!bytes.isEmpty()) {
         for (const auto &v : json["streams"].toArray()) {
             auto s = v.toObject();
-            if (s["codec_type"] == "audio" || isMidiSuffix(fi.suffix())) {
+            if (s["codec_type"] == "audio" || (s["codec_type"] == "video" && isVideoFile(fi.fileName())) || isMidiSuffix(fi.suffix())) {
                 hasAudio = true;
                 auto extra = s["tags"].toObject();
                 for (auto it = extra.begin(); it != extra.end(); ++it)

@@ -11,6 +11,7 @@ class Queue {
     int index = -1;
     Mode mode = Mode::ListLoop;
     void set(QVector<qint64> ids, qint64 current = 0);
+    bool enqueue(const QVector<qint64> &ids,bool next);
     qint64 current() const { return index >= 0 && index < items.size() ? items[index] : 0; }
     qint64 next(bool manual = false);
     qint64 previous();
@@ -19,6 +20,7 @@ class Queue {
 
   private:
     QVector<qint64> bag, history;
+    QVector<qint64> m_priority;
     int historyIndex = -1;
     QVector<QVector<qint64>> m_plannedBags,m_generated;
     bool m_previewing=false;

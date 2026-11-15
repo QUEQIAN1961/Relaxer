@@ -1,5 +1,6 @@
 #pragma once
 #include <QByteArray>
+#include <QAudioDevice>
 #include <QString>
 #include <memory>
 
@@ -13,6 +14,7 @@ public:
     bool pause();
     bool seek(qint64 milliseconds);
     bool setVolume(int percent);
+    bool setOutputDevice(const QAudioDevice &device);
     bool close();
     qint64 position() const;
     qint64 duration() const;
@@ -23,5 +25,6 @@ public:
 private:
     struct State;
     std::unique_ptr<State> m;
+    QAudioDevice m_outputDevice;
 };
 }

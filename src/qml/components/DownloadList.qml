@@ -17,7 +17,7 @@ Popup {
     exit:Transition {NumberAnimation {property:"opacity";to:0;duration:settingsBridge.values.reduceMotion?0:90}}
     contentItem:ColumnLayout {
         spacing:4
-        UiText {text:"下载";Layout.fillWidth:true;Layout.leftMargin:6;Layout.preferredHeight:24;font.pixelSize:14;font.weight:Font.DemiBold}
+        UiText {text:"下载";Layout.fillWidth:true;Layout.leftMargin:6;Layout.preferredHeight:24;basePixelSize:14;font.weight:Font.DemiBold}
         ListView {
             id:list;objectName:"onlineDownloadTasks";Layout.fillWidth:true;Layout.fillHeight:true
             clip:true;model:onlineDownloads;boundsBehavior:Flickable.StopAtBounds;spacing:0
@@ -33,9 +33,9 @@ Popup {
                     Artwork {Layout.preferredWidth:34;Layout.preferredHeight:34;radius:5;animated:false;file:entry.model.cover||"";seed:entry.model.title;resolution:80}
                     ColumnLayout {
                         Layout.fillWidth:true;Layout.minimumWidth:0;spacing:3
-                        UiText {Layout.fillWidth:true;text:entry.model.title;textFormat:Text.PlainText;font.pixelSize:13;elide:Text.ElideRight}
+                        UiText {Layout.fillWidth:true;text:entry.model.title;textFormat:Text.PlainText;basePixelSize:13;elide:Text.ElideRight}
                         UiText {
-                            objectName:"downloadBytes-"+entry.model.taskId;Layout.fillWidth:true;font.pixelSize:11;color:Theme.secondary;elide:Text.ElideRight;textFormat:Text.PlainText
+                            objectName:"downloadBytes-"+entry.model.taskId;Layout.fillWidth:true;basePixelSize:11;color:Theme.secondary;elide:Text.ElideRight;textFormat:Text.PlainText
                             text:entry.taskState==="queued"?"等待下载":entry.taskState==="resolving"?"正在获取资源…":entry.taskState==="converting"?"正在保存音频…":entry.taskState==="cancelled"?"已取消":entry.taskState==="failed"?entry.model.error:popup.byteText(entry.model.received)+"/"+(entry.model.total>0?popup.byteText(entry.model.total):"—")
                         }
                     }
@@ -43,7 +43,7 @@ Popup {
                     IconButton {Layout.preferredWidth:24;Layout.preferredHeight:24;padding:5;symbol:"close";tip:"取消下载";showTooltip:true;visible:entry.pending;onClicked:onlineDownloads.cancelTask(entry.model.taskId)}
                 }
             }
-            UiText {anchors.centerIn:parent;visible:onlineDownloads.count===0;text:"暂无下载";color:Theme.secondary;font.pixelSize:13}
+            UiText {anchors.centerIn:parent;visible:onlineDownloads.count===0;text:"暂无下载";color:Theme.secondary;basePixelSize:13}
         }
     }
 }

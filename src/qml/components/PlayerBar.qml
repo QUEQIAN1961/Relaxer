@@ -13,6 +13,7 @@ Rectangle {
     function miniTarget(key){return ({queue:queueButton,favorite:favoriteButton,previous:previousButton,play:playButton,next:nextButton,mode:modeButton,volume:compactVolume})[key]}
     function settleMiniLayout(){transportRow.forceLayout()}
     property real backgroundCanvasHeight: height
+    property Item popupBackdrop
     property real backgroundOffsetY: 0
     readonly property alias smallArtwork: art
     readonly property alias metadataTitle: title
@@ -23,16 +24,26 @@ Rectangle {
     readonly property real queueControlY:center.y+transportRow.y+queueButton.y
     readonly property real coverMargin:11
     readonly property real wideMargin:coverMargin
-    readonly property real wideMetadataWidth:Math.min(304,Math.max(130,(width-288)/2))
-    readonly property real wideCenterX:wideMargin+wideMetadataWidth+14
-    readonly property real wideRightSpace:Math.min(356,Math.max(168,168+(width-548)*188/692))
-    readonly property bool wideVolumeSlider:width>=900
+    property real wideLayoutWidth:width
+    property real compactLayoutWidth:width
+    readonly property real wideCenterWidth:Math.min(400,Math.max(240,wideLayoutWidth*.36))
+    readonly property real wideCenterX:(wideLayoutWidth-wideCenterWidth)/2
+    // Include the hover surface's 5px outset when leaving space before the timeline.
+    readonly property real wideMetadataWidth:Math.max(0,Math.min((height-2*coverMargin)*(playbackBridge.video?4/3:1)+12+Math.ceil(Math.max(titleNatural.implicitWidth,artistNatural.implicitWidth))+6,wideCenterX-3*coverMargin-5))
+    readonly property real wideRightSpace:Math.min(356,Math.max(168,168+(wideLayoutWidth-548)*188/692))
+    readonly property real wideVolumeX:Math.max(wideLayoutWidth-202,wideCenterX+wideCenterWidth+2*coverMargin)
+    readonly property real wideVolumeIconX:wideVolumeX+9
+    readonly property bool wideVolumeSlider:wideLayoutWidth>=547
+    readonly property real wideVolumeSliderWidth:Math.max(1,Math.min(80,wideLayoutWidth-coverMargin-36-10-(wideVolumeX+36+10)))
     property real expansion:expanded?1:0
     Behavior on expansion {NumberAnimation{duration:settingsBridge.values.reduceMotion?0:420;easing.type:Easing.OutCubic}}
-    readonly property real compactSpacing:Math.min(8,Math.max(4,(width-382)/6))
-    readonly property real compactControlsLeft:width-18-(258+6*compactSpacing)
-    readonly property real compactMetadataWidth:Math.max(76,compactControlsLeft-12-coverMargin)
+    readonly property real transportButtonWidth:blend(36,32)
+    readonly property real transportButtonPadding:blend(7,5)
+    readonly property real compactSpacing:6+4*Math.max(0,Math.min(1,(compactLayoutWidth-414)/132))
+    readonly property real compactControlsLeft:compactLayoutWidth-coverMargin-(7*32+playButton.implicitWidth+7*compactSpacing)
+    readonly property real compactMetadataWidth:Math.max((height-2*coverMargin)*(playbackBridge.video?4/3:1),compactControlsLeft-18-coverMargin)
     signal expandRequested()
+    signal narrowRequested()
     signal queueRequested(var anchor)
     readonly property real compactProgress:Theme.layoutProgress
     function blend(wide,narrow){return wide+(narrow-wide)*compactProgress}
@@ -41,7 +52,7 @@ Rectangle {
         const shown=Array.from(elided.replace(/[\s…]/g,"")).length
         return !(shown<=2 && total-shown>3)
     }
-    implicitHeight: 98*.9
+    implicitHeight: 98*.9*.9
     color: Theme.footer
     function timeText(ms) {
         const seconds = Math.floor(Math.max(0, ms) / 1000)
@@ -70,28 +81,30 @@ Rectangle {
         }
         Artwork {
             id: art; objectName: "bottomCover"
-            x: 0; anchors.verticalCenter: parent.verticalCenter; width:parent.height;height:width; radius: 10
+            x: 0; anchors.verticalCenter: parent.verticalCenter; width:parent.height*(playbackBridge.video?4/3:1);height:parent.height;videoCover:playbackBridge.video; radius: 10
             file: playbackBridge.coverUrl; seed: playbackBridge.hasTrack ? playbackBridge.title : "Relaxer"
             revision: playbackBridge.artworkRevision; resolution: 160; animated: false
         }
         Item {
             id:metadataText;clip:true
-            x:art.width+12;width:Math.max(0,parent.width-x-bar.blend(12,0)); anchors.verticalCenter: parent.verticalCenter
+            x:art.width+12;width:Math.max(0,parent.width-x-bar.blend(2,0)); anchors.verticalCenter: parent.verticalCenter
             // Keep distinct landing rows even when the available width hides both labels.
             height:title.implicitHeight+4+artist.implicitHeight
             UiText { fontRegion: "footer";
                 id: title; objectName: "currentTitle"; width: parent.width
                 text: playbackBridge.hasTrack ? playbackBridge.title : "Relaxer"
                 visible:!Theme.compact||bar.showMetadata(text,titleMetrics.elidedText)
-                textFormat: Text.PlainText; font.pixelSize: 15; font.weight:Font.DemiBold;color: Theme.text; elide: Text.ElideRight
+                textFormat: Text.PlainText; basePixelSize: 15; font.weight:Font.DemiBold;color: Theme.text; elide: Text.ElideRight
             }
             UiText { fontRegion: "footer";
-                id: artist; objectName: "currentArtist"; y:title.height+4; width: parent.width
-                text: playbackBridge.hasTrack ? playbackBridge.artist : "选一首歌，开始放松。"
+                id: artist; objectName: "currentArtist"; y:title.height+4; width:bar.blend(Math.max(0,Math.min(parent.width,bar.wideCenterX-2*bar.coverMargin-metadata.x-metadataText.x)),parent.width)
+                text: playbackBridge.hasTrack ? playbackBridge.artist+(playbackBridge.audioPreview?" · 试听":"") : "选一首歌，开始放松。"
                 visible:!Theme.compact||bar.showMetadata(text,artistMetrics.elidedText)
-                textFormat: Text.PlainText; font.pixelSize: 14; color: Theme.secondary; elide: Text.ElideRight
+                textFormat: Text.PlainText; basePixelSize: 14; color: Theme.secondary; elide: Text.ElideRight
             }
         }
+        Text {id:titleNatural;visible:false;text:title.text;font:title.font;textFormat:Text.PlainText}
+        Text {id:artistNatural;visible:false;text:artist.text;font:artist.font;textFormat:Text.PlainText}
         TextMetrics {id:titleMetrics;text:title.text;font:title.font;elide:Qt.ElideRight;elideWidth:title.width}
         TextMetrics {id:artistMetrics;text:artist.text;font:artist.font;elide:Qt.ElideRight;elideWidth:artist.width}
         MouseArea {
@@ -103,23 +116,35 @@ Rectangle {
     Item {
         id: center
         objectName: "playerCenter"
-        x:bar.blend(bar.wideCenterX,Math.min(112,bar.compactControlsLeft)*(1-bar.expansion)+18*bar.expansion);y:(bar.height-height)/2;width:Math.max(0,bar.blend(bar.width-bar.wideCenterX-bar.wideRightSpace,bar.width-18-(Math.min(112,bar.compactControlsLeft)*(1-bar.expansion)+18*bar.expansion)));height:74
+        x:bar.blend(bar.wideCenterX,Math.min(112,bar.compactControlsLeft)*(1-bar.expansion)+bar.coverMargin*bar.expansion);y:(bar.height-height)/2+3;width:Math.max(0,bar.blend(bar.wideCenterWidth,bar.compactLayoutWidth-bar.coverMargin-(Math.min(112,bar.compactControlsLeft)*(1-bar.expansion)+bar.coverMargin*bar.expansion)));height:74
         Row {
             id:transportRow
             visible:!bar.miniControlsTravelling
             x:Math.max(0,(parent.width-width)*(0.5+(0.5*(1-bar.expansion))*bar.compactProgress))
-            height:42;spacing:bar.blend(bar.width<700?8:12,bar.compactSpacing)
+            height:42;spacing:bar.blend(bar.wideLayoutWidth<700?8:12,bar.compactSpacing)
             IconButton {
                 id:queueButton;objectName:"compactQueueButton";anchors.verticalCenter:parent.verticalCenter
-                visible:bar.compactProgress>0;opacity:bar.compactProgress;scale:bar.compactProgress;width:36*bar.compactProgress
+                visible:bar.compactProgress>0;opacity:bar.compactProgress;scale:bar.compactProgress;width:bar.transportButtonWidth*bar.compactProgress;padding:bar.transportButtonPadding
                 text:"下一首列表";showTooltip:true
                 contentItem:Item {
-                    Repeater {model:3;Rectangle {required property int index;x:0;y:5+index*6;width:8+index*6;height:2;radius:1;color:Theme.text}}
+                    id:queueGlyph
+                    readonly property real pixelRatio:Screen.devicePixelRatio
+                    readonly property real lineHeight:Math.max(1,Math.round(1.25*pixelRatio))/pixelRatio
+                    Repeater {model:[7,12,16]
+                        Rectangle {
+                            required property int index;required property real modelData
+                            objectName:"queueLine-"+index
+                            x:Math.round((queueGlyph.width-16)/2*queueGlyph.pixelRatio)/queueGlyph.pixelRatio
+                            y:Math.round((queueGlyph.height/2+(index-1)*5.6-queueGlyph.lineHeight/2)*queueGlyph.pixelRatio)/queueGlyph.pixelRatio
+                            width:Math.round(modelData*queueGlyph.pixelRatio)/queueGlyph.pixelRatio;height:queueGlyph.lineHeight
+                            radius:height/2;antialiasing:true;color:Theme.text
+                        }
+                    }
                 }
                 onClicked:bar.queueRequested(queueButton)
             }
             IconButton {
-                id:favoriteButton;objectName: "currentFavoriteButton"; anchors.verticalCenter: parent.verticalCenter
+                id:favoriteButton;width:bar.transportButtonWidth;padding:bar.transportButtonPadding;objectName: "currentFavoriteButton"; anchors.verticalCenter: parent.verticalCenter
                 symbol: playbackBridge.currentFavorite ? "liked" : "heart"
                 iconColor: playbackBridge.currentFavorite ? Theme.accent : Theme.text
                 text: playbackBridge.currentFavorite ? "取消喜欢" : "喜欢歌曲"
@@ -127,7 +152,7 @@ Rectangle {
                 onClicked: playbackBridge.toggleFavorite()
             }
             IconButton {
-                id:previousButton;objectName: "previousButton"; anchors.verticalCenter: parent.verticalCenter; symbol: "previous"; text: "上一首"
+                id:previousButton;width:bar.transportButtonWidth;padding:bar.transportButtonPadding;objectName: "previousButton"; anchors.verticalCenter: parent.verticalCenter; symbol: "previous"; text: "上一首"
                 enabled: playbackBridge.available && playbackBridge.hasTrack; onClicked: playbackBridge.previous()
             }
             IconButton {
@@ -139,11 +164,11 @@ Rectangle {
                 onClicked: playbackBridge.toggle()
             }
             IconButton {
-                id:nextButton;objectName: "nextButton"; anchors.verticalCenter: parent.verticalCenter; symbol: "next"; text: "下一首"
+                id:nextButton;width:bar.transportButtonWidth;padding:bar.transportButtonPadding;objectName: "nextButton"; anchors.verticalCenter: parent.verticalCenter; symbol: "next"; text: "下一首"
                 enabled: playbackBridge.available && playbackBridge.hasTrack; onClicked: playbackBridge.next()
             }
             IconButton {
-                id:modeButton;objectName: "playMode"; showTooltip:true; anchors.verticalCenter: parent.verticalCenter
+                id:modeButton;width:bar.transportButtonWidth;padding:bar.transportButtonPadding;objectName: "playMode"; showTooltip:true; anchors.verticalCenter: parent.verticalCenter
                 symbol: ["playlist", "repeat", "single", "shuffle"][playbackBridge.mode]
                 text: ["顺序播放", "列表循环", "单曲循环", "随机循环"][playbackBridge.mode]
                 Accessible.name: text
@@ -151,20 +176,22 @@ Rectangle {
             }
             Item {
                 id:compactVolumeSlot;anchors.verticalCenter:parent.verticalCenter
-                visible:bar.compactProgress>0;width:36*bar.compactProgress;height:36
+                visible:bar.compactProgress>0;width:bar.transportButtonWidth*bar.compactProgress;height:36
             }
+            Item {id:compactWidthSlot;anchors.verticalCenter:parent.verticalCenter;visible:bar.compactProgress>0;width:bar.transportButtonWidth*bar.compactProgress;height:36}
         }
         RowLayout {
             x:(parent.width-width)*(1-0.5*bar.expansion);y:46;width:bar.blend(parent.width,Math.min(306,parent.width)); height: 22; spacing: 8
             UiText { fontRegion: "footer";
                 objectName: "playbackState"; Layout.preferredWidth: 40
-                text: bar.timeText(playbackBridge.position); color: Theme.secondary; font.pixelSize: 12
+                text: bar.timeText(playbackBridge.position); color: Theme.secondary; basePixelSize: 12
             }
             PlaybackSlider {
                 id: seek; objectName: "playbackProgress"; Layout.fillWidth: true
                 property string dragTrackKey: "0"
                 property real dragValue: 0
                 from: 0; to: Math.max(1, playbackBridge.duration)
+                showBuffer: true; bufferedRanges: playbackBridge.bufferedRanges
                 enabled: playbackBridge.available && playbackBridge.seekable
                 Accessible.name: "播放进度"
                 onPressedChanged: {
@@ -176,39 +203,42 @@ Rectangle {
             }
             UiText { fontRegion: "footer";
                 objectName: "durationDisplay"; Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight
-                text: bar.timeText(playbackBridge.duration); color: Theme.secondary; font.pixelSize: 12
+                text: bar.timeText(playbackBridge.duration); color: Theme.secondary; basePixelSize: 12
             }
         }
     }
     Item {
         objectName: "playerRight"
         opacity:1-bar.compactProgress;visible:opacity>0;enabled:!Theme.compact
-        x: bar.width - 342; y:(bar.height-height)/2; width: 320; height: 74
+        x: bar.wideLayoutWidth - 342; y:(bar.height-height)/2; width: 320; height: 74
         Item {
             id: volumeHost; objectName: "volumeControls"; width: 320; height: 36
             y:19*bar.expansion
-            Row {
-                anchors.right: parent.right; height: 36; spacing: 14
-                Item {width:36;height:36}
-                PlaybackSlider {
-                    objectName: "volumeSlider";visible:bar.wideVolumeSlider; anchors.verticalCenter: parent.verticalCenter; width: 80
-                    from: 0; to: 100; stepSize: 1; value: playbackBridge.volume
-                    onMoved: playbackBridge.setVolume(Math.round(value))
-                    Accessible.name: "音量"
-                }
-                IconButton {
-                    objectName: "playbackExpandButton"; anchors.verticalCenter: parent.verticalCenter
-                    symbol: bar.expanded ? "contract" : "expand"; text: bar.expanded ? "收起播放" : "展开播放"
-                    showTooltip: true; onClicked: {metadata.forceActiveFocus();bar.expandRequested()}
-                }
+            PlaybackSlider {
+                objectName:"volumeSlider";visible:bar.wideVolumeSlider
+                x:bar.wideVolumeX+46-(bar.wideLayoutWidth-342);anchors.verticalCenter:parent.verticalCenter;width:bar.wideVolumeSliderWidth
+                from:0;to:100;stepSize:1;value:playbackBridge.volume
+                onMoved:playbackBridge.setVolume(Math.round(value))
+                Accessible.name:"音量"
             }
         }
     }
+    IconButton {
+        id:widthButton;objectName:"playbackWidthButton";width:bar.transportButtonWidth;height:36;padding:bar.transportButtonPadding
+        visible:!bar.miniControlsTravelling
+        x:bar.blend(bar.wideLayoutWidth-bar.coverMargin-width,center.x+transportRow.x+compactWidthSlot.x)
+        y:bar.blend((bar.height-74)/2+19*bar.expansion,center.y+transportRow.y+compactWidthSlot.y)
+        symbol:Theme.compact?"expand":"contract";text:Theme.compact?"恢复宽窗口":"收窄窗口";showTooltip:true
+        onClicked:{compactVolume.closePopup();bar.narrowRequested()}
+    }
     function closeTransientPopups(){compactVolume.closePopup()}
     VolumeButton {
-        id:compactVolume;objectName:"muteButton";width:36;height:36
+        id:compactVolume;objectName:"muteButton";width:bar.transportButtonWidth;height:36;padding:bar.transportButtonPadding
+        backdropSource:bar.popupBackdrop;secondaryBackdrop:bar
+        // Keep Basic's horizontal inset explicit while the two layouts blend.
+        leftPadding:bar.transportButtonPadding+2;rightPadding:bar.transportButtonPadding+2
         visible:!bar.miniControlsTravelling
-        x:bar.blend(bar.width-(bar.wideVolumeSlider?202:108),center.x+transportRow.x+compactVolumeSlot.x)
+        x:bar.blend(bar.wideVolumeX,center.x+transportRow.x+compactVolumeSlot.x)
         y:bar.blend((bar.height-74)/2+19*bar.expansion,center.y+transportRow.y+compactVolumeSlot.y)
     }
     onExpandedChanged:compactVolume.closePopup()

@@ -1,4 +1,5 @@
 #pragma once
+#include <QAudioDevice>
 #include <QJsonObject>
 #include <QString>
 #include <QTemporaryFile>
@@ -25,6 +26,7 @@ class MidiTransport final {
     bool pause();
     bool seek(qint64 position);
     bool setVolume(int percent);
+    bool setOutputDevice(const QAudioDevice &device);
     bool close();
     qint64 position() const;
     qint64 duration() const { return m_duration; }

@@ -6,7 +6,7 @@ namespace relaxer {
 class UiRunDiagnostics;
 struct QmlLaunchOptions {
     QString dataRoot, screenshot, diagnostics;
-    int page = 0, quitAfter = 0;
+    int page = -1, quitAfter = 0;
 };
 // Same-toolchain private ABI. Only Qt Core values cross the module boundary;
 // business QObjects and every Quick type remain wholly inside the selected UI.

@@ -61,7 +61,7 @@ Item {
         RowLayout {
             visible: !lyricsModel.instrumental&&(lyricsModel.preview || panel.manualScroll || lyricsModel.loading || lyricsModel.error.length > 0)
             Layout.fillWidth: true
-            UiText { Layout.fillWidth: true; text: lyricsModel.status; wrapMode: Text.Wrap; color: lyricsModel.preview ? Theme.accent : Theme.secondary; font.pixelSize: 14; textFormat: Text.PlainText }
+            UiText { Layout.fillWidth: true; text: lyricsModel.status; wrapMode: Text.Wrap; color: lyricsModel.preview ? Theme.accent : Theme.secondary; basePixelSize: 14; textFormat: Text.PlainText }
             ShellButton { objectName: "lyricsReturnCurrent"; visible: panel.manualScroll && lyricsModel.timed; text: "回到当前歌词"; onClicked: panel.returnCurrent() }
         }
         UiText { Layout.fillWidth: true; visible: lyricsModel.error.length > 0; text: lyricsModel.error; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.accent }
@@ -110,7 +110,7 @@ Item {
                         fontRegion: "lyrics"
                         width: parent.width; text: row.original; textFormat: Text.PlainText
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
-                        font.pixelSize: 22; font.weight: Font.DemiBold
+                        basePixelSize: 22; font.weight: Font.DemiBold
                         color: settingsBridge.values.lyricColor.length > 0 ? settingsBridge.values.lyricColor : Theme.text
                     }
                     UiText {
@@ -118,7 +118,7 @@ Item {
                         width: parent.width; text: row.translation; textFormat: Text.PlainText
                         visible: settingsBridge.values.showLyricTranslation && text.length > 0
                         wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter
-                        objectName:"lyricTranslation";color: row.scrollSelected ? Theme.text : Theme.secondary; font.pixelSize: 17;font.weight:Font.DemiBold
+                        objectName:"lyricTranslation";color: row.scrollSelected ? Theme.text : Theme.secondary; basePixelSize: 17;font.weight:Font.DemiBold
                     }
                 }
             }
@@ -134,7 +134,7 @@ Item {
           MouseArea { anchors.fill: parent; enabled:!lyricsModel.instrumental;acceptedButtons: Qt.NoButton; onWheel: wheel => { panel.takeOver(); wheel.accepted = false } }
           UiText {
               objectName:"instrumentalMessage";anchors.centerIn:parent;width:Math.max(0,Math.min(parent.width-24,420));visible:lyricsModel.instrumental
-              text:"纯音乐，请欣赏";fontRegion:"lyrics";font.pixelSize:26;font.weight:Font.DemiBold;textFormat:Text.PlainText
+              text:"纯音乐，请欣赏";fontRegion:"lyrics";basePixelSize:26;font.weight:Font.DemiBold;textFormat:Text.PlainText
               color:Theme.text
               horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap
           }

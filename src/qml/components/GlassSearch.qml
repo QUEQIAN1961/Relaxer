@@ -9,6 +9,7 @@ Item {
     property string searchName:"library"
     property string searchLabel:"搜索音乐库"
     property string placeholderText:"搜索歌曲、歌手、专辑"
+    property real iconPadding:7
     readonly property bool opened:searchPopup.visible
     property point anchor:Qt.point(0,0)
     signal queryEdited(string value)
@@ -24,6 +25,7 @@ Item {
     Connections {target:control.backdrop;function onWidthChanged(){if(control.opened)Qt.callLater(control.place)}}
     IconButton {
         id:searchButton;objectName:control.searchName+"SearchButton";anchors.fill:parent
+        padding:control.iconPadding
         symbol:"search";text:control.searchLabel;showTooltip:true
         iconColor:control.query.length?Theme.accent:Theme.text
         onClicked:{if(searchPopup.visible)control.close();else control.open()}

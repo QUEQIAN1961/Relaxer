@@ -14,11 +14,12 @@ class UpcomingModel final : public QAbstractListModel {
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(QString firstTrackKey READ firstTrackKey NOTIFY firstChanged)
     Q_PROPERTY(QString firstTitle READ firstTitle NOTIFY firstChanged)
+    Q_PROPERTY(bool firstVideo READ firstVideo NOTIFY firstChanged)
     Q_PROPERTY(QString firstArtist READ firstArtist NOTIFY firstChanged)
     Q_PROPERTY(QUrl firstCoverUrl READ firstCoverUrl NOTIFY firstChanged)
     Q_PROPERTY(QString firstCoverRevision READ firstCoverRevision NOTIFY firstChanged)
   public:
-    enum Role { TrackId = Qt::UserRole + 1, TrackKey, Title, Artist, Album, Duration, Favorite, CoverUrl, CoverRevision, UpcomingIndex };
+    enum Role { TrackId = Qt::UserRole + 1, TrackKey, Title, Artist, Album, Duration, Favorite, CoverUrl, CoverRevision, UpcomingIndex, VideoTrack };
     explicit UpcomingModel(Library *library, PlaybackFacade *facade, QObject *parent = nullptr);
     int count() const { return int(m_tracks.size()); }
     int rowCount(const QModelIndex &parent = {}) const override;
@@ -27,6 +28,7 @@ class UpcomingModel final : public QAbstractListModel {
     QVector<qint64> ids() const { return m_ids; }
     QString firstTrackKey() const { return m_tracks.isEmpty() ? QString("0") : QString::number(m_tracks.first().id); }
     QString firstTitle() const { return m_tracks.isEmpty() ? QString() : m_tracks.first().title; }
+    bool firstVideo() const { return !m_tracks.isEmpty() && isVideoTrack(m_tracks.first()); }
     QString firstArtist() const { return m_tracks.isEmpty() ? QString() : m_tracks.first().artist; }
     QUrl firstCoverUrl() const { return m_tracks.isEmpty() ? QUrl() : artwork(m_tracks.first()); }
     QString firstCoverRevision() const { return m_artworkRevisions.isEmpty() ? QString() : m_artworkRevisions.first(); }

@@ -51,7 +51,7 @@ NativeKey ShortcutRules::nativeKey(const QKeySequence &sequence) {
         return {};
     auto combination = sequence[0];
     auto modifiers = combination.keyboardModifiers();
-    if (modifiers & ~(Qt::AltModifier | Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier))
+    if (modifiers & ~(Qt::AltModifier | Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier | Qt::KeypadModifier))
         return {};
     unsigned flags = 0;
     if (modifiers & Qt::AltModifier)
@@ -64,7 +64,15 @@ NativeKey ShortcutRules::nativeKey(const QKeySequence &sequence) {
         flags |= 8;
     int key = combination.key();
     unsigned value = 0;
-    if ((key >= Qt::Key_A && key <= Qt::Key_Z) || (key >= Qt::Key_0 && key <= Qt::Key_9))
+    if (modifiers & Qt::KeypadModifier) {
+        if (key >= Qt::Key_0 && key <= Qt::Key_9) value = 0x60 + key - Qt::Key_0;
+        else {
+            static const QMap<int, unsigned> keypad{{Qt::Key_Plus,0x6b},{Qt::Key_Minus,0x6d},
+                {Qt::Key_Asterisk,0x6a},{Qt::Key_Slash,0x6f},{Qt::Key_Period,0x6e},
+                {Qt::Key_Comma,0x6e},{Qt::Key_Enter,0x0d},{Qt::Key_Return,0x0d}};
+            value=keypad.value(key);
+        }
+    } else if ((key >= Qt::Key_A && key <= Qt::Key_Z) || (key >= Qt::Key_0 && key <= Qt::Key_9))
         value = key;
     else if (key >= Qt::Key_F1 && key <= Qt::Key_F24)
         value = 0x70 + key - Qt::Key_F1;

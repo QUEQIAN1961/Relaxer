@@ -184,8 +184,8 @@ private slots:
         QTRY_COMPARE(cover->width(),78.);QCOMPARE(cover->height(),cover->width());
         QTRY_COMPARE(header->height(),78.);QCOMPARE(bounds(edit).bottom()-bounds(play).top(),cover->height());
         QVERIFY(bounds(stats).left()>bounds(play).right());QCOMPARE(bounds(stats).right(),bounds(header).right());
-        QCOMPARE(bounds(description).right(),bounds(header).right());QCOMPARE(bounds(stats).top(),bounds(play).top());
-        QCOMPARE(bounds(description).top(),bounds(edit).top());shot(w,tag+"-collapsed");
+        QCOMPARE(bounds(description).right(),bounds(header).right());QVERIFY(qAbs(bounds(stats).top()-bounds(play).top())<.01);
+        QVERIFY(qAbs(bounds(description).top()-bounds(edit).top())<.01);shot(w,tag+"-collapsed");
         QTest::qWait(120);QCOMPARE(cover->width(),78.);
         wheel(w,cover,120);QTRY_COMPARE(cover->width(),160.);shot(w,tag+"-restored");
         wheel(w,cover,-120);QTest::qWait(65);const auto before=cover->width();
@@ -247,7 +247,7 @@ private slots:
         QVERIFY(header);QVERIFY(cover);QTRY_COMPARE(cover->width(),160.);shot(w,"long-metadata-expanded");
         wheel(w,cover,-120);QTRY_COMPARE(cover->width(),78.);
         for(const char *name:{"playlistStatisticsRow","playlistDescriptionRow"}) {
-            auto *row=visual(root,name);QVERIFY(row);QVERIFY(bounds(header).contains(bounds(row)));
+            auto *row=visual(root,name);QVERIFY(row);QVERIFY(bounds(header).adjusted(-.01,-.01,.01,.01).contains(bounds(row)));
             std::function<void(QQuickItem *)> inspect=[&](QQuickItem *item) {
                 if(item->isVisible() && item->property("text").isValid()) {
                     QVERIFY(bounds(item).right()<=bounds(header).right()+.1);
@@ -269,13 +269,13 @@ private slots:
         auto *header=visual(root,"playlistHeader"),*cover=visual(root,"playlistCover");QVERIFY(header);QVERIFY(cover);
         QVERIFY(f.shell->settingsBridge()->setPreference("reduceMotion",true));
         wheel(w,cover,-120);QTRY_COMPARE(cover->width(),78.);
-        QVERIFY(f.shell->libraryBridge()->openPlaylist(QString::number(second)));QTRY_COMPARE(cover->width(),78.);
+        QVERIFY(f.shell->libraryBridge()->openPlaylist(QString::number(second)));QTRY_COMPARE(cover->width(),160.);
         auto *table=visual(root,"libraryListContainer");QVERIFY(table);
         // The page must receive the header gesture even with the pointer over
         // the list's smooth wheel handler, including an empty playlist.
         wheel(w,table,120);QTRY_COMPARE(cover->width(),160.);
         wheel(w,table,-120);QTRY_COMPARE(cover->width(),78.);
-        QVERIFY(f.shell->libraryBridge()->openPlaylist(QString::number(first)));QTRY_COMPARE(cover->width(),78.);
+        QVERIFY(f.shell->libraryBridge()->openPlaylist(QString::number(first)));QTRY_COMPARE(cover->width(),160.);
         wheel(w,table,120);QTRY_COMPARE(cover->width(),160.);
         QVERIFY(f.shell->libraryBridge()->openPlaylist("0"));QTRY_VERIFY(!header->isVisible());
         QVERIFY(visual(root,"librarySummary")->isVisible());QVERIFY(visual(root,"playAllButton")->isVisible());

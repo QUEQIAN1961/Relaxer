@@ -1,22 +1,28 @@
 <RCC><qresource prefix="/qml">
+  <file alias="legal/GPL-3.0.txt">../../LICENSE</file>
+  <file alias="legal/REFERENCES.md">../../REFERENCES.md</file>
+  <file alias="legal/kugou-MIT.txt">../../docs/third-party/music-platforms/kugou-MIT.txt</file>
+  <file alias="legal/qishui-MIT.txt">../../docs/third-party/music-platforms/qishui-MIT.txt</file>
+  <file alias="legal/qishui-car-MIT.txt">../../docs/third-party/music-platforms/qishui-car-MIT.txt</file>
   <file>Main.qml</file><file>components/HintBubble.qml</file><file>components/RoundMenuItem.qml</file><file>components/RoundMenu.qml</file><file>components/UiText.qml</file>
   <file>theme/qmldir</file><file>theme/Theme.qml</file>
-  <file>components/ShellButton.qml</file><file>components/ToggleButton.qml</file><file>components/ColorSwatch.qml</file><file>components/NavigationButton.qml</file>
+  <file>components/ShellButton.qml</file><file>components/ToggleButton.qml</file><file>components/MorphCheck.qml</file><file>components/NextSongButton.qml</file><file>components/ListScrollBar.qml</file><file>components/MembershipBadge.qml</file><file>components/NextMorphFrames.js</file><file>components/MorphCheckBox.qml</file><file>components/CheckMorphFrames.js</file><file>components/ColorSwatch.qml</file><file>components/NavigationButton.qml</file>
   <file>components/EmptyState.qml</file><file>components/PlayerBar.qml</file><file>components/PlayModeButton.qml</file><file>components/GlassSearch.qml</file>
   <file>components/TrackList.qml</file><file>pages/PlaylistsPage.qml</file>
   <file>components/SmoothWheelHandler.qml</file>
   <file>pages/QueuePage.qml</file>
   <file>components/LyricsList.qml</file><file>pages/LyricsPage.qml</file>
   <file>components/ConfirmDialog.qml</file>
+  <file>components/SidebarEditor.qml</file><file>components/ReorderChecklistDialog.qml</file><file>components/LegalNoticeDialog.qml</file><file>components/PlatformAccounts.qml</file>
   <file>components/SettingsTabButton.qml</file>
-  <file>pages/SettingsPage.qml</file><file>pages/ImportPage.qml</file>
+  <file>pages/HistoryPage.qml</file><file>pages/SettingsPage.qml</file><file>components/SettingsGroup.qml</file><file>components/SettingsCard.qml</file><file>components/SettingsNumber.qml</file><file>components/DiscoveryActionsDialog.qml</file><file>components/SettingsRow.qml</file><file>pages/ImportPage.qml</file>
   <file>pages/AiPage.qml</file><file>pages/TranslationPage.qml</file>
   <file>pages/LocalPage.qml</file><file>pages/TransitionPage.qml</file>
   <file>components/Symbol.qml</file><file>components/EntryField.qml</file><file>components/EntryArea.qml</file><file>components/EditingMenu.qml</file><file>components/ChoiceBox.qml</file>
   <file>components/IconButton.qml</file>
   <file>components/DownloadGlyph.qml</file><file>components/OnlineDownloadButton.qml</file><file>components/DownloadList.qml</file>
   <file>components/VolumeButton.qml</file><file>components/MiniPlayer.qml</file>
-  <file>components/Artwork.qml</file><file>components/ProfileAvatar.qml</file>
+  <file>components/Artwork.qml</file><file>components/Avatar.qml</file><file>components/ProfileAvatar.qml</file>
   <file>components/PlaybackSlider.qml</file>
   <file>components/UpcomingPanel.qml</file>
   <file>components/LyricsWorkspace.qml</file>
@@ -83,8 +89,9 @@
   <file alias="marks/balloon.svg">../../resources/playlist-marks/balloon.svg</file>
   <file alias="licenses/playlist-marks.txt">../../resources/playlist-marks/LICENSE.txt</file>
   <file>pages/ProfilePage.qml</file><file>pages/VersionLogPage.qml</file>
+  <file>components/VideoPartsPanel.qml</file><file>components/VideoLyricCaption.qml</file>
   <file>pages/DiscoverPage.qml</file>
   <file>pages/AppearancePage.qml</file>
   <file>pages/ShortcutsPage.qml</file>
   <file>pages/FontDialog.qml</file>
-</qresource><qresource prefix="/"><file alias="changelog.json">../../resources/changelog.json</file><file alias="icon.svg">../../resources/icon.svg</file></qresource></RCC>
+</qresource><qresource prefix="/"><file alias="changelog.json">../../resources/changelog.json</file><file alias="icon.svg">../../resources/icon.svg</file><file alias="music-platforms/netease.ico">../../resources/music-platforms/netease.ico</file><file alias="music-platforms/qq.ico">../../resources/music-platforms/qq.ico</file><file alias="music-platforms/qishui.svg">../../resources/music-platforms/qishui.svg</file><file alias="music-platforms/kugou.png">../../resources/music-platforms/kugou.png</file></qresource></RCC>

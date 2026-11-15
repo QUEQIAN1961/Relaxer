@@ -22,21 +22,22 @@ Item {
             Layout.fillWidth: true; spacing: 20
             ColumnLayout {
                 Layout.fillWidth: true; spacing: 16
-                UiText { text: "歌单"; color: Theme.text; font.pixelSize: 28; font.weight: Font.DemiBold }
-                UiText { text: "给不同的心情，留一张歌单。"; color: Theme.secondary; font.pixelSize: 14 }
+                UiText { text: "歌单"; color: Theme.text; basePixelSize: 28; font.weight: Font.DemiBold }
+                UiText { text: "给不同的心情，留一张歌单。"; color: Theme.secondary; basePixelSize: 14 }
             }
             ShellButton { objectName: "createPlaylistButton"; text: "创建歌单"; primary: true; onClicked: page.createRequested() }
         }
         GridView {
             id: grid; objectName: "playlistCards"
             Layout.fillWidth: true; Layout.fillHeight: true
-            cellWidth:Theme.compact?width/2:Math.min(204,width);cellHeight:246-174*page.reflow
+            cellWidth:Theme.compact?(width-10)/2:Math.min(204,width-10);cellHeight:246-174*page.reflow
             clip: true; model: playlistModel; boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar {}
+            ScrollBar.vertical: ListScrollBar {}
             SmoothWheelHandler { flickable: grid }
             delegate: Item {
                 id: card
                 required property string playlistKey
+                required property string provider
                 required property string name
                 required property int trackCount
                 required property url cover
@@ -50,19 +51,19 @@ Item {
                 }
                 Artwork {
                     id:cardArt;objectName:"playlistCardCover-"+card.playlistKey
-                    x:7;y:7;width:Math.min(170-122*page.shrink,Math.max(0,card.width-14));height:width;radius:12
+                    x:7;y:7;width:Math.min((170-122*page.shrink)*(card.provider==="bilibili"?1+page.shrink/3:1),Math.max(0,card.width-14));height:width*(card.provider==="bilibili"?.75:1);videoCover:card.provider==="bilibili";radius:12
                     file:card.cover;seed:card.name;resolution:350;animated:false
                 }
                 UiText {
                     id:cardTitle;objectName:"playlistCardTitle-"+card.playlistKey
-                    x:7+64*page.shrink;y:(cardArt.height+17)*(1-page.arrange)+7*page.arrange
+                    x:7+(64+(card.provider==="bilibili"?cardArt.width-cardArt.height:0))*page.shrink;y:(cardArt.height+17)*(1-page.arrange)+7*page.arrange
                     width:Math.max(0,Math.min(177+(card.width-90-177)*page.arrange,card.width-x-14))
-                    text:card.name;textFormat:Text.PlainText;color:Theme.text;font.pixelSize:15;font.weight:Font.DemiBold;elide:Text.ElideRight
+                    text:card.name;textFormat:Text.PlainText;color:Theme.text;basePixelSize:15;font.weight:Font.DemiBold;elide:Text.ElideRight
                 }
                 UiText {
                     id:cardCount;x:cardTitle.x;y:(cardTitle.y+cardTitle.implicitHeight+4)*(1-page.arrange)+(55-implicitHeight)*page.arrange
                     width:cardTitle.width;text:card.trackCount+" 首歌曲"+(Theme.compact&&card.description.length?" · "+card.description:"")
-                    color:Theme.secondary;font.pixelSize:13;elide:Text.ElideRight
+                    color:Theme.secondary;basePixelSize:13;elide:Text.ElideRight
                 }
                 MouseArea {
                     id: cardMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton | Qt.RightButton; cursorShape: Qt.PointingHandCursor
@@ -72,7 +73,7 @@ Item {
                     }
                 }
             }
-            UiText { anchors.centerIn: parent; width: Math.min(400, parent.width - 40); visible: playlistModel.count === 0; text: "还没有歌单。\n创建一个，收集喜欢的音乐。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14; lineHeight: 1.6 }
+            UiText { anchors.centerIn: parent; width: Math.min(400, parent.width - 40); visible: playlistModel.count === 0; text: "还没有歌单。\n创建一个，收集喜欢的音乐。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; basePixelSize: 14; lineHeight: 1.6 }
         }
     }
     RoundMenu {

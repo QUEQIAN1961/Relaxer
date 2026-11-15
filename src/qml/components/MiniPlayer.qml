@@ -124,7 +124,7 @@ Rectangle {
         objectName:"miniDragArea";anchors.fill:parent
     }
     Artwork {
-        id:cover;objectName:"miniCover";x:8;y:(mini.height-height)/2;width:42;height:42;radius:8;resolution:96;animated:false
+        id:cover;objectName:"miniCover";x:8;y:(mini.height-height)/2;width:playbackBridge.video?56:42;height:42;videoCover:playbackBridge.video;radius:8;resolution:96;animated:false
         file:playbackBridge.coverUrl;revision:playbackBridge.artworkRevision;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer"
         WindowDragArea {objectName:"miniCoverDrag";anchors.fill:parent}
     }
@@ -133,8 +133,8 @@ Rectangle {
         opacity:1-mini.controlsProgress;visible:opacity>0;enabled:!mini.controlsVisible;clip:true
         Column {
             objectName:"miniMetadata";anchors.centerIn:parent;width:parent.width-16;spacing:3;visible:!mini.showingLyrics
-            UiText {id:titleLabel;objectName:"miniTitle";width:parent.width;text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter;fontRegion:"footer";font.pixelSize:14;font.weight:Font.DemiBold;color:Theme.text}
-            UiText {id:artistLabel;objectName:"miniArtist";width:parent.width;text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter;fontRegion:"footer";font.pixelSize:12;color:Theme.secondary}
+            UiText {id:titleLabel;objectName:"miniTitle";width:parent.width;text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter;fontRegion:"footer";basePixelSize:14;font.weight:Font.DemiBold;color:Theme.text}
+            UiText {id:artistLabel;objectName:"miniArtist";width:parent.width;text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideRight;horizontalAlignment:Text.AlignHCenter;fontRegion:"footer";basePixelSize:12;color:Theme.secondary}
         }
         Column {
             objectName:"miniLyrics";anchors.centerIn:parent;width:parent.width-16;spacing:3;visible:mini.showingLyrics
@@ -143,7 +143,7 @@ Rectangle {
                 UiText {
                     id:originalLine;objectName:"miniLyric";text:mini.lyricLine.original;textFormat:Text.PlainText;wrapMode:Text.NoWrap
                     x:implicitWidth>parent.width?-(implicitWidth-parent.width)*mini.lyricScrollProgress:(parent.width-implicitWidth)/2
-                    fontRegion:"footer";font.pixelSize:14;font.weight:Font.DemiBold;color:Theme.text
+                    fontRegion:"footer";basePixelSize:14;font.weight:Font.DemiBold;color:Theme.text
                 }
             }
             Item {
@@ -151,7 +151,7 @@ Rectangle {
                 UiText {
                     id:translationLine;objectName:"miniLyricTranslation";text:mini.lyricLine.translation;textFormat:Text.PlainText;wrapMode:Text.NoWrap
                     x:implicitWidth>parent.width?-(implicitWidth-parent.width)*mini.lyricScrollProgress:(parent.width-implicitWidth)/2
-                    fontRegion:"footer";font.pixelSize:12;color:Theme.secondary
+                    fontRegion:"footer";basePixelSize:12;color:Theme.secondary
                 }
             }
         }

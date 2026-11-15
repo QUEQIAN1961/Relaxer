@@ -2,7 +2,9 @@
 #include "domain/queue.h"
 #include "library.h"
 #include "midi-transport.h"
+#include "audio-fader.h"
 #include <QAudioOutput>
+#include <QAudioDevice>
 #include <QElapsedTimer>
 #include <QMediaPlayer>
 #include <QPointer>
@@ -19,6 +21,10 @@ class Playback : public QObject {
     ~Playback() override;
     void play(const QVector<qint64> &ids, qint64 start = 0);
     void toggle();
+    void pauseForQueue();
+    void stopForQueue();
+    void restoreQueued(qint64 id,qint64 position);
+    void setExternalQueue(bool enabled){m_externalQueue=enabled;}
     void next();
     QVector<qint64> upcoming() {return m_queue.upcoming();}
     void playUpcoming(int index);
@@ -43,6 +49,8 @@ class Playback : public QObject {
     const Queue &queue() const { return m_queue; }
     QMediaPlayer *media() { return &m_player; }
     int volume() const { return m_volume; }
+    QAudioDevice outputDevice() const;
+    bool applyOutputDevice(const QAudioDevice &device);
     QString roundStatus() const;
   signals:
     void trackChanged();
@@ -50,26 +58,32 @@ class Playback : public QObject {
     void positionChanged(qint64, qint64);
     void error(const QString &message);
     void saveFailed(const QString &message);
+    void advanceRequested(bool failed);
 
   private:
     friend class PlaybackDiagnostics; // Controlled clock samples in contract tests.
     Library *m_library;
     std::unique_ptr<QAudioOutput> m_output;
     int m_volume = 65;
+    AudioFader m_fader;
     QMediaPlayer m_player;
     Queue m_queue;
     QTimer m_timer;
     QElapsedTimer m_elapsed;
     Session m_session;
+    qint64 m_historyHeard=0;
+    void finishHistory();
     qint64 m_lastPosition = 0, m_lastWall = 0, m_restorePosition = -1;
     int m_threshold = 80;
     bool m_loading = false, m_autoStart = false, m_wasPlaying = false, m_decodeOnly = false;
+    bool m_externalQueue=false;
     QSet<qint64> m_failed;
     bool m_midi = false, m_midiPlaying = false;
     std::unique_ptr<MidiTransport> m_midiBackend;
     qint64 m_midiDuration = 0;
     int m_playGeneration = 0;
     QPointer<QProcess> m_transcode;
+    void applyLocalVideoMode();
     void load(qint64 id, bool autoplay, bool resume = false);
     bool m_shutdown = false, m_shutdownInProgress = false, m_shutdownSaved = true;
     QJsonObject m_lastSavedQueue;

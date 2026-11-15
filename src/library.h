@@ -91,6 +91,8 @@ class Library : public QObject {
     bool saveOnlineSession(Session &session,qint64 delta,int threshold,bool finished=false);
     Session session(qint64 id) const;
     bool saveSession(Session &s, qint64 delta, int threshold, bool finished = false);
+    bool recordPlaybackHistory(const Track &track);
+    QVariantList playbackHistory(const QString &query={},int offset=0,const QString &sortKey="endedAt",bool descending=true) const;
     qint64 totalHeard() const;
     qint64 totalPlays() const;
     QString lastError() const { return m_error; }
@@ -100,6 +102,7 @@ class Library : public QObject {
     void querySucceeded(const QString &query) const;
     void changed();
     void statsChanged();
+    void playbackHistoryChanged();
     void settingsUpdated(const QStringList &keys);
 
   private:

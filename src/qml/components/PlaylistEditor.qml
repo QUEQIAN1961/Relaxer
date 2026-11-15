@@ -41,7 +41,7 @@ ConfirmDialog{
         spacing:12
         UiText {text:dialog.cloud?"歌单备注":"歌单名称";color:Theme.secondary}
         EntryField {id:nameInput;objectName:"playlistNameInput";Layout.fillWidth:true;maximumLength:120;placeholderText:dialog.cloud?"留空显示平台歌单名称":dialog.listKey==="0"?"新歌单":"";selectByMouse:true;onAccepted:dialog.accept()}
-        UiText {visible:dialog.cloud;Layout.fillWidth:true;text:"平台名称："+dialog.originalName;textFormat:Text.PlainText;wrapMode:Text.Wrap;font.pixelSize:12;color:Theme.secondary}
+        UiText {visible:dialog.cloud;Layout.fillWidth:true;text:"平台名称："+dialog.originalName;textFormat:Text.PlainText;wrapMode:Text.Wrap;basePixelSize:12;color:Theme.secondary}
         RowLayout {
             Layout.fillWidth:true;spacing:14
             Artwork {
@@ -80,7 +80,7 @@ ConfirmDialog{
         RowLayout {
             visible:dialog.textMark;Layout.fillWidth:true
             EntryField {id:markInput;objectName:"playlistMarkerText";Layout.fillWidth:true;maximumLength:1;placeholderText:"输入一个字，留空使用歌单首字"}
-            UiText {objectName:"playlistMarkerTextPreview";text:dialog.selectedMarker.slice(5);textFormat:Text.PlainText;font.pixelSize:22;font.weight:Font.DemiBold;color:Theme.accent;Layout.preferredWidth:32;horizontalAlignment:Text.AlignHCenter}
+            UiText {objectName:"playlistMarkerTextPreview";text:dialog.selectedMarker.slice(5);textFormat:Text.PlainText;basePixelSize:22;font.weight:Font.DemiBold;color:Theme.accent;Layout.preferredWidth:32;horizontalAlignment:Text.AlignHCenter}
         }
       }
     }

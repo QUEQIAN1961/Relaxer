@@ -110,13 +110,22 @@ def deploy(args, logs):
     runtime.mkdir()
     shutil.copy2(build / "Relaxer.exe", runtime)
     shutil.copy2(build / "RelaxerQmlUi.dll", runtime)
+    # Keep the tested avformat cancellation fix instead of recollecting the
+    # unpatched system DLL. Its upstream archive/patch remain source inputs.
+    ffmpeg_info = json.loads((build / "runtime-ffmpeg.json").read_text(encoding="utf-8"))
+    ffmpeg_dll = build / "avformat-63.dll"
+    assert hashlib.sha256(ffmpeg_dll.read_bytes()).hexdigest() == ffmpeg_info['binarySHA256'], "Patched avformat identity differs"
+    shutil.copy2(ffmpeg_dll, runtime)
+    shutil.copy2(build / "runtime-ffmpeg.json", runtime)
+    shutil.copytree(build / "licenses/ffmpeg", dest / "licenses/ffmpeg", dirs_exist_ok=True)
+
     shutil.copy2(build / "RelaxerStart.exe", dest)
     shutil.copy2(build / "RelaxerPortable.exe", dest / "Relaxer.exe")
     shutil.copy2(build / "RelaxerLockCheck.exe", dest)
     shutil.copy2(source / "THIRD_PARTY_NOTICES.md", dest)
     for name in ('LICENSE', 'LICENSE-NOTICE.txt'):
         shutil.copy2(source / name, dest)
-    shutil.copytree(source / "licenses", dest / "licenses")
+    shutil.copytree(source / "licenses", dest / "licenses", dirs_exist_ok=True)
     (runtime / "resources").mkdir()
     shutil.copy2(source / "resources/icon.ico", runtime / "resources")
     for folder, names in {"platforms": ["qwindows.dll", "qoffscreen.dll"],

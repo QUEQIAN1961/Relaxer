@@ -103,11 +103,26 @@ private slots:
         const auto f24 = ShortcutRules::nativeKey(sequence("Ctrl+Alt+Shift+F24"));
         QCOMPARE(f24.modifiers, 7u);
         QCOMPARE(f24.key, 0x87u);
-        QCOMPARE(ShortcutRules::nativeKey(sequence("Ctrl+Num+1")).key, 0u);
+        QCOMPARE(ShortcutRules::nativeKey(sequence("Ctrl+Num+1")).key, 0x61u);
         QCOMPARE(ShortcutRules::nativeKey(sequence("Ctrl+K, Ctrl+C")).key, 0u);
         QCOMPARE(ShortcutRules::nativeKey(QKeySequence()).key, 0u);
         QCOMPARE(ShortcutRules::nativeKey(QKeySequence(Qt::Key_MediaNext)).key, 0xb0u);
         QCOMPARE(ShortcutRules::nativeKey(QKeySequence(Qt::Key_Enter)).key, 0x0du);
+    }
+    void numericShortcuts() {
+        for(int digit=0;digit<10;++digit){
+            const auto number=QString::number(digit);
+            const auto top=ShortcutRules::nativeKey(sequence("Ctrl+Alt+"+number));
+            const auto pad=ShortcutRules::nativeKey(sequence("Ctrl+Alt+Num+"+number));
+            QCOMPARE(top.key,unsigned(0x30+digit));QCOMPARE(pad.key,unsigned(0x60+digit));
+            QCOMPARE(pad.modifiers,3u);
+            auto config=ShortcutRules::defaults();config["globalEnabled"]=true;
+            setBinding(config,"global","miniPlayer","Ctrl+Alt+Num+"+number);
+            QVERIFY(ShortcutRules::validate(config));
+            setBinding(config,"global","next","Ctrl+Alt+Num+"+number);
+            QVERIFY(!ShortcutRules::validate(config));
+        }
+        QCOMPARE(ShortcutRules::nativeKey(sequence("Ctrl+Num+A")).key,0u);
     }
     void emitComparableBaseline() {
         QJsonObject snapshot{{"defaults", ShortcutRules::defaults()},

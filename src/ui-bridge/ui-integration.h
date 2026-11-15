@@ -34,6 +34,7 @@ public:
 signals:
     void changed();
     void miniPlayerToggleRequested();
+    void pointerMoved(QPointF position);
 private:
     QPointer<Library> m_library;QPointer<PlaybackBridge> m_playback;QPointer<QQuickWindow> m_window;
     std::unique_ptr<QMenu> m_menu;std::unique_ptr<QSystemTrayIcon> m_tray;
@@ -43,8 +44,10 @@ private:
     QKeySequence m_miniSequence;
     QPointF m_pointerPosition;
     int m_resizeEdges=0;
+    bool m_applyingNativeFrame=false;
     WId m_resizeWindow=0;
     QPoint m_nativeResizeAnchor;
+    int m_nativeResizeHeight=0;
     void dispatch(int action);bool apply(const QJsonObject &configuration,QString *error);void releaseGlobals();bool registerGlobals(const QJsonObject &,QString *);
     bool editableFocus()const;
     void updateWindowShadow();

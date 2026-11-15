@@ -39,6 +39,25 @@ QVariantMap allRegions(bool value) {
 class QmlSettingsParityTests final : public QObject {
     Q_OBJECT
 private slots:
+    void sidebarVisibilityOrderPersistsAndSettingsCannotBeHidden() {
+        Fixture f;QVERIFY(f.ok);
+        auto rows=f.bridge->values().value("sidebarSections").toList();
+        QCOMPARE(rows.size(),7);
+        std::reverse(rows.begin(),rows.end());
+        for(auto &entry:rows){auto row=entry.toMap();row["visible"]=row["id"].toInt()==3;entry=row;}
+        QVERIFY(f.bridge->setPreference("sidebarSections",rows));
+        SettingsBridge reopened(&f.library);
+        QCOMPARE(reopened.values().value("sidebarSections").toList(),rows);
+        auto invalid=rows;
+        for(auto &entry:invalid){auto row=entry.toMap();row["visible"]=false;entry=row;}
+        QVERIFY(!f.bridge->setPreference("sidebarSections",invalid));
+        invalid=rows;invalid[0]=invalid[1];
+        QVERIFY(!f.bridge->setPreference("sidebarSections",invalid));
+        invalid=rows;invalid.removeLast();
+        QVERIFY(!f.bridge->setPreference("sidebarSections",invalid));
+        QCOMPARE(f.bridge->values().value("sidebarSections").toList(),rows);
+        QCOMPARE(f.library.setting("sidebarSections").toArray().toVariantList(),rows);
+    }
     void committedSettingsRefreshCachedUiAndRollbackKeepsPreviousValues() {
         Fixture f; QVERIFY(f.ok);
         const auto original = f.bridge->values();

@@ -124,8 +124,9 @@ private slots:
 QtObject {
     signal changed()
     signal played(string id)
+    signal loginCompleted()
     signal pageRequested(string kind,string argument,bool refresh)
-    property bool loggedIn:false;property bool busy:false;property bool catalogLoading:false
+    property bool loggedIn:false;property bool vip:false;property string membership:"";property bool busy:false;property bool catalogLoading:false
     property string nickname:"";property string avatarUrl:"";property string qrImage:"";property string quality:"hires"
     property string status:"歌单 · 199 首歌曲"
     property var playlists:[];property var songs:[];property var searchResults:[];property var currentPlaylist:({id:"123",name:"Test playlist",count:199,cover:""})
@@ -173,7 +174,7 @@ QtObject {
         QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,center(firstCard));QCOMPARE(pages.count(),requests+1);QCOMPARE(pages.last().at(0).toString(),QString("playlist"));QCOMPARE(pages.last().at(1).toString(),QString("123"));QVERIFY(!page->property("showPlaylists").toBool());
         QVERIFY(QMetaObject::invokeMethod(page,"showHome"));QTest::qWait(80);secondCard=visual(page,"onlinePlaylist-456");QVERIFY(secondCard);QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,center(secondCard));QCOMPARE(pages.count(),requests+3);QCOMPARE(pages.last().at(1).toString(),QString("456"));
         QVERIFY(QMetaObject::invokeMethod(page,"chooseSource",Q_ARG(QVariant,1)));QTest::qWait(50);QVERIFY(!visual(page,"onlineSong-7102")->property("selected").toBool());
-        auto *actions=visual(page,"onlinePlaylistActions"),*back=visual(page,"onlinePlaylistBack"),*pin=visual(page,"pinOnlinePlaylist");QVERIFY(actions&&back&&pin);QCOMPARE(actions->height(),56.);QCOMPARE(back->height()+pin->height()+4,actions->height());QVERIFY(pin->property("text").toString().isEmpty());
+        auto *actions=visual(page,"onlinePlaylistActions"),*back=visual(page,"onlinePlaylistBack"),*pin=visual(page,"pinOnlinePlaylist");QVERIFY(actions&&back&&pin);QCOMPARE(actions->height(),32.);auto *scopeSearch=visual(page,"onlineCollectionSearchControl");QVERIFY(scopeSearch);QVERIFY(scopeSearch->x()<pin->x()&&pin->x()<back->x());QCOMPARE(back->height(),pin->height());QVERIFY(pin->property("text").toString().isEmpty());
         QVERIFY(QMetaObject::invokeMethod(page,"submitSearch",Q_ARG(QVariant,"Saved search")));QTest::qWait(30);QVERIFY(visual(page,"onlineSearchTabs")->isVisible());QVERIFY(!visual(page,"onlineDiscoveryTabs")->isVisible());
         if(!folder.isEmpty())w->grabWindow().save(QDir(folder).filePath("discovery-search-categories.png"));
         for(int category=0;category<4;++category){auto *button=visual(page,"onlineSearchCategory-"+QString::number(category));QVERIFY(button);QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,center(button));QCOMPARE(pages.last().at(0).toString(),QStringList({"search","search-artists","search-albums","search-playlists"})[category]);QCOMPARE(pages.last().at(1).toString(),QString("Saved search"));}
@@ -182,11 +183,12 @@ QtObject {
         QVERIFY(QMetaObject::invokeMethod(page,"showPage",Q_ARG(QVariant,"playlist"),Q_ARG(QVariant,"123"),Q_ARG(QVariant,false)));
         for(const int width:{840,414}){
             w->resize(width,650);QTest::qWait(420);page->setSize(localPage->size());QTest::qWait(60);
-            auto *heading=visual(page,"onlinePlaylistHeading");QVERIFY(heading&&heading->isVisible());QCOMPARE(actions->height(),heading->height());
+            auto *heading=visual(page,"onlinePlaylistHeading");QVERIFY(heading&&heading->isVisible());QVERIFY(qAbs(actions->mapToScene(QPointF(0,actions->height()/2)).y()-heading->mapToScene(QPointF(0,heading->height()/2)).y())<1);QVERIFY(qAbs(actions->mapToScene(QPointF(actions->width(),0)).x()-heading->mapToScene(QPointF(heading->width(),0)).x())<1);
             QTest::mouseMove(w,center(back));QTRY_VERIFY(back->property("hovered").toBool());QVERIFY(back->property("background").value<QQuickItem *>()->property("color").value<QColor>().alpha()>0);
             QTest::mouseMove(w,center(pin));QTRY_VERIFY(pin->property("hovered").toBool());QVERIFY(pin->property("background").value<QQuickItem *>()->property("color").value<QColor>().alpha()>0);
             if(!folder.isEmpty())w->grabWindow().save(QDir(folder).filePath(QString("discovery-playlist-actions-%1.png").arg(width)));
         }
+        auto *songList=visual(page,"onlineSongs");QVERIFY(songList);QVERIFY(QMetaObject::invokeMethod(page,"filterCollection",Q_ARG(QVariant,"Second")));QTRY_COMPARE(songList->property("count").toInt(),1);QCOMPARE(fake->property("songs").toList().size(),2);QVERIFY(QMetaObject::invokeMethod(page,"selectAll",Q_ARG(QVariant,false)));QCOMPARE(page->property("selectedIds").value<QJSValue>().toVariant().toList(),QVariantList{"7102"});QVERIFY(QMetaObject::invokeMethod(page,"filterCollection",Q_ARG(QVariant,"Fixture")));QTRY_COMPARE(songList->property("count").toInt(),2);QVERIFY(QMetaObject::invokeMethod(page,"filterCollection",Q_ARG(QVariant,"")));QTRY_COMPARE(songList->property("count").toInt(),2);
         QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,center(back));QCOMPARE(pages.last().at(0).toString(),QString("featured"));
         pageObject.reset();localPage->setVisible(true);w->resize(840,650);QTest::qWait(420);moveAway();auto *metadata=visual(w->contentItem(),"playerMetadata"),*metadataBackground=visual(w->contentItem(),"playerMetadataHover");QVERIFY(metadata&&metadataBackground);QCOMPARE(metadataBackground->property("color").value<QColor>().alpha(),0);
         QTest::mouseMove(w,center(metadata));QTRY_VERIFY(metadataBackground->property("color").value<QColor>().alpha()>0);if(!folder.isEmpty())w->grabWindow().save(QDir(folder).filePath("player-metadata-hover.png"));

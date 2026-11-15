@@ -54,7 +54,7 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: Theme.pageMargin; anchors.topMargin: 28; anchors.rightMargin: Theme.pageMargin; anchors.bottomMargin: 0
         spacing: 20
-        UiText { text: "个人"; color: Theme.text; font.pixelSize: 28; font.weight: Font.DemiBold }
+        UiText { text: "个人"; color: Theme.text; basePixelSize: 28; font.weight: Font.DemiBold }
         Item {
             id: profileHeader
             objectName: "profileHeader"
@@ -82,12 +82,12 @@ Item {
                 UiText {
                     objectName:"profileName";x:96-24*page.headerProgress;y:4+identity.contentInset;width:Math.max(0,identity.width-x)
                     text:libraryBridge.profile.nickname||"Relaxer Listener";textFormat:Text.PlainText
-                    font.pixelSize:22;font.weight:Font.DemiBold;color:Theme.text;elide:Text.ElideRight
+                    basePixelSize:22;font.weight:Font.DemiBold;color:Theme.text;elide:Text.ElideRight
                 }
                 UiText {
                     id:biography;objectName:"profileDescription";x:96-24*page.headerProgress;y:identity.descriptionTop+identity.contentInset
                     width:Math.max(0,Math.min(page.compactHeader?identity.width:325,identity.width-x))
-                    text:libraryBridge.profile.description||"";textFormat:Text.PlainText;font.pixelSize:14;color:Theme.secondary
+                    text:libraryBridge.profile.description||"";textFormat:Text.PlainText;basePixelSize:14;color:Theme.secondary
                     wrapMode:Text.Wrap;maximumLineCount:2;elide:Text.ElideRight
                     HintBubble {visible:identityMouse.containsMouse&&biography.truncated;text:biography.text}
                 }
@@ -122,14 +122,14 @@ Item {
                         y:60*(1-parent.progress)*(1-page.headerProgress)+(parent.height-implicitHeight)/2*page.headerProgress
                         width:Math.min(implicitWidth,Math.max(0,parent.width-30))
                         text: modelData.caption + (parent.progress > .5 ? "：" : "")
-                        color:Theme.secondary;font.pixelSize:14-page.headerProgress;elide:Text.ElideRight
+                        color:Theme.secondary;basePixelSize:14-page.headerProgress;elide:Text.ElideRight
                     }
                     UiText {
                         objectName:"profileStatistic"
                         x:(22*(1-parent.progress)+108*parent.progress)*(1-page.headerProgress)+(statCaption.width+4)*page.headerProgress
                         y:18*(1-parent.progress)*(1-page.headerProgress)+(parent.height-implicitHeight)/2*page.headerProgress
                         width:Math.max(0,parent.width-x-10*(1-page.headerProgress));text:modelData.value; textFormat: Text.PlainText
-                        color: Theme.text; font.pixelSize: 28 - 16 * parent.progress; font.weight: parent.progress < .5 ? Font.Bold : Font.Normal
+                        color: Theme.text; basePixelSize: 28 - 16 * parent.progress; font.weight: parent.progress < .5 ? Font.Bold : Font.Normal
                         elide: Text.ElideRight
                     }
                 }
@@ -186,7 +186,7 @@ Item {
                             file:String(profileEditor.pendingAvatar).length?profileEditor.pendingAvatar:libraryBridge.profile.avatar||"";seed:nickname.text||"Relaxer Listener"
                             revision:String(page.avatarRevision);resolution:512;
                         }
-                        UiText {anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:parent.bottom;anchors.bottomMargin:20;text:"更换头像";font.pixelSize:13;color:Theme.secondary}
+                        UiText {anchors.horizontalCenter:parent.horizontalCenter;anchors.bottom:parent.bottom;anchors.bottomMargin:20;text:"更换头像";basePixelSize:13;color:Theme.secondary}
                     }
                     onClicked:avatarPicker.open()
                 }
@@ -205,7 +205,7 @@ Item {
                     contentWidth:availableWidth;clip:true
                     EntryArea {id:description;objectName:"profileDescriptionEdit";width:descriptionScroll.availableWidth;height:Math.max(implicitHeight,descriptionScroll.availableHeight);placeholderText:"简介";textFormat:TextEdit.PlainText;wrapMode:TextEdit.Wrap;leftPadding:18;rightPadding:18;background:null}
                 }
-                UiText {id:editError;anchors.left:parent.left;anchors.right:parent.right;anchors.margins:18;anchors.bottom:editorActions.top;anchors.bottomMargin:8;visible:text.length>0;color:Theme.accent;font.pixelSize:12;wrapMode:Text.Wrap}
+                UiText {id:editError;anchors.left:parent.left;anchors.right:parent.right;anchors.margins:18;anchors.bottom:editorActions.top;anchors.bottomMargin:8;visible:text.length>0;color:Theme.accent;basePixelSize:12;wrapMode:Text.Wrap}
                 Row {
                     id:editorActions;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.margins:14;spacing:8
                     ShellButton {objectName:"profileCancel";text:"取消";onClicked:profileEditor.reject()}

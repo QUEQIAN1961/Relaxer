@@ -1,6 +1,7 @@
 #include "playback.h"
 #include "importer.h"
 #include "lyric-text.h"
+#include "disk-cache.h"
 #include <QAudioDevice>
 #include <QCryptographicHash>
 #include <QDir>
@@ -9,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMediaDevices>
+#include <QMediaMetaData>
 #include <QSaveFile>
 #include <QUrl>
 #include <QDebug>
@@ -22,8 +24,11 @@
 #endif
 namespace relaxer {
 Playback::Playback(Library *l, QObject *p, bool decodeOnly)
-    : QObject(p), m_library(l), m_player(this), m_decodeOnly(decodeOnly) {
+    : QObject(p), m_library(l), m_fader([this](qreal gain){if(m_output)m_output->setVolume(m_volume*gain/100.);if(m_midi&&m_midiBackend)m_midiBackend->setVolume(qRound(m_volume*gain));}), m_player(this), m_decodeOnly(decodeOnly) {
     m_midiBackend = std::make_unique<MidiTransport>(l->root(), MidiTransport::Sender{}, MidiTransport::PathResolver{}, decodeOnly);
+    connect(l,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("playbackFade")&&!m_library->setting("playbackFade",false).toBool())m_fader.finish();});
+    connect(l,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("localVideoMode"))applyLocalVideoMode();});
+    connect(&m_player,&QMediaPlayer::tracksChanged,this,&Playback::applyLocalVideoMode);
     // Headless self-tests must not initialize an arbitrary physical audio driver.
     // Real application launches do not set this variable and keep normal audio.
     // QAudioOutput's constructor itself enumerates devices, so even an
@@ -31,7 +36,7 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     m_volume = decodeOnly ? 0 : qBound(0, l->setting("volume", 65).toInt(), 100);
     if (!decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS") &&
         !QMediaDevices::defaultAudioOutput().isNull())
-        m_player.setAudioOutput(audioOutput());
+        {m_midiBackend->setOutputDevice(outputDevice());m_player.setAudioOutput(audioOutput());}
     m_player.setLoops(1);
     m_queue.mode = static_cast<Mode>(qBound(0, l->setting("mode", 1).toInt(), 3));
     m_elapsed.start();
@@ -45,6 +50,7 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
             if (dur > 0 && pos + 120 >= dur) {
                 m_midiPlaying = false;
                 finish();
+                if(m_externalQueue){emit advanceRequested(false);return;}
                 auto id = m_queue.next(false);
                 if (id)
                     load(id, true);
@@ -60,6 +66,7 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     });
     m_timer.start();
     connect(&m_player, &QMediaPlayer::playbackStateChanged, this, [this](auto state) {
+        if(state==QMediaPlayer::PlayingState&&!m_fader.pausing())m_fader.to(1,m_library->setting("playbackFade",false).toBool());
         if (m_wasPlaying && state != QMediaPlayer::PlayingState)
             sample(false, true);
         m_wasPlaying = state == QMediaPlayer::PlayingState;
@@ -76,10 +83,11 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     });
     connect(&m_player, &QMediaPlayer::mediaStatusChanged, this, [this](auto s) {
         if (s == QMediaPlayer::LoadedMedia || s == QMediaPlayer::BufferedMedia) {
+            applyLocalVideoMode();
             if (m_loading) {
                 m_loading = false;
                 if (m_restorePosition >= 0) {
-                    auto pos = qBound<qint64>(0, m_restorePosition, qMax<qint64>(0, m_player.duration() - 1));
+                    auto pos = m_player.duration()>0?qBound<qint64>(0,m_restorePosition,m_player.duration()-1):qMax<qint64>(0,m_restorePosition);
                     m_player.setPosition(pos);
                     m_restorePosition = -1;
                 }
@@ -90,6 +98,7 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
             }
         } else if (s == QMediaPlayer::EndOfMedia) {
             finish();
+            if(m_externalQueue){emit advanceRequested(false);return;}
             auto id = m_queue.next(false);
             if (id)
                 load(id, true);
@@ -102,19 +111,44 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     });
     connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](auto, const QString &e) { onError(e); });
 }
+void Playback::applyLocalVideoMode(){
+    if(m_shutdown||!isVideoTrack(current()))return;
+    const int selected=m_library->setting("localVideoMode",0).toInt()==1?-1:0;
+    if((selected<0||!m_player.videoTracks().isEmpty())&&m_player.activeVideoTrack()!=selected){
+        m_player.setActiveVideoTrack(selected);
+        // A paused FFmpeg player needs a seek to decode the newly enabled
+        // picture track; keep the same position and playback intent.
+        if(selected>=0&&m_player.playbackState()==QMediaPlayer::PausedState)
+            m_player.setPosition(m_player.position());
+    }
+}
 Playback::~Playback() { shutdown(true); }
 QAudioOutput *Playback::audioOutput() {
     if (!m_output) {
         m_output = std::make_unique<QAudioOutput>(this);
-        m_output->setVolume(float(m_volume) / 100);
+        m_output->setDevice(outputDevice());
+        m_output->setVolume(m_volume*m_fader.gain()/100.);
     }
     return m_output.get();
+}
+QAudioDevice Playback::outputDevice() const {
+    if(m_decodeOnly||qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))return {};
+    const auto id=QByteArray::fromBase64(m_library->setting("audioOutputDevice",QString()).toString().toLatin1());
+    if(!id.isEmpty())for(const auto &device:QMediaDevices::audioOutputs())if(device.id()==id)return device;
+    return QMediaDevices::defaultAudioOutput();
+}
+bool Playback::applyOutputDevice(const QAudioDevice &device){
+    if(m_decodeOnly||qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS"))return false;
+    if(!m_midiBackend->setOutputDevice(device)){emit error(m_midiBackend->error());return false;}
+    if(m_output)m_output->setDevice(device);
+    return true;
 }
 bool Playback::shutdown(bool force) {
     if (m_shutdown || m_shutdownInProgress) return m_shutdownSaved;
     m_shutdownInProgress = true;
     m_shutdownSaved = save();
     if(!m_shutdownSaved&&!force){m_shutdownInProgress=false;return false;}
+    finishHistory();
     // The final snapshot and listening sample precede irreversible teardown.
     // A failed interactive attempt leaves the transport and timer available.
     m_timer.stop();
@@ -144,6 +178,7 @@ bool Playback::sampleAt(qint64 now, qint64 position, bool isPlaying, bool finish
         delta = 0;
     if (delta > 0 || finishing)
         ok = m_library->saveSession(m_session, delta, m_threshold, finishing);
+    if(ok&&delta>0)m_historyHeard+=delta;
     // Some backends publish position only every 500 ms. Keep the wall baseline
     // until media position advances, or real listening time would be lost.
     if (ok && position != m_lastPosition) {
@@ -152,8 +187,12 @@ bool Playback::sampleAt(qint64 now, qint64 position, bool isPlaying, bool finish
     }
     return ok;
 }
+void Playback::finishHistory(){
+    if(m_historyHeard>0&&!m_library->recordPlaybackHistory(m_library->track(m_session.track)))emit saveFailed("播放历史未能保存");
+    m_historyHeard=0;
+}
 void Playback::finish() {
-    sample(true);
+    sample(true);finishHistory();
     m_session = {};
 }
 void Playback::load(qint64 id, bool autoplay, bool resume) {
@@ -165,11 +204,12 @@ void Playback::load(qint64 id, bool autoplay, bool resume) {
         emit error("未检测到音频输出设备，请连接耳机或音箱后再播放。");
     }
     if (!m_decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS") && !QMediaDevices::defaultAudioOutput().isNull()) {
-        audioOutput()->setDevice(QMediaDevices::defaultAudioOutput());
+        audioOutput()->setDevice(outputDevice());
         m_player.setAudioOutput(audioOutput());
     }
     m_loading = true;
     m_autoStart = autoplay;
+    m_fader.reset(autoplay&&m_library->setting("playbackFade",false).toBool()?0:1);
     if (!resume) {
         m_threshold = qBound(70, m_library->setting("threshold", 80).toInt(), 100);
         m_session = m_library->startSession(id, t.duration);
@@ -215,8 +255,9 @@ void Playback::toggle() {
         play(ids);
         return;
     }
-    if (playing()) {
+    if (playing()&&!m_fader.pausing()) {
         sample();
+        m_fader.to(0,m_library->setting("playbackFade",false).toBool(),[this]{
         if (m_midi) {
             if (!m_midiBackend->pause()) { onError(m_midiBackend->error()); return; }
             m_midiPlaying = false;
@@ -224,7 +265,10 @@ void Playback::toggle() {
         } else
             m_player.pause();
         save();
+        });
     } else {
+        if(playing())m_fader.to(1,m_library->setting("playbackFade",false).toBool());
+        else m_fader.reset(m_library->setting("playbackFade",false).toBool()?0:1);
         if (!m_decodeOnly && !qEnvironmentVariableIsSet("RELAXER_SKIP_AUDIO_DEVICE_TESTS") && QMediaDevices::defaultAudioOutput().isNull()) {
             emit error("未检测到音频输出设备，请连接耳机或音箱后再播放。");
             return;
@@ -234,6 +278,7 @@ void Playback::toggle() {
         if (m_midi) {
             if (!m_midiBackend->play()) { onError(m_midiBackend->error()); return; }
             m_midiPlaying = true;
+            m_fader.to(1,m_library->setting("playbackFade",false).toBool());
             m_lastPosition = position();
             m_lastWall = m_elapsed.elapsed();
             emit stateChanged();
@@ -243,6 +288,19 @@ void Playback::toggle() {
         } else
             m_player.play();
     }
+}
+void Playback::pauseForQueue(){
+    sample();m_fader.reset(0);
+    if(m_midi){if(m_midiPlaying)m_midiBackend->pause();m_midiPlaying=false;}
+    else m_player.pause();
+    sample(false,true);finishHistory();emit stateChanged();save();
+}
+void Playback::stopForQueue(){sample();finish();haltTransport();emit stateChanged();save();}
+void Playback::restoreQueued(qint64 id,qint64 position){
+    if(m_shutdown||!m_library->track(id).id)return;
+    haltTransport();m_queue.set({id},id);
+    if(m_session.track!=id||!m_session.id){m_session=m_library->startSession(id,m_library->track(id).duration);m_session.sought=position>0;}
+    m_restorePosition=qMax<qint64>(0,position);load(id,false,true);
 }
 void Playback::next() {
     if (m_shutdown) return;
@@ -319,8 +377,8 @@ void Playback::setMode(Mode m) {
 void Playback::setVolume(int v) {
     if (m_shutdown) return;
     m_volume = qBound(0, v, 100);
-    if (m_output) m_output->setVolume(float(m_volume) / 100);
-    if (!m_midiBackend->setVolume(m_volume) && m_midi) emit error(m_midiBackend->error());
+    if (m_output) m_output->setVolume(m_volume*m_fader.gain()/100.);
+    if (!m_midiBackend->setVolume(qRound(m_volume*m_fader.gain())) && m_midi) emit error(m_midiBackend->error());
     m_library->setSetting("volume", qBound(0, v, 100));
 }
 bool Playback::saveQueue() {
@@ -331,7 +389,7 @@ bool Playback::saveQueue() {
     // Same keys and representation; one existing storage transaction prevents
     // a failed periodic/final snapshot from leaving a partially updated queue.
     const QJsonObject snapshot{{"queue", ids}, {"current", double(m_queue.current())},
-        {"position", double(position())}, {"activeSession", double(m_session.id)}};
+        {"position", m_library->setting("rememberPosition",true).toBool()?double(position()):0}, {"activeSession", double(m_session.id)}};
     if(m_haveSavedQueue&&snapshot==m_lastSavedQueue)return true;
     const bool ok = m_library->setSettings(snapshot);
     if(ok){m_lastSavedQueue=snapshot;m_haveSavedQueue=true;m_lastSaveWrote=true;}
@@ -358,7 +416,7 @@ void Playback::restore() {
         return;
     m_session = m_library->session(qint64(m_library->setting("activeSession").toDouble()));
     m_threshold = qBound(70, m_library->setting("activeThreshold", 80).toInt(), 100);
-    m_restorePosition = qint64(m_library->setting("position", 0).toDouble());
+    m_restorePosition = m_library->setting("rememberPosition",true).toBool()?qint64(m_library->setting("position", 0).toDouble()):0;
     if (m_session.track != m_queue.current() || !m_session.id) {
         m_session = m_library->startSession(m_queue.current(), m_library->track(m_queue.current()).duration);
         if (m_restorePosition > 0)
@@ -403,6 +461,7 @@ void Playback::onError(const QString &text) {
     emit error(text);
     finish();
     haltTransport();
+    if(m_externalQueue){m_loading=false;QTimer::singleShot(150,this,[this,id]{if(!m_shutdown&&m_externalQueue&&m_queue.current()==id)emit advanceRequested(true);});return;}
     if (m_failed.size() >= m_queue.items.size()) {
         m_loading = false;
         emit stateChanged();
@@ -424,6 +483,7 @@ void Playback::onError(const QString &text) {
     });
 }
 qint64 Playback::position() const {
+    if(m_restorePosition>=0)return m_restorePosition;
     if (!m_midi)
         return m_player.position();
     return m_midiBackend->position();
@@ -445,6 +505,7 @@ bool Playback::seekable() const {
     return m_player.isSeekable();
 }
 void Playback::haltTransport() {
+    m_fader.reset();
     stopMidi();
     if (m_transcode) {
         auto *process = m_transcode.data();
@@ -453,6 +514,7 @@ void Playback::haltTransport() {
         process->deleteLater();
     }
     m_player.stop();
+    DiskCache::activeFiles.remove(m_player.source().toLocalFile());
 }
 void Playback::stopMidi() {
     if(!m_midiBackend->close())qWarning().noquote()<<"Playback::stopMidi:"<<m_midiBackend->error();
@@ -475,7 +537,7 @@ bool Playback::startMidi(const QString &path, bool autoplay) {
         onError(m_midiBackend->error());
         return false;
     }
-    if (!m_midiBackend->setVolume(m_volume)) { onError(m_midiBackend->error()); return false; }
+    if (!m_midiBackend->setVolume(qRound(m_volume*m_fader.gain()))) { onError(m_midiBackend->error()); return false; }
     m_midiDuration = m_midiBackend->duration();
     m_session.duration = m_midiDuration;
     m_library->saveSession(m_session, 0, m_threshold);
@@ -492,6 +554,7 @@ bool Playback::startMidi(const QString &path, bool autoplay) {
     if (autoplay) {
         if (!m_midiBackend->play()) { onError(m_midiBackend->error()); return false; }
         m_midiPlaying = true;
+        m_fader.to(1,m_library->setting("playbackFade",false).toBool());
     }
     emit positionChanged(start, m_midiDuration);
     emit stateChanged();
@@ -523,7 +586,9 @@ bool Playback::ensurePlayable(const Track &track, bool autoplay) {
     const auto key = QCryptographicHash::hash((path + QString::number(stamp)).toUtf8(), QCryptographicHash::Sha1).toHex();
     const QString flac = cache.filePath(QString::fromLatin1(key) + ".flac");
     if (QFileInfo::exists(flac) && QFileInfo(flac).size() > 0) {
+        DiskCache::activeFiles.insert(flac);
         m_player.setSource(QUrl::fromLocalFile(flac));
+        DiskCache::trim(m_library,{flac});
         if (autoplay)
             m_player.play();
         return true;
@@ -553,6 +618,7 @@ bool Playback::ensurePlayable(const Track &track, bool autoplay) {
         m_player.setSource(QUrl::fromLocalFile(flac));
         if (autoplay)
             m_player.play();
+        DiskCache::activeFiles.insert(flac);DiskCache::trim(m_library,{flac});
     });
     process->start();
     return true;

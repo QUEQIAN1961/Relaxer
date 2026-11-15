@@ -18,7 +18,8 @@ bool OnlineDownloadBridge::openDownloadDirectory(){return QDir().mkpath(download
 QString OnlineDownloadBridge::destinationPath(const QVariantMap &song,const QString &extension){
     auto name=song.value("artist").toString()+" - "+song.value("title").toString();name.replace(QRegularExpression(R"([<>:"/\\|?*\x00-\x1f])"),"_");
     if(!QDir().mkpath(downloadDirectory())){m_status="无法创建下载目录";emit changed();return {};}
-    return QDir(downloadDirectory()).filePath(name+(extension=="flac"?".flac":".mp3"));
+    const auto format=QStringList{"flac","m4a","ogg","wav"}.contains(extension)?extension:QString("mp3");
+    return QDir(downloadDirectory()).filePath(name+"."+format);
 }
 QString OnlineDownloadBridge::songKey(const QString &provider,const QVariantMap &song) const {return song.value("key",provider=="qq"?"qqmusic:"+song.value("mid").toString():"netease:"+song.value("id").toString()).toString();}
 bool OnlineDownloadBridge::isDownloaded(const QString &provider,const QVariantMap &song){
@@ -91,7 +92,7 @@ bool OnlineDownloadBridge::startTransfer(const QVariantMap &song,const QUrl &url
     if(isDownloaded(song.value("provider").toString(),song)||QFileInfo::exists(path))return false;
     m_song=song;m_requested=QFileInfo(path).absoluteFilePath();m_key=songKey(song.value("provider").toString(),song);m_partial=m_requested+".relaxer-"+QUuid::createUuid().toString(QUuid::WithoutBraces)+".part";
     m_file=std::make_unique<QSaveFile>(m_partial);if(!m_file->open(QIODevice::WriteOnly)){m_status="无法创建下载文件";emit changed();return false;}
-    if(auto *t=activeTask())t->state="downloading";m_prefix.clear();m_busy=true;m_progress=0;m_status="正在下载…";updateTask();QNetworkRequest request(url);request.setTransferTimeout(30000);request.setRawHeader("User-Agent","Mozilla/5.0");request.setRawHeader("Referer",song.value("provider").toString()=="qq"?"https://y.qq.com/":"https://music.163.com/");
+    if(auto *t=activeTask())t->state="downloading";m_prefix.clear();m_busy=true;m_progress=0;m_status="正在下载…";updateTask();QNetworkRequest request(url);request.setTransferTimeout(30000);request.setRawHeader("User-Agent","Mozilla/5.0");request.setRawHeader("Referer",song.value("provider").toString()=="qq"?"https://y.qq.com/":song.value("provider").toString()=="kugou"?"https://www.kugou.com/":song.value("provider").toString()=="qishui"?"https://music.douyin.com/":"https://music.163.com/");
     auto *reply=m_network.get(request);m_reply=reply;
     connect(reply,&QNetworkReply::readyRead,this,[this,reply]{const auto bytes=reply->readAll();if(m_prefix.size()<32)m_prefix.append(bytes.left(32-m_prefix.size()));if(m_file&&m_file->write(bytes)!=bytes.size()){reply->abort();return;}
         if(auto *t=activeTask()){t->received=m_file?m_file->pos():t->received;t->total=qMax(t->total,reply->header(QNetworkRequest::ContentLengthHeader).toLongLong());t->progress=t->total>0?double(t->received)/t->total:0;m_progress=t->progress;updateTask();}});
@@ -103,9 +104,13 @@ bool OnlineDownloadBridge::startTransfer(const QVariantMap &song,const QUrl &url
             m_status="正在自动还原 NCM 音频…";if(auto *t=activeTask())t->state="converting";updateTask();const auto input=m_partial;
             m_worker=QThread::create([this,input,base]{const auto result=restoreNcm(input,base);QMetaObject::invokeMethod(this,[this,result]{complete(result.path,result.error);},Qt::QueuedConnection);});connect(m_worker,&QThread::finished,m_worker,&QObject::deleteLater);m_worker->start();return;
         }
-        const auto format=m_prefix.startsWith("fLaC")?QString("flac"):(m_prefix.startsWith("ID3")||(m_prefix.size()>1&&quint8(m_prefix[0])==255&&(quint8(m_prefix[1])&224)==224))?QString("mp3"):QString();
+        const auto format=m_prefix.startsWith("fLaC")?QString("flac"):
+            m_prefix.size()>=12&&m_prefix.mid(4,4)=="ftyp"?QString("m4a"):
+            m_prefix.startsWith("OggS")?QString("ogg"):
+            m_prefix.size()>=12&&m_prefix.startsWith("RIFF")&&m_prefix.mid(8,4)=="WAVE"?QString("wav"):
+            (m_prefix.startsWith("ID3")||(m_prefix.size()>1&&quint8(m_prefix[0])==255&&(quint8(m_prefix[1])&224)==224))?QString("mp3"):QString();
         const auto target=base+"."+format;
-        if(format.isEmpty()){complete({},"下载内容不是可保存的 MP3、FLAC 或 NCM 音频");return;}
+        if(format.isEmpty()){complete({},"下载内容不是支持的音频格式");return;}
         if(QFileInfo::exists(target)){complete({},"本地文件已存在，已阻止重复下载");return;}
         if(!QFile::rename(m_partial,target)){complete({},"下载文件保存失败");return;}m_partial.clear();complete(target);
     });return true;

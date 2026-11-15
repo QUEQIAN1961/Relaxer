@@ -53,7 +53,7 @@ private:
 QRectF bounds(QQuickItem *item) { return item->mapRectToScene(QRectF(QPointF(), item->size())); }
 bool click(QQuickWindow *w, QQuickItem *item) {
     if (!item || !item->isVisible() || !item->isEnabled()) return false;
-    QTest::mouseClick(w, Qt::LeftButton, Qt::NoModifier, bounds(item).center().toPoint()); return true;
+    c4c5_fixture::reveal(item);QTest::mouseClick(w, Qt::LeftButton, Qt::NoModifier, bounds(item).center().toPoint()); return true;
 }
 bool prepare(Fixture &f) {
     if (!f.ok) return false;
@@ -347,7 +347,7 @@ private slots:
         }
         QVERIFY(QMetaObject::invokeMethod(visual(root,"lyricsWorkspace"),"close")); QTest::qWait(300);
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
-        QVERIFY(exercisePopup(visual(root,"qmlThemeSetting"),"theme-dropdown"));
+        w->resize(540,790);QTest::qWait(420);QVERIFY(exercisePopup(visual(root,"qmlThemeSetting"),"theme-dropdown"));w->resize(1240,790);QTest::qWait(420);
         QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTest::qWait(300);
         QVERIFY(exercisePopup(visual(root,"aiProviderSelection"),"api-provider-dropdown"));
         auto *scroll=visual(root,"aiSettingsScroll"); auto *flick=qvariant_cast<QQuickItem *>(scroll->property("contentItem")); QVERIFY(flick);
@@ -598,7 +598,7 @@ private slots:
         QVERIFY(click(w,visual(root,"aiSettingsBack"))); QTRY_COMPARE(w->property("settingsSection").toString(),QString("settings")); QTest::qWait(180);
         // Every exit path keeps Appearance visible until its snapshot is ready.
         for(int path=0;path<4;++path) {
-            QVERIFY(click(w,visual(root,"editAppearance"))); QTRY_COMPARE(w->property("settingsSection").toString(),QString("appearance")); QTest::qWait(180);
+            QVERIFY(click(w,visual(root,"themeOption-3"))); QTRY_COMPARE(w->property("settingsSection").toString(),QString("appearance")); QTest::qWait(180);
             if(path>0) {
                 const auto mode=f.shell->settingsBridge()->appearanceMode();
                 QVERIFY(click(w,visual(root,QString("appearanceMode%1").arg(mode==0?1:0))));
@@ -633,10 +633,10 @@ private slots:
         }
         auto *scroll=visual(root,"settingsScroll"); QVERIFY(scroll);
         QVERIFY(qAbs(bounds(scroll).bottom()-bounds(visual(root,"playerBar")).top())<1);
-        auto *bold=visual(root,"mutedBoldSetting"), *reduce=visual(root,"reduceMotionSetting"); QVERIFY(bold); QVERIFY(reduce);
+        auto *bold=visual(root,"mutedBoldSetting"), *reduce=visual(root,"animationOption-2"); QVERIFY(bold); QVERIFY(reduce);
         // Responsive options may wrap. Both controls must fit without overlap.
         QVERIFY(!bounds(bold).intersects(bounds(reduce)));
-        const auto optionFlow=bounds(bold->parentItem());
+        const auto optionFlow=bounds(bold->parentItem()).united(bounds(reduce->parentItem()));
         QVERIFY(optionFlow.contains(bounds(bold)));QVERIFY(optionFlow.contains(bounds(reduce)));
         QVERIFY(click(w,bold)); QVERIFY(f.shell->settingsBridge()->values().value("mutedBold").toBool());
         auto *caption=visual(root,"librarySummary"); QVERIFY(caption); QCOMPARE(caption->property("font").value<QFont>().weight(),QFont::DemiBold);
@@ -660,7 +660,7 @@ private slots:
             shot(w,size.width()==1240?"settings-actions-wide":"settings-actions-compact");
         }
         flick->setProperty("contentY",0); QTest::qWait(60);
-        QVERIFY(click(w,visual(root,"editAppearance"))); QTest::qWait(280);
+        QVERIFY(click(w,visual(root,"themeOption-3"))); QTest::qWait(280);
         QVERIFY(click(w,visual(root,"appearanceMode4"))); QTest::qWait(120);
         auto *options=visual(root,"appearanceImageOptions"); QVERIFY(options);
         QVERIFY(!visual(root,"appearanceMutedBold"));

@@ -19,7 +19,8 @@ Rectangle {
     ShellButton {
         objectName: "listPlayModeStart"
         width: parent.width-32; height: parent.height; flat: true
-        text: control.labels[control.selectedMode]; symbol:control.width<145?"":control.symbols[control.selectedMode]
+        text:control.width<112?control.labels[control.selectedMode].slice(0,2):control.labels[control.selectedMode];Accessible.name:control.labels[control.selectedMode]; symbol:control.width<145?"":control.symbols[control.selectedMode]
+        HintBubble {visible:parent.hovered&&control.width<112;text:control.labels[control.selectedMode]}
         leftPadding: 10; rightPadding: 6
         background: Rectangle { radius:8;color:parent.hovered?Theme.hover:"transparent" }
         onClicked:{modes.close();control.playRequested(control.selectedMode)}

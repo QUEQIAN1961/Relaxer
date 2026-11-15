@@ -277,7 +277,7 @@ private slots:
         // window only after that popup has completely left the overlay.
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QTRY_VERIFY(!w->property("popupOpen").toBool());
-        QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());QVERIFY(click(w,visual(root,"playbackExpandButton")));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
+        QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());QVERIFY(click(w,visual(root,"playerMetadata")));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
         QTest::keyClick(w,Qt::Key_Escape);QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);QVERIFY(shell.feedbackBridge()->visible());QVERIFY(!w->property("popupOpen").toBool());QVERIFY(shot(shell,"ui-batch-result-notification"));QVERIFY(shell.warnings().isEmpty());
     }
 };

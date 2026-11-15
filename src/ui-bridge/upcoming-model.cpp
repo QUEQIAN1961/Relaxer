@@ -8,7 +8,7 @@ namespace {
 bool sameMetadata(const Track &left, const Track &right) {
     return left.id == right.id && left.title == right.title && left.artist == right.artist &&
         left.album == right.album && left.duration == right.duration && left.favorite == right.favorite &&
-        left.cover == right.cover;
+        left.cover == right.cover && isVideoTrack(left)==isVideoTrack(right);
 }
 }
 UpcomingModel::UpcomingModel(Library *library, PlaybackFacade *facade, QObject *parent)
@@ -38,7 +38,7 @@ int UpcomingModel::rowCount(const QModelIndex &parent) const { return parent.isV
 QHash<int, QByteArray> UpcomingModel::roleNames() const {
     return {{TrackId, "trackId"}, {TrackKey, "trackKey"}, {Title, "title"}, {Artist, "artist"},
         {Album, "album"}, {Duration, "duration"}, {Favorite, "favorite"}, {CoverUrl, "coverUrl"},
-        {CoverRevision, "coverRevision"}, {UpcomingIndex, "upcomingIndex"}};
+        {CoverRevision, "coverRevision"}, {UpcomingIndex, "upcomingIndex"}, {VideoTrack,"videoTrack"}};
 }
 QVariant UpcomingModel::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.column() != 0 || index.row() < 0 || index.row() >= count()) return {};
@@ -54,6 +54,7 @@ QVariant UpcomingModel::data(const QModelIndex &index, int role) const {
     case CoverUrl: return artwork(track);
     case CoverRevision: return m_artworkRevisions.value(index.row());
     case UpcomingIndex: return index.row();
+    case VideoTrack: return isVideoTrack(track);
     default: return {};
     }
 }
@@ -103,10 +104,10 @@ void UpcomingModel::refresh() {
     QVector<QString> revisions;
     if (alive && !ids.isEmpty() && (orderChanged || m_metadataDirty)) {
         ++m_metadataReads;
-        const auto selected = m_facade->onlineActive() ? QHash<qint64,Track>{} : m_library->tracksByIds(ids);
+        const auto selected = m_library->tracksByIds(ids);
         tracks.reserve(ids.size());
         for (const auto id : ids) {
-            auto track = m_facade->onlineActive() ? m_facade->track(id) : selected.value(id);
+            auto track = selected.value(id);if(!track.id)track=m_facade->track(id);
             if (!track.id) { track.id = id; track.title = "歌曲已从曲库移除"; }
             revisions.append(artworkRevision(track));
             tracks.append(std::move(track));
@@ -124,7 +125,7 @@ void UpcomingModel::refresh() {
         }
         m_tracks = std::move(tracks);
         m_artworkRevisions = std::move(revisions);
-        if (first >= 0) emit dataChanged(index(first), index(last), {Title, Artist, Album, Duration, Favorite, CoverUrl, CoverRevision});
+        if (first >= 0) emit dataChanged(index(first), index(last), {Title, Artist, Album, Duration, Favorite, CoverUrl, CoverRevision, VideoTrack});
     }
     if (previousCount != count()) emit countChanged();
     const Track first = m_tracks.isEmpty() ? Track{} : m_tracks.first();

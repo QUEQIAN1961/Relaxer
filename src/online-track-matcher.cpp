@@ -13,9 +13,11 @@ double similarity(const QString &a,const QString &b){
 }
 }
 qint64 matchOnlineTrack(const Track &online,const QVector<Track> &local,bool requireUnique){
+    if(isVideoTrack(online))return 0;
     const auto title=normalize(online.title),artist=normalize(online.artist),kind=version(online.title);
     if(title.isEmpty()||artist.isEmpty())return 0;double best=0,second=0;qint64 selected=0;
     for(const auto &track:local){
+        if(isVideoTrack(track))continue;
         const bool timed=track.duration>0&&online.duration>0;
         if((timed&&qAbs(track.duration-online.duration)>qMax<qint64>(2000,online.duration*15/1000))||version(track.title)!=kind)continue;
         const auto titleScore=similarity(title,normalize(track.title));if(titleScore<(timed?.92:1.))continue;

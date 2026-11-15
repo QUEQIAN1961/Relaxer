@@ -24,7 +24,9 @@ Item {
     readonly property string textMarker:savedMarker.startsWith("text:")?savedMarker.slice(5):""
     function reorderAt(point) {
         const local=listView.contentItem.mapFromItem(null,point.x,point.y)
-        const target=Math.max(0,Math.min(orderModel.count-1,Math.floor(local.y/(height+listView.spacing))))
+        const first=listView.itemAtIndex(0)
+        const start=listView.headerItem?listView.headerItem.y+listView.headerItem.height:first?first.y:0
+        const target=Math.max(0,Math.min(orderModel.count-1,Math.floor((local.y-start)/(height+listView.spacing))))
         if(index!==target)orderModel.move(index,target,1)
     }
     Rectangle {anchors.fill:parent;radius:8;color:Theme.hover;visible:reorderDrag.active}
@@ -48,7 +50,7 @@ Item {
                 const point=reorderDrag.centroid.scenePosition
                 const local=row.listView.mapFromItem(null,point.x,point.y)
                 const step=local.y<24?-8:local.y>row.listView.height-24?8:0
-                if(step){row.listView.contentY=Math.max(0,Math.min(Math.max(0,row.listView.contentHeight-row.listView.height),row.listView.contentY+step));row.reorderAt(point)}
+                if(step){const top=row.listView.originY;row.listView.contentY=Math.max(top,Math.min(top+Math.max(0,row.listView.contentHeight-row.listView.height),row.listView.contentY+step));row.reorderAt(point)}
             }
         }
     }

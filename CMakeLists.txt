@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Relaxer VERSION 0.2.5 LANGUAGES CXX)
+project(Relaxer VERSION 0.2.6 LANGUAGES CXX)
 include(CTest)
 set(RELAXER_QT_TEST_COMPONENT)
 if(BUILD_TESTING)
@@ -218,9 +218,30 @@ else()
   target_compile_options(relaxer_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 if(RELAXER_PLAYBACK_FACADE_ONLY OR NOT (RELAXER_IMPORT_ONLY OR RELAXER_TRANSLATION_ONLY OR RELAXER_LYRICS_SEARCH_ONLY OR RELAXER_STORAGE_ONLY))
-add_library(relaxer_playback_facade STATIC src/playback-facade.cpp src/online-playback.cpp src/online-track-matcher.cpp src/online-track-matcher.h src/playback-facade.h)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Network)
+add_library(relaxer_playback_facade STATIC src/dash-stream.cpp src/dash-stream.h src/media-preload.cpp src/media-preload.h src/playback-facade.cpp src/online-playback.cpp src/online-track-matcher.cpp src/online-track-matcher.h src/playback-facade.h)
+# FFmpeg 9.0.2 needs the retained DASH cancellation patch on Windows.
+set(RELAXER_FFMPEG_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.dependencies/ffmpeg" CACHE PATH "Prepared DASH-safe avformat runtime")
+if(WIN32)
+  if(NOT EXISTS "${RELAXER_FFMPEG_RUNTIME_DIR}/runtime-ffmpeg.json")
+    message(FATAL_ERROR "Prepare the DASH playback fix: python scripts/prepare-dash-ffmpeg.py")
+  endif()
+  file(READ "${RELAXER_FFMPEG_RUNTIME_DIR}/runtime-ffmpeg.json" ffmpeg_runtime)
+  string(JSON expected_ffmpeg_sha GET "${ffmpeg_runtime}" binarySHA256)
+  string(JSON expected_patch_sha GET "${ffmpeg_runtime}" patchSHA256)
+  file(SHA256 "${RELAXER_FFMPEG_RUNTIME_DIR}/avformat-63.dll" actual_ffmpeg_sha)
+  file(SHA256 "${CMAKE_CURRENT_SOURCE_DIR}/docs/third-party/ffmpeg/dash-cancel.patch" actual_patch_sha)
+  if(NOT actual_ffmpeg_sha STREQUAL expected_ffmpeg_sha OR NOT actual_patch_sha STREQUAL expected_patch_sha)
+    message(FATAL_ERROR "DASH runtime differs from its recorded binary/patch; rerun scripts/prepare-dash-ffmpeg.py")
+  endif()
+  add_custom_target(relaxer_ffmpeg_runtime
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_FFMPEG_RUNTIME_DIR}/avformat-63.dll" "${RELAXER_FFMPEG_RUNTIME_DIR}/runtime-ffmpeg.json" "${CMAKE_BINARY_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${RELAXER_FFMPEG_RUNTIME_DIR}/licenses/ffmpeg" "${CMAKE_BINARY_DIR}/licenses/ffmpeg")
+  add_dependencies(relaxer_playback_facade relaxer_ffmpeg_runtime)
+endif()
+
 target_include_directories(relaxer_playback_facade PUBLIC src)
-target_link_libraries(relaxer_playback_facade PUBLIC relaxer_core)
+target_link_libraries(relaxer_playback_facade PUBLIC relaxer_core Qt6::Network)
 if(BUILD_TESTING)
 add_executable(relaxer_playback_facade_tests tests/playback-facade-tests.cpp)
 target_link_libraries(relaxer_playback_facade_tests PRIVATE relaxer_playback_facade Qt6::Test)
@@ -528,6 +549,8 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/online-artwork-cache.cpp src/ui-bridge/online-artwork-cache.h
     src/ui-bridge/online-download-bridge.cpp src/ui-bridge/online-download-bridge.h src/ncm-restore.cpp src/ncm-restore.h
     src/ui-bridge/qq-music-bridge.cpp src/ui-bridge/qq-music-bridge.h
+    src/ui-bridge/bilibili-bridge.cpp src/ui-bridge/bilibili-bridge.h
+    src/ui-bridge/additional-music-bridge.cpp src/ui-bridge/additional-music-bridge.h
     third_party/qrcodegen/qrcodegen.cpp third_party/qrcodegen/qrcodegen.hpp
     src/ui-bridge/qml-shell.cpp src/ui-bridge/qml-shell.h
     src/qml/qml.qrc)
@@ -554,6 +577,16 @@ if(RELAXER_ENABLE_QML)
   relaxer_add_qt_test(relaxer_rc6_user_regressions relaxer_rc6_user_regressions_tests)
   relaxer_qml_test_environment(relaxer_rc6_user_regressions)
   add_executable(relaxer_qml_resources_tests tests/qml-resources-tests.cpp)
+  add_executable(relaxer_phase_g_tests tests/phase-g-tests.cpp)
+  target_link_libraries(relaxer_phase_g_tests PRIVATE relaxer_qml Qt6::Test)
+  relaxer_add_qt_test(relaxer_phase_g relaxer_phase_g_tests)
+  relaxer_qml_test_environment(relaxer_phase_g)
+  # Hover, decoded-frame pixels and MultiEffect masks require a real compositor.
+  if(WIN32)
+    set_tests_properties(relaxer_phase_g PROPERTIES TIMEOUT 300 RUN_SERIAL TRUE)
+    set_property(TEST relaxer_phase_g APPEND PROPERTY ENVIRONMENT_MODIFICATION
+      "QT_QPA_PLATFORM=set:windows" "QT_QUICK_BACKEND=set:rhi" "QSG_RHI_BACKEND=set:d3d11")
+  endif()
   target_link_libraries(relaxer_qml_resources_tests PRIVATE relaxer_qml Qt6::Test)
   relaxer_add_qt_test(relaxer_qml_resources relaxer_qml_resources_tests)
   relaxer_qml_test_environment(relaxer_qml_resources)
@@ -1027,4 +1060,11 @@ relaxer_add_qt_test(relaxer_settings_appearance_compat relaxer_settings_appearan
 add_executable(relaxer_settings_appearance_widgets_tests tests/settings-appearance-widgets-tests.cpp)
 target_link_libraries(relaxer_settings_appearance_widgets_tests PRIVATE relaxer_ui Qt6::Test)
 relaxer_add_qt_test(relaxer_settings_appearance_widgets relaxer_settings_appearance_widgets_tests)
+endif()
+
+if(TARGET Relaxer)
+  add_custom_command(TARGET Relaxer POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:Relaxer>/licenses/wiliwili"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/REFERENCES.md" "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.md" "$<TARGET_FILE_DIR:Relaxer>"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/docs/third-party/wiliwili/LICENSE" "${CMAKE_CURRENT_SOURCE_DIR}/docs/third-party/wiliwili/ADAPTATION.md" "$<TARGET_FILE_DIR:Relaxer>/licenses/wiliwili")
 endif()

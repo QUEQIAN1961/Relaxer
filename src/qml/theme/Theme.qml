@@ -26,11 +26,13 @@ QtObject {
     readonly property color card: custom.card || (dark ? "#25252d" : "#f7f6f8")
     readonly property color footer: custom.footer || panel
     readonly property color progress: custom.progressFill || accent
+    readonly property color progressUnloaded: Qt.darker(progressTrack, dark ? 1.28 : 1.10)
     readonly property color progressTrack: custom.progressTrack || (dark ? "#45414a" : "#e6e1e7")
     readonly property int radius: 10
     readonly property int spacing: 16
-    readonly property int fontSize: 15
-    readonly property int controlHeight: 36
+    property real fontScale:1
+    readonly property int fontSize:Math.round(15*fontScale)
+    readonly property int controlHeight:Math.max(32,Math.round(36*fontScale))
     readonly property int pageContentOffset: Math.round(controlHeight * 0.6)
     property string fontFamily: "Microsoft YaHei UI"
     readonly property int headingSize: 28

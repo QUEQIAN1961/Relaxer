@@ -99,6 +99,7 @@ void LyricsModel::present(const QByteArray &bytes,bool preview) {
     m_current=-1;endResetModel();position(m_facade?m_facade->position():0);emit documentChanged();
 }
 void LyricsModel::position(qint64 ms) {
+    if(m_facade&&m_facade->onlineActive()&&m_facade->current().onlineMetadata.value("preview").toBool())ms+=m_facade->current().onlineMetadata.value("previewStartMs").toInteger();
     const int index=timed()?m_timeline.indexAt(ms-m_offset):-1;
     if(index==m_current)return;const int previous=m_current;m_current=index;
     // Only the affected range changes state; no per-frame lyric scan/reset.
@@ -114,7 +115,12 @@ bool LyricsModel::setOffsetMs(int value) {
 }
 bool LyricsModel::seekRow(int row) {
     if(!m_facade||!timed()||row<0||row>=m_rows.size()||m_track.id!=m_facade->current().id||!m_facade->seekable())return false;
-    m_facade->seek(qBound<qint64>(0,m_rows[row].time+m_offset,m_facade->duration()));return true;
+    auto target=m_rows[row].time+m_offset;
+    if(m_facade->onlineActive()&&m_facade->current().onlineMetadata.value("preview").toBool()){
+        target-=m_facade->current().onlineMetadata.value("previewStartMs").toInteger();
+        if(target<0||target>=m_facade->duration())return false;
+    }
+    m_facade->seek(qBound<qint64>(0,target,m_facade->duration()));return true;
 }
 void LyricsModel::presentTranslation(const TranslationSummary &summary) {
     if(!m_facade||!m_library||summary.trackId!=m_facade->current().id)return;

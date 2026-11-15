@@ -27,7 +27,7 @@ ConfirmDialog {
     contentItem:ColumnLayout {
         spacing:10
         ToggleButton {objectName:"lyricColorFollow";Layout.fillWidth:true;ButtonGroup.group:colorModes;text:"跟随文字颜色";checked:!dialog.custom;onClicked:dialog.custom=false}
-        UiText {Layout.fillWidth:true;wrapMode:Text.Wrap;font.pixelSize:12;color:Theme.secondary;text:"跟随当前主题的正文文字颜色，随深浅外观改变。"}
+        UiText {Layout.fillWidth:true;wrapMode:Text.Wrap;basePixelSize:12;color:Theme.secondary;text:"跟随当前主题的正文文字颜色，随深浅外观改变。"}
         ToggleButton {objectName:"lyricColorCustom";Layout.fillWidth:true;ButtonGroup.group:colorModes;text:"自定义";checked:dialog.custom;onClicked:dialog.custom=true}
         Rectangle {
             objectName:"lyricColorPicker";Layout.fillWidth:true

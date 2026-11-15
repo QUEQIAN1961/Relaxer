@@ -14,6 +14,8 @@
 #include "lyrics-search-bridge.h"
 #include "online-music-bridge.h"
 #include "qq-music-bridge.h"
+#include "additional-music-bridge.h"
+#include "bilibili-bridge.h"
 #include "online-artwork-cache.h"
 #include "online-download-bridge.h"
 #include <QQmlApplicationEngine>
@@ -31,11 +33,12 @@ class QmlShell final : public QObject {
                       SettingsBridge::SystemThemeReader systemTheme = {},
                       QNetworkAccessManager *searchTransport = nullptr, QVector<LyricsSearchSource> searchSources = {});
     ~QmlShell() override;
-    bool load();
+    bool load(int initialPage = -1);
     bool shutdown();
     QQuickWindow *window() const;
     AppBridge *appBridge() { return &m_appBridge; }
     PlaybackBridge *playbackBridge() { return &m_playbackBridge; }
+    BilibiliBridge *bilibiliBridge() { return &m_bilibili; }
     FeedbackBridge *feedbackBridge() { return &m_feedback; }
     PlaybackFacade *facade() { return &m_facade; }
     TrackFilterModel *libraryModel() { return &m_trackView; }
@@ -59,6 +62,11 @@ class QmlShell final : public QObject {
   protected:
     bool eventFilter(QObject *object,QEvent *event) override;
   private:
+    bool saveNavigation();
+    void fallbackMissingPlaylist(const QString &provider,const QString &id);
+    QString m_restoredCloudKey;
+    QPointer<Library> m_navigationLibrary;
+    bool m_rememberNavigation=false, m_navigationSaved=false, m_navigationSaveOk=true;
     FeedbackBridge m_feedback;
     PlaybackFacade m_facade;
     AppBridge m_appBridge;
@@ -85,9 +93,12 @@ class QmlShell final : public QObject {
     OnlineDownloadBridge m_onlineDownloads;
     OnlineMusicBridge m_onlineMusic;
     QqMusicBridge m_qqMusic;
+    AdditionalMusicBridge m_kugouMusic,m_sodaMusic;
+    BilibiliBridge m_bilibili;
     QTranslator m_controlsTranslator;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QStringList m_warnings;
+    QTimer m_backgroundRelease;
     bool m_artworkRecoveryScheduled=false;
 };
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include <QMetaType>
+#include <QJsonObject>
 #include <QDateTime>
 #include <QString>
 #include <QStringList>
@@ -11,10 +12,17 @@ struct Track {
     QString hash, file, title, artist, album, cover, lyrics;
     qint64 duration = 0, plays = 0, heard = 0;
     bool favorite = false;
+    bool requiresSubscription = false; // Online metadata only; local files retain their existing schema.
+    QJsonObject onlineMetadata; // Stable provider identifiers; never a stream URL or credential.
     QString coverOrigin;
     QString importedAt;
     qint64 matchedLocalId=0;
 };
+inline bool isVideoFile(const QString &path){
+    const auto suffix=path.section('.',-1).toLower();
+    return QStringList{"mp4","mkv","webm","mov","m4v","avi","mpeg","mpg","ts","m2ts","wmv"}.contains(suffix);
+}
+inline bool isVideoTrack(const Track &track){return track.hash.startsWith("bilibili:")||isVideoFile(track.file);}
 struct Playlist {
     qint64 id = 0;
     QString name, cover;

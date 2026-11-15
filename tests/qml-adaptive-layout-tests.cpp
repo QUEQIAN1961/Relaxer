@@ -114,7 +114,7 @@ bool nativeDrag(QQuickWindow *window,QPoint start,const QList<QPoint> &path){
 QRectF rect(QQuickItem *item) { return item->mapRectToScene(QRectF(QPointF(),item->size())); }
 bool click(QQuickWindow *w,QQuickItem *item) {
     if(!item||!item->isVisible()||!item->isEnabled())return false;
-    QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(item).center().toPoint());return true;
+    c4c5_fixture::reveal(item);QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(item).center().toPoint());return true;
 }
 bool prepare(Fixture &f) {
     if(!f.ok)return false;
@@ -222,12 +222,12 @@ private slots:
                 const bool profile=scope=="-2"||scope=="-3";
                 QVERIFY(f.shell->appBridge()->navigate(profile?2:0));QVERIFY(bridge->openPlaylist(scope));QTest::qWait(260);w->grabWindow();
                 auto *table=visual(root,profile?"recentTable":"libraryListContainer");QVERIFY(table&&table->isVisible());
-                QCOMPARE(table->property("headerHeight").toInt(),30);
+                QCOMPARE(table->property("headerHeight").toInt(),24);
                 QTest::mouseMove(w,QPoint(10,10));QTest::qWait(30);
                 for(const int column:{2,3}) {
                     auto *heading=visual(table,"trackHeading-"+QString::number(column));
                     auto *indicator=visual(table,"trackSort-"+QString::number(column));QVERIFY(heading&&indicator);
-                    QCOMPARE(heading->height(),30.);QVERIFY(!indicator->isVisible());
+                    QCOMPARE(heading->height(),24.);QVERIFY(!indicator->isVisible());
                     QTest::mouseMove(w,rect(heading).center().toPoint());QTRY_VERIFY(indicator->isVisible());
                     QCOMPARE(indicator->property("name").toString(),QString("sort-default"));
                     QVERIFY(click(w,heading));QCOMPARE(model->sortKey(),column-1);QVERIFY(!model->descending());
@@ -1062,14 +1062,17 @@ private slots:
         auto *panel=visual(hover,"compactVolumePanel"),*slider=visual(hover,"compactVolumeSlider"),*mute=visual(hover,"compactVolumeMuteButton");QVERIFY(panel);QVERIFY(slider);QVERIFY(mute);
         const auto speakerCenter=speaker->mapToGlobal(QPointF(speaker->width()/2,speaker->height()/2));
         const auto panelCenter=panel->mapToGlobal(QPointF(panel->width()/2,panel->height()/2));QVERIFY(qAbs(speakerCenter.x()-panelCenter.x())<=1);
-        const auto muteCenter=mute->mapToGlobal(QPointF(18,18));QVERIFY2(qAbs(muteCenter.x()-speakerCenter.x())<=1&&qAbs(muteCenter.y()-speakerCenter.y())<=1,qPrintable(QString("Speaker (%1,%2), popup (%3,%4)").arg(speakerCenter.x()).arg(speakerCenter.y()).arg(muteCenter.x()).arg(muteCenter.y())));QVERIFY(panelCenter.y()<speakerCenter.y());
+        const auto muteCenter=mute->mapToGlobal(QPointF(mute->width()/2,mute->height()/2));QVERIFY2(qAbs(muteCenter.x()-speakerCenter.x())<=1&&qAbs(muteCenter.y()-speakerCenter.y())<=1,qPrintable(QString("Speaker (%1,%2), popup (%3,%4)").arg(speakerCenter.x()).arg(speakerCenter.y()).arg(muteCenter.x()).arg(muteCenter.y())));QVERIFY(panelCenter.y()<speakerCenter.y());
         QCOMPARE(panel->childItems().size(),1);
-        if(screenEdge)QVERIFY(hover->width()<102);
-        // Corners and the full-width gap belong to the same hover rectangle.
-        const int right=qRound(hover->width())-2;
-        for(const auto &point:QList<QPoint>{QPoint(1,1),QPoint(right,1),QPoint(right,46),QPoint(1,46),QPoint(1,84),QPoint(right,84)}) {
-            move(floating,hover->mapToScene(point).toPoint());QVERIFY(popup->property("opened").toBool());
+        if(screenEdge){
+            const auto screen=speaker->window()->screen()->geometry();
+            QVERIFY(hover->width()<=102);QVERIFY(hover->mapToGlobal(QPointF()).x()>=screen.left()-1);
+            QVERIFY(hover->mapToGlobal(QPointF(hover->width(),0)).x()<=screen.x()+screen.width()+1);
         }
+        // Follow the pointer-intent corridor between the button and slider.
+        // Empty corners in the old hover rectangle are no longer safe targets.
+        const auto origin=rect(mute).center(),destination=rect(slider).center();
+        for(int step=0;step<=8;++step){move(floating,(origin+(destination-origin)*step/8.).toPoint());QVERIFY(popup->property("opened").toBool());}
         // A physical click follows a move to the button. QtTest mouseClick
         // alone teleports the press from the last corner without a hover move.
         move(floating,rect(mute).center().toPoint());
@@ -1192,7 +1195,7 @@ private slots:
                 QVERIFY(rect(visual(panel,"nextCompactTitle")).right()<=rect(visual(panel,"upcomingToggle")).left()+.1);
                 if(!track)shot(w,QString("queue-rc-collapsed-%1").arg(width));
                 QVERIFY(click(w,visual(panel,"upcomingToggle")));QTest::qWait(350);QVERIFY(panel->property("panelExpanded").toBool());
-                const auto expanded=rect(panel);QVERIFY(qAbs(expanded.width()-collapsed.width())<.1);QVERIFY(qAbs(expanded.left()-collapsed.left())<.1);QVERIFY(qAbs(expanded.right()-collapsed.right())<.1);
+                QTRY_VERIFY(rect(panel).width()+.01>=collapsed.width());QTRY_VERIFY(qAbs(rect(panel).right()-collapsed.right())<.1);qInfo()<<"Queue width"<<width<<"collapsed"<<collapsed<<"expanded"<<rect(panel);
                 QVERIFY(!icon->isVisible());QVERIFY(heading->isVisible());QCOMPARE(heading->property("text").toString(),QString("下一首"));QVERIFY(qAbs(rect(heading).left()-rect(icon).left())<.1);
                 if(!track)shot(w,QString("queue-rc-expanded-%1").arg(width));
                 QVERIFY(click(w,visual(panel,"upcomingToggle")));QTest::qWait(350);QVERIFY(qAbs(rect(panel).width()-collapsed.width())<.1);
@@ -1214,9 +1217,11 @@ private slots:
         QVERIFY(click(w,entry));QTest::qWait(270);
         auto *confirmation=w->findChild<QObject *>("playlistDeletionConfirmation");QVERIFY(confirmation);QVERIFY(confirmation->property("opened").toBool());
         QCOMPARE(confirmation->property("background").value<QObject *>()->property("radius").toInt(),12);shot(w,"playlist-delete-confirmation");
-        auto *footer=confirmation->property("footer").value<QQuickItem *>();QVERIFY(footer);QVERIFY(click(w,visual(footer,"confirmationButton1")));QTest::qWait(240);QCOMPARE(f.library.playlists().size(),1);
-        QVERIFY(click(w,visual(root,"playlistOptions")));QTest::qWait(260);QVERIFY(click(w,visual(root,"playlistEditEntry")));QTest::qWait(280);
-        auto *editor=w->findChild<QObject *>("playlistEditor");QVERIFY(editor);QVERIFY(editor->property("opened").toBool());
+        auto *footer=confirmation->property("footer").value<QQuickItem *>();QVERIFY(footer);QVERIFY(click(w,visual(footer,"confirmationButton1")));QTRY_VERIFY(!confirmation->property("visible").toBool());QCOMPARE(f.library.playlists().size(),1);
+        QVERIFY(click(w,visual(root,"playlistOptions")));QTRY_VERIFY(menu->property("opened").toBool());
+        auto *editEntry=visual(root,"playlistEditEntry");QVERIFY(editEntry);QSignalSpy editTriggered(editEntry,SIGNAL(triggered()));QVERIFY(editTriggered.isValid());
+        w->grabWindow();QVERIFY(click(w,editEntry));QTRY_COMPARE(editTriggered.count(),1);
+        QObject *editor=nullptr;QTRY_VERIFY((editor=w->findChild<QObject *>("playlistEditor")));QTRY_VERIFY(editor->property("opened").toBool());
         for(auto *object:editor->findChildren<QObject *>())QVERIFY(!object->property("text").toString().startsWith("删除此歌单"));
         QVERIFY(QMetaObject::invokeMethod(editor,"reject"));QTest::qWait(230);
         QVERIFY(click(w,visual(root,"playlistOptions")));QTest::qWait(260);QVERIFY(click(w,visual(root,"deletePlaylistEntry")));QTest::qWait(260);
@@ -1229,7 +1234,7 @@ private slots:
         QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(320);auto *dialog=w->findChild<QObject *>("lyricColorDialog");QVERIFY(dialog);
         auto chooser=[]()->QColorDialog *{for(auto *widget:QApplication::topLevelWidgets())if(widget->objectName()=="lyricDraftColorDialog")return qobject_cast<QColorDialog *>(widget);return nullptr;};
         for(int opening=0;opening<2;++opening) {
-            QVERIFY(click(w,visual(root,"lyricColorSetting")));
+            w->resize(540,790);QTest::qWait(420);QVERIFY(click(w,visual(root,"lyricColorSetting")));
             for(int frame=0;frame<20;++frame){QTest::qWait(16);QVERIFY(!dialog->property("custom").toBool());QVERIFY(visual(root,"lyricColorFollow")->property("checked").toBool());}
             QVERIFY(!visual(root,"chooseLyricDraftColor")->isEnabled());QVERIFY(!chooser());
             if(!opening){QVERIFY(click(w,visual(root,"cancelLyricColor")));QTest::qWait(240);}
@@ -1241,7 +1246,7 @@ private slots:
         QVERIFY(click(w,visual(root,"chooseLyricDraftColor")));QTRY_VERIFY(chooser());palette=chooser();palette->setCurrentColor(QColor("#123456"));palette->accept();QTRY_VERIFY(palette.isNull());
         QCOMPARE(dialog->property("chosenColor").value<QColor>(),QColor("#123456"));QVERIFY(settings->values().value("lyricColor").toString().isEmpty());
         QVERIFY(click(w,visual(root,"saveLyricColor")));QTRY_COMPARE(settings->values().value("lyricColor").toString(),QString("#123456"));QTest::qWait(240);
-        QVERIFY(click(w,visual(root,"lyricColorSetting")));QVERIFY(dialog->property("custom").toBool());
+        w->resize(540,790);QTest::qWait(420);QVERIFY(click(w,visual(root,"lyricColorSetting")));QVERIFY(dialog->property("custom").toBool());
         for(int frame=0;frame<20;++frame){QTest::qWait(16);QVERIFY(dialog->property("custom").toBool());QVERIFY(visual(root,"lyricColorCustom")->property("checked").toBool());}
         QVERIFY(click(w,visual(root,"lyricColorFollow")));QVERIFY(click(w,visual(root,"saveLyricColor")));QTRY_VERIFY(settings->values().value("lyricColor").toString().isEmpty());
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
@@ -1291,8 +1296,8 @@ private slots:
         QTest::qWait(300);QCOMPARE(caption->opacity(),0.);QVERIFY(click(w,visual(root,"sidebarLogo")));QTest::qWait(60);w->grabWindow();QVERIFY(caption->opacity()>0&&caption->opacity()<1);QTest::qWait(300);
         for(int width:{1240,900,547,546,414}) {
             w->resize(width,790);QTest::qWait(400);auto *bar=visual(root,"playerBar");const auto cover=rect(visual(root,"bottomCover")),barBox=rect(bar);
-            QCOMPARE(cover.left(),qreal(11));QCOMPARE(cover.top()-barBox.top(),qreal(11));QCOMPARE(barBox.bottom()-cover.bottom(),qreal(11));QCOMPARE(cover.width(),qreal(66.2));
-            if(width>=547){auto *queue=visual(root,"nextQueuePanel");const auto queueBox=rect(queue);QVERIFY(qAbs(w->width()-queueBox.right()-11)<.1);QVERIFY(qAbs(w->height()-queueBox.bottom()-11)<.1);QVERIFY(qAbs(rect(visual(queue,"upcomingToggle")).right()-queueBox.right())<.1);}
+            QCOMPARE(cover.left(),qreal(11));QCOMPARE(cover.top()-barBox.top(),qreal(11));QCOMPARE(barBox.bottom()-cover.bottom(),qreal(11));QCOMPARE(cover.width(),bar->height()-22);
+            if(width>=547){auto *queue=visual(root,"nextQueuePanel");const auto queueBox=rect(queue);QVERIFY(qAbs(w->width()-queueBox.right()-11)<.1);QVERIFY(qAbs(w->height()-queueBox.bottom()-7)<.1);QVERIFY(qAbs(rect(visual(queue,"upcomingToggle")).right()-queueBox.right())<.1);}
             shot(w,QString("footer-equal-margins-%1").arg(width));
         }
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
@@ -1305,28 +1310,28 @@ private slots:
         auto *directory=visual(root,"openDataRoot"),*path=visual(root,"dataRootText");QVERIFY(directory);QVERIFY(path);
         QCOMPARE(directory->property("text").toString(),QString("打开本地音乐目录"));QVERIFY(qAbs(rect(directory).center().y()-rect(path).center().y())<1);
         auto *row=visual(root,"dataRootRow");QVERIFY(qAbs(rect(directory).right()-rect(row).right())<1);
-        QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(280);auto *dialog=w->findChild<QObject *>("lyricColorDialog");QVERIFY(dialog);QVERIFY(dialog->property("opened").toBool());
+        w->resize(540,790);QTest::qWait(420);QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(280);auto *dialog=w->findChild<QObject *>("lyricColorDialog");QVERIFY(dialog);QVERIFY(dialog->property("opened").toBool());
         auto *picker=visual(root,"lyricColorPicker");QVERIFY(picker);QVERIFY(!picker->isEnabled());shot(w,"lyric-color-follow");
         QVERIFY(click(w,visual(root,"lyricColorFollow")));QVERIFY(click(w,visual(root,"lyricColorFollow")));QVERIFY(!picker->isEnabled());
         QVERIFY(click(w,visual(root,"lyricColorCustom")));QVERIFY(picker->isEnabled());QVERIFY(visual(root,"lyricColorCustom")->property("checked").toBool());QVERIFY(!visual(root,"lyricColorFollow")->property("checked").toBool());QVERIFY(QMetaObject::invokeMethod(dialog,"selectColor",Q_ARG(QVariant,QString("#123456"))));QTest::qWait(300);shot(w,"lyric-color-custom");
         w->resize(414,540);QTest::qWait(420);QVERIFY(rect(visual(root,"saveLyricColor")).bottom()<w->height());QVERIFY(rect(visual(root,"lyricColorFollow")).top()>0);shot(w,"lyric-color-414-540");
         QVERIFY(click(w,visual(root,"cancelLyricColor")));QTest::qWait(230);QVERIFY(settings->values().value("lyricColor").toString().isEmpty());w->resize(1240,790);QTest::qWait(420);
-        QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(260);QVERIFY(click(w,visual(root,"lyricColorCustom")));QVERIFY(QMetaObject::invokeMethod(dialog,"selectColor",Q_ARG(QVariant,QString("#123456"))));QVERIFY(click(w,visual(root,"saveLyricColor")));
+        w->resize(540,790);QTest::qWait(420);QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(260);QVERIFY(click(w,visual(root,"lyricColorCustom")));QVERIFY(QMetaObject::invokeMethod(dialog,"selectColor",Q_ARG(QVariant,QString("#123456"))));QVERIFY(click(w,visual(root,"saveLyricColor")));
         QTRY_COMPARE(settings->values().value("lyricColor").toString(),QString("#123456"));QTest::qWait(240);
         QVERIFY(click(w,visual(root,"showFavoritesSetting")));QVERIFY(!settings->values().value("showFavorites").toBool());
-        QVERIFY(f.shell->appBridge()->navigate(0));QTest::qWait(280);QVERIFY(!visual(table,"trackFavorite-"+QString::number(f.a.id))->isVisible());QCOMPARE(rect(visual(table,"trackHeading-2")).left(),titleStart-32);
+        QVERIFY(f.shell->appBridge()->navigate(0));QTest::qWait(280);QVERIFY(!visual(table,"trackFavorite-"+QString::number(f.a.id))->isVisible());QCOMPARE(visual(table,"trackHeading-1")->width(),0.);
         for(const QString id:{QString("-1"),QString("-2"),QString("0")}) {QVERIFY(f.shell->libraryBridge()->openPlaylist(id));QTest::qWait(120);QCOMPARE(visual(table,"trackHeading-1")->width(),0.);}
         w->resize(414,790);QTest::qWait(400);QCOMPARE(visual(table,"trackHeading-1")->width(),0.);
-        QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(320);QVERIFY(visual(root,"dataRootRow")->property("columns").toInt()==2);QVERIFY(qAbs(rect(visual(root,"openDataRoot")).center().y()-rect(visual(root,"dataRootText")).center().y())<1);shot(w,"settings-directory-narrow");
+        QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(320);QVERIFY(visual(root,"dataRootRow")->property("stacked").toBool());QVERIFY(rect(visual(root,"openDataRoot")).top()>=rect(visual(root,"dataRootText")).bottom());shot(w,"settings-directory-narrow");
         QVERIFY(click(w,visual(root,"showFavoritesSetting")));QVERIFY(settings->values().value("showFavorites").toBool());QCOMPARE(visual(table,"trackHeading-1")->width(),32.);
-        QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(260);QVERIFY(click(w,visual(root,"lyricColorFollow")));QVERIFY(!picker->isEnabled());QVERIFY(click(w,visual(root,"saveLyricColor")));QTRY_VERIFY(settings->values().value("lyricColor").toString().isEmpty());
+        w->resize(540,790);QTest::qWait(420);QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(260);QVERIFY(click(w,visual(root,"lyricColorFollow")));QVERIFY(!picker->isEnabled());QVERIFY(click(w,visual(root,"saveLyricColor")));QTRY_VERIFY(settings->values().value("lyricColor").toString().isEmpty());
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void navigationFitsItsRowsAndKeepsTheSameVerticalPositions() {
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();
         w->resize(414,790);QTest::qWait(420);QVERIFY(click(w,visual(root,"compactNavigation")));QTest::qWait(310);
         auto *emptyList=visual(root,"compactPlaylistNavigation");QVERIFY(emptyList);QCOMPARE(emptyList->property("count").toInt(),0);QCOMPARE(emptyList->height(),0.);
-        auto *emptyPopup=w->findChild<QObject *>("compactNavigationPanel");QVERIFY(emptyPopup);QVERIFY(emptyPopup->property("height").toInt()<390);shot(w,"navigation-empty");
+        auto *emptyPopup=w->findChild<QObject *>("compactNavigationPanel");QVERIFY(emptyPopup);QVERIFY(emptyPopup->property("height").toReal()<w->height()-visual(root,"playerBar")->height()-50);shot(w,"navigation-empty");
         QVERIFY(QMetaObject::invokeMethod(emptyPopup,"close"));QTest::qWait(250);w->resize(1240,790);QTest::qWait(420);
         const auto key=f.shell->libraryBridge()->createPlaylist("侧栏高度");QVERIFY(key!="0");
         auto *playlist=visual(root,"sidebarPlaylist-"+key);QTRY_VERIFY((playlist=visual(root,"sidebarPlaylist-"+key)));
@@ -1348,9 +1353,9 @@ private slots:
         shot(w,"navigation-content-height");
         for(int i=0;i<14;++i)QVERIFY(f.shell->libraryBridge()->createPlaylist("列表 "+QString::number(i))!="0");
         QTRY_VERIFY(list->property("contentHeight").toReal()>list->height());
-        QTRY_COMPARE(popup->property("height").toReal(),qreal(w->height()-98*.9-52));
+        QTRY_COMPARE(popup->property("height").toReal(),qreal(w->height()-visual(root,"playerBar")->height()-52));
         QVERIFY(popup->property("height").toReal()>shortHeight);shot(w,"navigation-scrolling-height");
-        w->resize(414,540);QTest::qWait(400);QVERIFY(rect(list).bottom()<=w->height()-98*.9);
+        w->resize(414,540);QTest::qWait(400);QVERIFY(rect(list).bottom()<=w->height()-visual(root,"playerBar")->height());
         QVERIFY(QMetaObject::invokeMethod(list,"positionViewAtEnd"));QTest::qWait(100);
         QVERIFY(list->property("atYEnd").toBool());
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
@@ -1427,7 +1432,7 @@ private slots:
         QVERIFY(click(w,visual(root,"thresholdIncrease")));QTRY_COMPARE(settings->values().value("threshold").toInt(),ratio+1);
         QVERIFY(click(w,visual(root,"thresholdDecrease")));QTRY_COMPARE(settings->values().value("threshold").toInt(),ratio);
         auto findColor=[]()->QColorDialog *{for(auto *widget:QApplication::topLevelWidgets())if(widget->objectName()=="lyricFullColorDialog")return qobject_cast<QColorDialog *>(widget);return nullptr;};
-        for(int press=0;press<2;++press){QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(250);QVERIFY(!findColor());QVERIFY(click(w,visual(root,"cancelLyricColor")));QTest::qWait(220);}
+        for(int press=0;press<2;++press){w->resize(540,790);QTest::qWait(420);QVERIFY(click(w,visual(root,"lyricColorSetting")));QTest::qWait(250);QVERIFY(!findColor());QVERIFY(click(w,visual(root,"cancelLyricColor")));QTest::qWait(220);}
         QVERIFY(settings->values().value("lyricColor").toString().isEmpty());
         QVERIFY(settings->chooseLyricColor(w));QTRY_VERIFY(findColor());QPointer<QColorDialog> chooser=findColor();
         QVERIFY(chooser->testOption(QColorDialog::DontUseNativeDialog));QVERIFY(chooser->findChildren<QSpinBox *>().size()>=6);QVERIFY(!chooser->findChildren<QLineEdit *>().isEmpty());
@@ -1443,7 +1448,7 @@ private slots:
         const auto folder=qEnvironmentVariable("RELAXER_ADAPTIVE_SCREENSHOTS");if(!folder.isEmpty())chooser->grab().save(QDir(folder).filePath("color-chinese-rounded.png"));
         chooser->setCurrentColor(QColor("#123456"));chooser->reject();QTRY_VERIFY(chooser.isNull());QVERIFY(settings->values().value("lyricColor").toString().isEmpty());
         QVERIFY(settings->chooseLyricColor(w));QTRY_VERIFY(findColor());chooser=findColor();chooser->setCurrentColor(QColor("#123456"));chooser->accept();QTRY_COMPARE(settings->values().value("lyricColor").toString(),QString("#123456"));QTRY_VERIFY(chooser.isNull());
-        QVERIFY(click(w,visual(root,"uiFontSetting")));QTest::qWait(300);auto *dialog=w->findChild<QObject *>("uiFontDialog");QVERIFY(dialog);QVERIFY(dialog->property("opened").toBool());
+        w->resize(1240,790);QTest::qWait(420);QVERIFY(click(w,visual(root,"uiFontSetting")));QTest::qWait(300);auto *dialog=w->findChild<QObject *>("uiFontDialog");QVERIFY(dialog);QVERIFY(dialog->property("opened").toBool());
         const auto before=settings->fontFiles();
         const auto font=QUrl::fromLocalFile(qEnvironmentVariable("WINDIR","C:/Windows")+"/Fonts/segoeui.ttf").toString();
         QVERIFY(QMetaObject::invokeMethod(dialog,"setFile",Q_ARG(QVariant,QString("songs")),Q_ARG(QVariant,font)));QCOMPARE(settings->fontFiles(),before);shot(w,"font-table-wide");
@@ -1459,39 +1464,15 @@ private slots:
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void settingsRowsWrapAndRestoreAfterNarrowMode() {
-        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();
-        w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));
-        QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(300);
-        auto *normalShell=visual(root,"normalShell");QVERIFY(normalShell);
-        const QStringList cells{"settingsAppearanceCell","settingsThresholdCell","settingsCloseCell"};
-        for(int width:{1240,1000,900,600,546,414,547,1000,1240}) {
-            QElapsedTimer layoutClock;layoutClock.start();w->resize(width,790);
-            // Native geometry can precede the scene viewport. Observe the
-            // committed viewport and animation endpoint before judging rows.
-            QVERIFY2(QTest::qWaitFor([&]{
-                return w->width()==width&&normalShell->width()==width
-                    &&w->property("narrowLayout").toBool()==(width<547)
-                    &&w->property("narrowProgress").toReal()==(width<547?1.:0.);
-            },2000),qPrintable(QString("Requested %1, window %2, scene %3, narrow progress %4")
-                .arg(width).arg(w->width()).arg(normalShell->width()).arg(w->property("narrowProgress").toReal())));
-            qInfo()<<"settings layout settled"<<width<<"ms"<<layoutClock.elapsed();
-            w->grabWindow();
-            auto *flow=visual(root,"settingsBasicGrid");QVERIFY(flow);
-            QList<QRectF> boxes;
-            for(const auto &name:cells) {
-                auto *cell=visual(root,name);QVERIFY(cell);const auto box=rect(cell);boxes.append(box);
-                QVERIFY2(box.left()>=rect(flow).left()-.5&&box.right()<=rect(flow).right()+.5,qPrintable(name));
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(320);
+        for(int width:{1240,1000,900,600,547,414,1240}){
+            w->resize(width,790);QTest::qWait(420);
+            for(const auto &name:QStringList{"settingsAppearanceGroup","settingsPlaybackGroup","settingsInteractionGroup"}){
+                auto *group=visual(root,name);QVERIFY(group);auto *heading=visual(root,name+"Heading"),*body=visual(root,name+"Body");QVERIFY(heading&&body);
+                QVERIFY(rect(body).left()>=rect(group).left()-.5);QVERIFY(rect(body).right()<=rect(group).right()+.5);
+                if(group->property("stacked").toBool())QVERIFY(rect(body).top()>=rect(heading).bottom());
+                else {QVERIFY(rect(body).left()>rect(heading).right());QVERIFY(qAbs(rect(body).top()-rect(heading).top())<.5);}
             }
-            for(int i=0;i<3;++i)for(int j=i+1;j<3;++j)QVERIFY(!boxes[i].intersects(boxes[j]));
-            if(width<547) {
-                QVERIFY(boxes[1].top()>boxes[0].bottom());QVERIFY(boxes[2].top()>boxes[1].bottom());
-                for(const auto &box:boxes)QVERIFY(qAbs(box.width()-flow->width())<1);
-            }else if(width==1240) {
-                QVERIFY(qAbs(boxes[0].top()-boxes[1].top())<1);QVERIFY(qAbs(boxes[1].top()-boxes[2].top())<1);
-            }else if(width==900||width==1000) {
-                QVERIFY(qAbs(boxes[0].top()-boxes[1].top())<1);QVERIFY(boxes[2].top()>boxes[0].bottom());
-            }
-            if(width==414||width==900||width==1240)shot(w,QString("settings-wrapping-%1").arg(width));
         }
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
@@ -1629,9 +1610,9 @@ private slots:
         Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();
         w->resize(460,790);QTest::qWait(420);
         QVERIFY(rect(visual(root,"muteButton")).left()>rect(visual(root,"playMode")).right());
-        QVERIFY(qAbs(rect(visual(root,"muteButton")).right()-(w->width()-18))<1);
+        QVERIFY(qAbs(rect(visual(root,"playbackWidthButton")).right()-(w->width()-11))<1);
         QTest::mouseMove(w,rect(visual(root,"muteButton")).center().toPoint());QCoreApplication::processEvents();
-        auto *volume=w->findChild<QObject *>("compactVolumePopup");QVERIFY(volume);QVERIFY(volume->property("opened").toBool());
+        auto *volume=w->findChild<QObject *>("compactVolumePopup");QVERIFY(volume);QTRY_VERIFY(volume->property("opened").toBool());
         QVERIFY(QMetaObject::invokeMethod(volume,"close"));QTest::qWait(180);
         QVERIFY(click(w,visual(root,"compactQueueButton")));QTest::qWait(360);
         auto *popup=w->findChild<QObject *>("narrowQueuePopup");QVERIFY(popup);QVERIFY(popup->property("opened").toBool());
@@ -1644,13 +1625,13 @@ private slots:
         shot(w,"footer-centering-460");QTest::qWait(360);
         const auto art=rect(visual(root,"currentArtwork")),title=rect(visual(root,"currentTitle"));Q_UNUSED(title)
         auto *lyrics=visual(root,"lyricsPanel");QVERIFY(lyrics);QVERIFY(rect(lyrics).top()>art.bottom());
-        QVERIFY(!visual(root,"compactNavigation")->isVisible());QVERIFY(rect(visual(root,"playerCollapse")).top()<2);
+        QVERIFY(!visual(root,"compactNavigation")->isVisible());QVERIFY(visual(root,"compactPlayerCollapse")->isVisible());QVERIFY(qAbs(rect(visual(root,"compactPlayerCollapse")).top())<1);
         auto *bar=visual(root,"playerBar"),*cover=visual(root,"bottomCover"),*seek=visual(root,"playbackProgress");QVERIFY(bar);QVERIFY(cover);QVERIFY(seek);
-        QCOMPARE(qRound(bar->height()),88);QCOMPARE(cover->width(),qreal(66.2));QVERIFY(rect(seek).width()<300);
+        QCOMPARE(qRound(bar->height()),79);QVERIFY(qAbs(cover->width()-57.38)<.01);QVERIFY(rect(seek).width()<300);
         QVERIFY(rect(visual(root,"currentFavoriteButton")).left()>rect(cover).right());
-        QVERIFY(qAbs((rect(visual(root,"compactQueueButton")).left()+rect(visual(root,"muteButton")).right())/2-w->width()/2.)<1);
+        QVERIFY(qAbs((rect(visual(root,"compactQueueButton")).left()+rect(visual(root,"playbackWidthButton")).right())/2-w->width()/2.)<1);
         QVERIFY(qAbs(rect(seek).center().x()-w->width()/2.)<1);
-        QCOMPARE(qRound(art.width()),88);QCOMPARE(visual(root,"playerCollapse")->property("text").toString(),QString());
+        QCOMPARE(qRound(art.width()),88);QCOMPARE(visual(root,"compactPlayerCollapse")->property("text").toString(),QString());
         shot(w,"lyrics-460");
         w->resize(1240,790);QTest::qWait(420);shot(w,"lyrics-wide-restored");
         w->resize(460,790);QTest::qWait(420);QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QTest::qWait(460);
@@ -1785,7 +1766,7 @@ private slots:
                         auto *bar=visual(root,"playerBar");const auto targetX=bar->x()+bar->property("queueControlX").toReal();
                         const auto targetY=bar->y()+bar->property("queueControlY").toReal();
                         QVERIFY(qAbs(box.x()-(8+(targetX-8)*progress))<1);
-                        QVERIFY(qAbs(box.y()-((w->height()-8-panel->height())*(1-progress)+targetY*progress))<1);
+                        QVERIFY(qAbs(box.y()-((w->height()-8-panel->height())*(1-progress)+targetY*progress+(panel->height()+8)*w->property("upcomingTravel").toReal()))<1);
                     }
                     if(frame==8)shot(w,QString("transition-%1-%2").arg(expanded?"lyrics":"library").arg(width));
                 }
@@ -1793,8 +1774,8 @@ private slots:
         }
         QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QTest::qWait(520);
         auto *nav=visual(root,"compactNavigation"),*close=visual(root,"windowControl2");QVERIFY(nav);QVERIFY(close);
-        QCOMPARE(rect(nav).size(),rect(close).size());QVERIFY(qAbs(rect(nav).center().y()-rect(close).center().y())<1);
-        QVERIFY(qAbs(rect(nav).center().x()-(w->width()-rect(close).center().x()))<1);
+        QCOMPARE(rect(nav).size(),QSizeF(42,32));QCOMPARE(rect(close).size(),QSizeF(33.6,25.6));QVERIFY(qAbs(rect(nav).top()-rect(close).top())<1);
+        QVERIFY(qAbs(rect(nav).left())<1&&qAbs(rect(close).right()-w->width())<1);
         QVERIFY(click(w,nav));QTest::qWait(80);
         auto *popup=w->findChild<QObject *>("compactNavigationPanel");QVERIFY(popup);
         auto *surface=qvariant_cast<QQuickItem *>(popup->property("contentItem"));QVERIFY(surface);
@@ -1813,13 +1794,13 @@ private slots:
         w->resize(460,790);QTest::qWait(420);QVERIFY(!visual(root,"currentTitle")->isVisible());
         w->resize(414,790);QTest::qWait(420);
         QVERIFY(rect(visual(root,"compactQueueButton")).left()>=rect(visual(root,"bottomCover")).right()+11);
-        QVERIFY(qAbs(rect(visual(root,"muteButton")).right()-(w->width()-18))<1);shot(w,"minimum-414");
+        QVERIFY(qAbs(rect(visual(root,"playbackWidthButton")).right()-(w->width()-11))<1);shot(w,"minimum-414");
         w->resize(546,790);QTest::qWait(420);auto *title=visual(root,"currentTitle"),*artist=visual(root,"currentArtist");QVERIFY(title->isVisible());QVERIFY(artist->isVisible());
         const auto cover=rect(visual(root,"bottomCover")),controls=rect(visual(root,"compactQueueButton"));
         QVERIFY(rect(title).left()>cover.right());QVERIFY(rect(title).right()<controls.left());QVERIFY(rect(artist).right()<controls.left());shot(w,"metadata-546");
         for(int width:{900,970,1240}) {
             w->resize(width,790);QTest::qWait(420);w->grabWindow();auto *panel=visual(root,"nextQueuePanel");QVERIFY(panel);
-            QTRY_VERIFY2(qAbs(rect(panel).bottom()-(w->height()-11))<1,qPrintable(QString("bottom=%1 expected=%2 narrow=%3 travel=%4").arg(rect(panel).bottom()).arg(w->height()-11).arg(w->property("narrowProgress").toReal()).arg(w->property("upcomingTravel").toReal())));QVERIFY(rect(panel).left()>rect(visual(root,"playerCenter")).right());
+            QTRY_VERIFY2(qAbs(rect(panel).bottom()-(w->height()-7))<1,qPrintable(QString("bottom=%1 expected=%2 narrow=%3 travel=%4").arg(rect(panel).bottom()).arg(w->height()-7).arg(w->property("narrowProgress").toReal()).arg(w->property("upcomingTravel").toReal())));QVERIFY(rect(panel).left()>rect(visual(root,"playerCenter")).right());
             QVERIFY(click(w,visual(panel,"upcomingToggle")));QTest::qWait(350);w->grabWindow();QVERIFY(panel->property("panelExpanded").toBool());
             if(qEnvironmentVariable("QT_QUICK_BACKEND")!="software")QTRY_VERIFY(visual(root,"wideQueueBackdropBlur"));
             auto *rowTitle=visual(panel,"upcomingTitle-0"),*rowArtist=visual(panel,"upcomingArtist-0");QVERIFY(rowTitle);QVERIFY(rowArtist);
@@ -1871,7 +1852,7 @@ private slots:
         const auto key=f.shell->libraryBridge()->createPlaylist("晚间音乐");QVERIFY(key!="0");
         const auto second=f.shell->libraryBridge()->createPlaylist("晨间音乐"),third=f.shell->libraryBridge()->createPlaylist("旅途音乐");
         w->resize(460,790);QTest::qWait(420);QVERIFY(f.shell->appBridge()->navigate(1));QTest::qWait(160);
-        auto *cards=visual(root,"playlistCards");QVERIFY(cards);QCOMPARE(cards->property("cellWidth").toReal()*2,cards->width());
+        auto *cards=visual(root,"playlistCards");QVERIFY(cards);QVERIFY(cards->property("cellWidth").toReal()*2<=cards->width());QVERIFY(cards->width()-cards->property("cellWidth").toReal()*2<12);
         auto *firstCover=visual(root,"playlistCardCover-"+key),*secondCover=visual(root,"playlistCardCover-"+second),*thirdCover=visual(root,"playlistCardCover-"+third);
         QVERIFY(firstCover);QVERIFY(secondCover);QVERIFY(thirdCover);
         QCOMPARE(rect(firstCover).top(),rect(secondCover).top());QVERIFY(rect(secondCover).left()>rect(firstCover).right());QVERIFY(rect(thirdCover).top()>rect(firstCover).bottom());
@@ -1900,9 +1881,9 @@ private slots:
         QVERIFY(click(w,visual(root,"compactNavigation")));QTest::qWait(300);
         QVERIFY(click(w,visual(root,"compactNavigate-3")));QTest::qWait(550);QCOMPARE(f.shell->appBridge()->page(),3);
         QVERIFY(f.shell->appBridge()->navigate(3));QTest::qWait(250);
-        QVERIFY(visual(root,"lyricColorSetting")->isVisible());QVERIFY(!visual(root,"lyricColorReset"));
+        QVERIFY(visual(root,"lyricColorSetting")->isVisible());QVERIFY(!visual(root,"lyricColorFollowSetting")->isVisible());QVERIFY(!visual(root,"lyricColorCustomSetting")->isVisible());QVERIFY(!visual(root,"lyricColorReset"));
         const auto theme=rect(visual(root,"qmlThemeSetting")),threshold=rect(visual(root,"qmlThresholdSetting")),close=rect(visual(root,"closeSetting"));
-        QVERIFY(threshold.top()>theme.bottom());QVERIFY(close.top()>threshold.bottom());shot(w,"settings-460");
+        QVERIFY(close.top()>theme.bottom());QVERIFY(threshold.top()>close.bottom());shot(w,"settings-460");
         auto *scroll=visual(root,"settingsScroll");QVERIFY(scroll);auto *flick=qvariant_cast<QQuickItem *>(scroll->property("contentItem"));QVERIFY(flick);
         auto *shortcuts=visual(root,"shortcutsPage");QVERIFY(shortcuts);flick->setProperty("contentY",shortcuts->y());QTest::qWait(100);shot(w,"shortcuts-460");
         auto *app=visual(root,"shortcut-app-toggle"),*global=visual(root,"shortcut-global-toggle");

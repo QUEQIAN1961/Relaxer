@@ -36,7 +36,7 @@ Button {
         UiText {
             visible:control.textMarker.length>0
             x:control.markerOffset;width:20;height:22;anchors.verticalCenter:parent.verticalCenter
-            text:control.textMarker;textFormat:Text.PlainText;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter;font.pixelSize:18;font.weight:Font.DemiBold
+            text:control.textMarker;textFormat:Text.PlainText;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter;basePixelSize:18;font.weight:Font.DemiBold
             color:!control.enabled?Theme.disabled:control.selected?Theme.accent:Theme.text
         }
         UiText {

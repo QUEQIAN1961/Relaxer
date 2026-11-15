@@ -6,7 +6,10 @@ Relaxer 自有代码采用 GPL-3.0-only。第三方代码、数据、字体（�
 
 ## 版权及许可证材料
 
-- `third_party/qrcodegen/`：Nayuki QR Code generator，MIT 许可；源文件中保留完整版权和许可，用于本机生成网易云登录二维码。
+- 圆圈到勾的形状变形数据由 morphicons 2.0.2（MIT，Guillermo）生成；原文许可和原生 QML 适配说明见 `docs/third-party/morphicons/`。平台身份图标的官网来源见 `resources/music-platforms/README.md`。
+
+- `third_party/qrcodegen/`：Nayuki QR Code generator，MIT 许可；源文件中保留完整版权和许可，用于本机生成音乐平台登录二维码。
+- 汽水与酷狗原生适配参考 MIT 许可的 `guowenye/qishui-api`（2026 arrow）与 `MakcRe/KuGouMusicApi`（2023 MakcRe）；来源、适配边界及原文许可证见 `docs/third-party/music-platforms/`。
 
 - `third-party-licenses/`：原部署提供的软件包许可证与版权，包含所用包之外保留的原通知，不按目录数量推定实际分发组件。
 - `licenses/startup/`：GCC/MinGW 运行代码版权、GPL 和适用例外材料。
@@ -69,3 +72,16 @@ V0.2.5-RC 已将 MIDI 后端替换为 FluidSynth 2.6.2（LGPL-2.1-or-later）。
 V0.2.5-RC 的 48 个歌单标记为 Relaxer 独立重绘的矢量图，遵循项目许可证。较早版本曾使用 Lucide 0.468.0 / Feather 派生图形；历史版权及 ISC、MIT 许可继续保留在 `licenses/playlist-marks/LICENSE.txt` 和资源目录内。
 
 界面的返回箭头、大头钉及下载状态图形参考 Morphicons 所用的 Lucide 开源图形，并按 Relaxer 的尺寸、线宽和动画规则适配。原图形的 ISC / MIT 声明保留，不重新许可为 GPL。来源：https://github.com/lucide-icons/lucide/tree/0.468.0/icons ，https://www.morphicons.com/ 。
+
+## wiliwili 接口适配（V0.2.6-RC）
+
+哔哩哔哩原生适配参考并改编 xfangfang / 贡献者的 wiliwili，固定提交 88e5876bea9502d06f46a8656e3530684d3aaf7d，GNU GPL v3。逐文件来源、作者说明、修改者/日期、采用范围及对应源码安排见根 REFERENCES.md；保留的原文见 docs/third-party/wiliwili/LICENSE。未引入其 UI、字体、图标、CPR、borealis、libmpv 或预编译依赖。致谢不能替代 GPL 的声明、许可与精确对应源码义务。
+
+
+## 原生音乐平台接口
+
+汽水/酷狗原生接口的独立 MIT 归属、许可原文与本次改编范围见 `docs/third-party/music-platforms/README.md` 及 `REFERENCES.md` 的平台补充。新汽水来源为 GSQZ/qishui-music-api 0.2.2（Copyright (c) 2026 sayqz，MIT）；协议与签名改写为 Qt/Windows CNG，未复制 AGPL Folia 的应用代码。三份平台 MIT 原文也嵌入“开源许可与致谢”。本地新改动公开发行时需随同匹配的完整应用源码提供。
+
+## Phase G 的 FFmpeg DASH 取消修复
+
+当前 V0.2.6-RC 本地构建额外采用已修改的 FFmpeg 9.0.2 avformat-63.dll，只修复 DASH 取消时的错误返回，保持原版权与 GPL-3.0-or-later 许可路线。来源、补丁、修改日期、精确源码及重建方式见 docs/third-party/ffmpeg/README.md，构建身份见 runtime-ffmpeg.json。公开发行时必须附匹配的新组件源码/补丁/配置与许可证，不沿用旧 GA 二进制身份。

@@ -14,10 +14,12 @@ ConfirmDialog {
     anchors.centerIn: parent
     width: Math.min(680, parent ? parent.width - 32 : 680)
     property var files:({})
+    property int chosenSize:15
     property string targetRegion:"songs"
     readonly property var regions:[{key:"songs",name:"歌曲列表"},{key:"lyrics",name:"歌词"},{key:"footer",name:"底栏"},{key:"next",name:"下一首"},{key:"rest",name:"其余界面文字"}]
     function openSettings() {
         files=Object.assign({},settingsBridge.fontFiles)
+        chosenSize=settingsBridge.values.fontSize
         open()
     }
     function setFile(key,path){const copy=Object.assign({},files);copy[key]=path;files=copy}
@@ -27,17 +29,26 @@ ConfirmDialog {
         const name=(text.startsWith("file:")?decodeURIComponent(text):text).split(/[\\/]/).pop()
         return text.startsWith("Fonts/")?name.replace(/-[0-9a-f]{12}(?=\.[^.]+$)/,""):name
     }
-    contentItem: ColumnLayout {
-        spacing: 12
-        UiText {Layout.fillWidth:true;text:"每个板块可单独选择字体文件。";wrapMode:Text.Wrap;color:Theme.secondary;font.pixelSize:14}
+    contentItem:ScrollView {
+        id:fontScroll;contentWidth:availableWidth;contentHeight:fontContent.implicitHeight;clip:true
+        implicitHeight:Math.min(fontContent.implicitHeight,Math.max(140,dialog.parent.height-180))
+        ColumnLayout {
+        id:fontContent;width:fontScroll.availableWidth;spacing:12
+        RowLayout {
+            Layout.fillWidth:true
+            UiText {text:"界面字号";Layout.fillWidth:true}
+            SettingsNumber {objectName:"uiFontSizeSetting";controlPrefix:"fontSize";suffix:" px";from:12;to:20;value:dialog.chosenSize;onValueModified:dialog.chosenSize=value}
+        }
+        UiText {objectName:"fontSizePreview";Layout.fillWidth:true;wrapMode:Text.Wrap;text:"Relaxer 字体大小预览";basePixelSize:dialog.chosenSize/Theme.fontScale}
+        UiText {Layout.fillWidth:true;text:"每个板块可单独选择字体文件。";wrapMode:Text.Wrap;color:Theme.secondary;basePixelSize:14}
         Rectangle {
             Layout.fillWidth:true;implicitHeight:fontRows.implicitHeight+16;radius:10;color:Theme.card;border.color:Theme.border
             ColumnLayout {
                 id:fontRows;anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;anchors.margins:8;spacing:8
                 RowLayout {
                     Layout.fillWidth:true;spacing:8
-                    UiText {text:"板块";Layout.preferredWidth:dialog.width<520?84:100;color:Theme.secondary;font.pixelSize:14}
-                    UiText {text:"字体文件";Layout.fillWidth:true;color:Theme.secondary;font.pixelSize:14}
+                    UiText {text:"板块";Layout.preferredWidth:dialog.width<520?84:100;color:Theme.secondary;basePixelSize:14}
+                    UiText {text:"字体文件";Layout.fillWidth:true;color:Theme.secondary;basePixelSize:14}
                     Item {Layout.preferredWidth:112;Layout.preferredHeight:1}
                 }
                 Rectangle {Layout.fillWidth:true;height:1;color:Theme.border}
@@ -46,10 +57,10 @@ ConfirmDialog {
                     delegate:RowLayout {
                         required property var modelData
                         objectName:"fontRegionRow-"+modelData.key;Layout.fillWidth:true;spacing:8
-                        UiText {text:modelData.name;Layout.preferredWidth:dialog.width<520?84:100;color:Theme.text;font.pixelSize:14;wrapMode:Text.Wrap}
+                        UiText {text:modelData.name;Layout.preferredWidth:dialog.width<520?84:100;color:Theme.text;basePixelSize:14;wrapMode:Text.Wrap}
                         UiText {
                             objectName:"fontRegionFile-"+modelData.key;text:dialog.fileName(dialog.files[modelData.key]);textFormat:Text.PlainText;Layout.fillWidth:true;Layout.minimumWidth:0
-                            elide:Text.ElideMiddle;color:Theme.secondary;font.pixelSize:14
+                            elide:Text.ElideMiddle;color:Theme.secondary;basePixelSize:14
                             HoverHandler {id:fileHover}
                             HintBubble {visible:fileHover.hovered;text:String(dialog.files[modelData.key]||"系统字体")}
                         }
@@ -59,7 +70,8 @@ ConfirmDialog {
                 }
             }
         }
-        UiText { Layout.fillWidth: true; text: settingsBridge.status; visible:text.length>0;wrapMode: Text.Wrap; color: Theme.accent;font.pixelSize:14 }
+        UiText { Layout.fillWidth: true; text: settingsBridge.status; visible:text.length>0;wrapMode: Text.Wrap; color: Theme.accent;basePixelSize:14 }
+        }
     }
     footer: Item {
         implicitHeight: actions.implicitHeight + 28
@@ -70,7 +82,7 @@ ConfirmDialog {
             ShellButton { objectName:"resetAllFonts";text: "恢复默认"; onClicked: { if (settingsBridge.resetFont()) dialog.close() } }
             Item { Layout.fillWidth: true }
             ShellButton { text: "取消"; onClicked: dialog.close() }
-            ShellButton { objectName:"saveRegionFonts";text: "保存"; primary: true; onClicked: { if (settingsBridge.saveFonts(dialog.files)) dialog.close() } }
+            ShellButton { objectName:"saveRegionFonts";text: "保存"; primary: true; onClicked: { if (settingsBridge.saveFonts(dialog.files,dialog.chosenSize)) dialog.close() } }
         }
     }
     FileDialog {

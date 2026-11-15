@@ -12,7 +12,7 @@ ToolTip {
     contentItem: UiText {
         text: hint.text
         color: Theme.text
-        font.pixelSize: 14
+        basePixelSize: 14
         wrapMode: Text.Wrap
     }
     background: Rectangle { radius: 8; color: Theme.card; border.color: Theme.border }

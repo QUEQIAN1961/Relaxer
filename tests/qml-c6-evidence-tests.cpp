@@ -1,5 +1,10 @@
 #include "c4c5-ui-fixture.h"
 #include "background-window-fixture.h"
+#include "ui-bridge/online-artwork-cache.h"
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QTimer>
+#include <cstring>
 #include <QApplication>
 #include <QDateTime>
 #include <QElapsedTimer>
@@ -14,6 +19,35 @@ using namespace c4c5_fixture;
 namespace {
 QString output;
 int serial=0;
+
+// Visual flash checks need deterministic pixels, not live recommendation covers.
+class CatalogReply final:public QNetworkReply {
+    QByteArray payload;qsizetype offset=0;bool done=false;
+public:
+    CatalogReply(const QNetworkRequest &request,const QByteArray &bytes,QObject *parent):QNetworkReply(parent),payload(bytes){
+        setRequest(request);setUrl(request.url());setAttribute(QNetworkRequest::HttpStatusCodeAttribute,200);open(QIODevice::ReadOnly);
+        QTimer::singleShot(0,this,[this]{if(done)return;done=true;setFinished(true);emit readyRead();emit finished();});
+    }
+    void abort()override{if(done)return;done=true;setError(OperationCanceledError,"Mock cancelled");setFinished(true);emit finished();}
+    qint64 bytesAvailable()const override{return payload.size()-offset+QNetworkReply::bytesAvailable();}
+    qint64 readData(char *data,qint64 maximum)override{const auto count=qMin(maximum,qint64(payload.size()-offset));if(count<=0)return -1;memcpy(data,payload.constData()+offset,count);offset+=count;return count;}
+};
+class CatalogNetwork final:public QNetworkAccessManager {
+public:
+    QByteArray payload;int requests=0;
+protected:
+    QNetworkReply *createRequest(Operation,const QNetworkRequest &request,QIODevice *)override{++requests;return new CatalogReply(request,payload,this);}
+};
+struct SyntheticDiscovery {
+    CatalogNetwork network;OnlineArtworkCache artwork;OnlineMusicBridge bridge;QQmlContext *context;QObject *original;bool ok=false;
+    explicit SyntheticDiscovery(Fixture &f):artwork(&f.library,f.shell->facade()),bridge(&f.library,f.shell->facade(),f.shell->lyricsModel(),f.runtime.get(),&artwork,nullptr,&network),context(QQmlEngine::contextForObject(f.shell->window())->engine()->rootContext()),original(f.shell->onlineMusicBridge()){
+        const auto path=f.dir.filePath("generated-discovery.png");QImage cover(64,64,QImage::Format_RGB32);cover.fill(QColor("#efd6dd"));ok=cover.save(path);
+        network.payload=QJsonDocument(QJsonObject{{"code",200},{"result",QJsonArray{QJsonObject{{"id",11},{"name","Synthetic discovery"},{"picUrl",QUrl::fromLocalFile(path).toString()},{"trackCount",3}}}}}).toJson();
+        QQmlEngine::setObjectOwnership(&bridge,QQmlEngine::CppOwnership);context->setContextProperty("onlineMusic",&bridge);
+    }
+    ~SyntheticDiscovery(){context->setContextProperty("onlineMusic",original);}
+};
+
 QRectF rect(QQuickItem *item){return item->mapRectToScene(QRectF(QPointF(),item->size()));}
 template<typename Predicate> bool remainsTrueFor(Predicate predicate,int milliseconds){
     QElapsedTimer timer;timer.start();
@@ -34,10 +68,11 @@ void shot(QQuickWindow *w,const QString &name){
     const auto path=QDir(output).filePath(QString("%1-%2.png").arg(++serial,4,10,QChar('0')).arg(name));
     if(!w->grabWindow().save(path))qFatal("Cannot preserve C6 screenshot");
 }
-bool prepare(Fixture &f){
+bool prepare(Fixture &f,bool activate=true){
     if(!f.ok)return false;
-    auto *w=f.shell->window();w->showNormal();w->setGeometry(45,50,1240,790);
+    auto *w=f.shell->window();w->showNormal();w->setGeometry(45,50,1240,790);if(activate){w->raise();w->requestActivate();}
     if(!QTest::qWaitForWindowExposed(w))return false;
+    if(activate&&QGuiApplication::platformName()=="windows"&&!QTest::qWaitForWindowActive(w))return false;
     auto *player=f.shell->facade();auto *media=player->backend()->media();
     const auto ready=[&]{const auto status=media->mediaStatus();return player->playing()&&player->seekable()&&
         (status==QMediaPlayer::LoadedMedia||status==QMediaPlayer::BufferingMedia||status==QMediaPlayer::BufferedMedia);};
@@ -169,7 +204,7 @@ private slots:
     void actualAnimationFrames(){
         const BackgroundWindowFixture background;
         QVERIFY2(background.installed(),"Could not install the test-thread non-activation guard");
-        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();auto *root=w->contentItem();auto *clip=visual(root,"playerBackdropClip");auto *panel=visual(root,"nextQueuePanel");QVERIFY(clip&&panel);
+        Fixture f;QVERIFY(prepare(f,false));auto *w=f.shell->window();auto *root=w->contentItem();auto *clip=visual(root,"playerBackdropClip");auto *panel=visual(root,"nextQueuePanel");QVERIFY(clip&&panel);
         for(int scenario=0;scenario<5;++scenario){
             const bool opening=scenario!=1;
             if(scenario==3)w->resize(1000,660);
@@ -444,16 +479,16 @@ private slots:
         Fixture f(4);QVERIFY(prepare(f));auto *w=f.shell->window();
         auto *panel=visual(w->contentItem(),"nextQueuePanel"),*title=visual(w->contentItem(),"nextCompactTitle"),*artist=visual(w->contentItem(),"nextCompactArtist");QVERIFY(panel&&title&&artist);
         QTRY_COMPARE(title->property("text").toString(),f.b.title);
-        QVERIFY(panel->setProperty("width",480));QTRY_VERIFY(artist->isVisible());QVERIFY(title->width()>=title->implicitWidth());QVERIFY(artist->x()>=title->x()+title->width());
+        QVERIFY(panel->setProperty("width",480));QTRY_VERIFY(!artist->isVisible());QTRY_VERIFY(title->width()>=title->implicitWidth());QVERIFY(artist->x()>=title->x()+title->width());
         QCOMPARE(artist->property("text").toString(),QString(" — ")+f.b.artist);
         // Text metrics now decide when both labels fit; don't encode the old
         // fixed title/artist cutoff. A roomy panel must retain the full title.
         QVERIFY(panel->setProperty("width",title->x()+title->implicitWidth()+artist->implicitWidth()+40));
-        QTRY_VERIFY(artist->isVisible());QVERIFY(title->width()>=title->implicitWidth());
+        QTRY_VERIFY(!artist->isVisible());QTRY_VERIFY(title->width()>=title->implicitWidth());
         QVERIFY(artist->x()>=title->x()+title->width());
-        QVERIFY(artist->x()+artist->width()<=panel->width()-34);
-        QVERIFY(panel->setProperty("width",160));QTRY_VERIFY(title->width()<title->implicitWidth());QVERIFY(!artist->isVisible());
-        QVERIFY(panel->setProperty("width",480));QTRY_VERIFY(artist->isVisible());shot(w,"next-title-and-artist");
+        QVERIFY(rect(title).right()<=rect(visual(panel,"upcomingToggle")).left()+.1);
+        QVERIFY(panel->setProperty("width",160));QTRY_VERIFY(qAbs(panel->width()-160)<.01);QVERIFY(title->width()<title->implicitWidth());QVERIFY(!artist->isVisible());
+        QVERIFY(panel->setProperty("width",480));QTRY_VERIFY(!artist->isVisible());shot(w,"next-title-and-artist");
         record("next-title-priority",{{"title",title->property("text").toString()},{"artist",artist->property("text").toString()},{"width",panel->width()}});QVERIFY(f.shell->warnings().isEmpty());
     }
     void userReviewCompletedWorkspaceCanAlwaysOpen(){
@@ -543,7 +578,7 @@ private slots:
     void userReviewPageInteriorNeverFlashesBlack(){
         QFETCH(bool,reduced);
         QFETCH(int,theme);
-        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();SyntheticDiscovery synthetic(f);QVERIFY(synthetic.ok);
         QVERIFY(f.shell->settingsBridge()->setTheme(theme));
         QVERIFY(f.shell->settingsBridge()->setPreference("reduceMotion",reduced));
         auto *paper=visual(w->contentItem(),"paperSurface");QVERIFY(paper);
@@ -553,7 +588,12 @@ private slots:
             QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,rect(button).center().toPoint());
             if(destination==3){
                 w->showMinimized();QTRY_COMPARE(w->visibility(),QWindow::Minimized);
-                w->showNormal();QVERIFY(QTest::qWaitForWindowExposed(w));
+                // A grab before the first restored paint may return the stale
+                // swapchain. Sample from the first fresh frame, not a black
+                // unpainted buffer; retain every subsequent frame assertion.
+                QSignalSpy restored(w,&QQuickWindow::frameSwapped);
+                w->showNormal();w->raise();w->requestActivate();QVERIFY(QTest::qWaitForWindowExposed(w));
+                w->requestUpdate();QTRY_VERIFY(!restored.isEmpty());
             }
             QElapsedTimer timer;timer.start();QJsonArray frames;double minimumMean=255,maximumDark=0;QImage worst;
             while(timer.elapsed()<400){
@@ -577,10 +617,10 @@ private slots:
             QCOMPARE(f.shell->appBridge()->page(),destination==1?4:destination);
             QVERIFY2(minimumMean>(theme==1?17:190)&&maximumDark<.15,"Page interior flashed black during navigation or window restore");
         }
-        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+        QVERIFY(synthetic.network.requests>0);QCOMPARE(synthetic.bridge.playlists().size(),1);QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void userReviewPageFramesAndSettingsLayout(){
-        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();QVERIFY(f.shell->settingsBridge()->setTheme(0));
+        Fixture f;QVERIFY(prepare(f));auto *w=f.shell->window();SyntheticDiscovery synthetic(f);QVERIFY(synthetic.ok);QVERIFY(f.shell->settingsBridge()->setTheme(0));
         auto *paper=visual(w->contentItem(),"paperSurface");QVERIFY(paper);
         for(int destination:{1,3,0}){
             auto *button=visual(w->contentItem(),"navigation"+QString::number(destination));QVERIFY(button);
@@ -594,8 +634,8 @@ private slots:
             record("sidebar-no-black-frame",{{"destination",destination},{"darkestPaddingPixel",darkest},{"frames",frames}});QVERIFY2(darkest>100,"Light-theme page padding flashed black");
         }
         f.shell->appBridge()->navigate(3);QTest::qWait(80);
-        auto *cover=visual(w->contentItem(),"playerCoverBackground");auto *reduce=visual(w->contentItem(),"reduceMotionSetting");QVERIFY(cover&&reduce);
-        QVERIFY(qAbs(rect(cover).center().y()-rect(reduce).center().y())<1);QVERIFY(rect(reduce).left()>rect(cover).left());
+        auto *cover=visual(w->contentItem(),"playerCoverBackground");auto *reduce=visual(w->contentItem(),"animationOption-2");QVERIFY(cover&&reduce);
+        QVERIFY(rect(reduce).top()>rect(cover).bottom());
         auto *settings=visual(w->contentItem(),"settingsScroll");QVERIFY(settings);auto *flick=qvariant_cast<QQuickItem *>(settings->property("contentItem"));QVERIFY(flick);QCOMPARE(flick->property("boundsBehavior").toInt(),0);
         auto *shortcuts=visual(w->contentItem(),"shortcutsPage");auto *app=visual(w->contentItem(),"shortcut-app-toggle");auto *global=visual(w->contentItem(),"shortcut-global-toggle");QVERIFY(shortcuts&&app&&global);
         const auto a=rect(app),g=rect(global);
@@ -604,7 +644,7 @@ private slots:
         QVERIFY(rect(shortcuts).right()-g.right()<65);
         record("settings-review-layout",{{"appWidth",a.width()},{"globalWidth",g.width()},{"remainingRight",rect(shortcuts).right()-g.right()},{"boundsBehavior",flick->property("boundsBehavior").toInt()}});
         flick->setProperty("contentY",qMax(0.,flick->property("contentHeight").toDouble()-flick->height()));shot(w,"settings-review-layout");
-        QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
+        QVERIFY(synthetic.network.requests>0);QCOMPARE(synthetic.bridge.playlists().size(),1);QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
 };
 int main(int argc,char **argv){QApplication app(argc,argv);app.setStyle("Fusion");app.setQuitOnLastWindowClosed(false);C6EvidenceTests tests;return QTest::qExec(&tests,argc,argv);}

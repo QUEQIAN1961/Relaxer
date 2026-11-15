@@ -14,6 +14,7 @@ class QqMusicBridge final:public QObject {
     Q_PROPERTY(QString status READ status NOTIFY changed)
     Q_PROPERTY(QString qrImage READ qrImage NOTIFY changed)
     Q_PROPERTY(QString membership READ membership NOTIFY changed)
+    Q_PROPERTY(bool vip READ vip NOTIFY changed)
     Q_PROPERTY(QString loginChannel READ loginChannel WRITE setLoginChannel NOTIFY changed)
     Q_PROPERTY(QVariantList songs READ songs NOTIFY songsChanged)
     Q_PROPERTY(QVariantList playlists READ playlists NOTIFY changed)
@@ -21,7 +22,7 @@ class QqMusicBridge final:public QObject {
     Q_PROPERTY(QVariantMap currentPlaylist READ currentPlaylist NOTIFY changed)
     Q_PROPERTY(QString quality READ quality WRITE setQuality NOTIFY changed)
 public:
-    QqMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel *lyrics,ai::AiRuntime *ai,OnlineArtworkCache *artwork,QObject *parent=nullptr);
+    QqMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel *lyrics,ai::AiRuntime *ai,OnlineArtworkCache *artwork,QObject *parent=nullptr,QNetworkAccessManager *transport=nullptr);
     ~QqMusicBridge() override;
     bool loggedIn() const{return m_loggedIn;}
     bool busy() const{return !m_pageCache.quiet()&&(!m_requests.isEmpty()||m_aiTask!=0);}
@@ -31,6 +32,7 @@ public:
     QString status() const{return m_status;}
     QString qrImage() const{return m_qrImage;}
     QString membership() const{return m_membership;}
+    bool vip()const{return m_loggedIn&&!m_membership.isEmpty()&&m_membership!=QStringLiteral("普通账号");}
     QString loginChannel() const{return m_loginChannel;}
     QString quality() const{return m_quality;}
     QVariantList songs() const{return m_songs;}
@@ -54,22 +56,26 @@ public:
     Q_INVOKABLE void recommend();
     Q_INVOKABLE void playSong(const QString &id);
     void playSongs(const QStringList &ids,const QString &start);
+    Q_INVOKABLE bool batchSongs(const QStringList &ids,const QString &action);
     void savePinnedPlaylist(const QString &id){m_pageCache.savePinned("playlist:"+id);}
     Q_INVOKABLE void cancelRecommendation();
     void toggleFavorite(qint64 internalId);
     static constexpr qint64 TrackBase=OnlineMusicBridge::TrackBase*2;
 signals:
+    void playlistMissing(const QString &id);
+    void loginCompleted();
     void changed();
     void songsChanged();
     void downloadReady(const QVariantMap &song,const QUrl &url,const QString &extension);
     void downloadFailed(const QVariantMap &song,const QString &error);
 private:
+    QVector<Track> tracksFor(const QStringList &ids);
     using JsonDone=std::function<void(const QJsonObject &)>;
     using ReplyDone=std::function<void(QNetworkReply *,const QByteArray &)>;
     Library *m_library;PlaybackFacade *m_facade;LyricsModel *m_lyrics;ai::AiRuntime *m_ai;
     OnlineArtworkCache *m_artwork;
     OnlinePageCache m_pageCache;bool m_forcePage=false;QTimer m_pageCommit;
-    QNetworkAccessManager m_network;MusicCookieJar *m_cookies;
+    QNetworkAccessManager m_network;QNetworkAccessManager *m_transport;MusicCookieJar *m_cookies;
     QSet<QNetworkReply *> m_requests;
     QPointer<QNetworkReply> m_loginRequest;
     QTimer m_poll;

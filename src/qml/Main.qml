@@ -7,6 +7,23 @@ import "pages"
 import "theme"
 ApplicationWindow {
     id: root
+    readonly property real captionHeight:32*.8
+    readonly property real captionButtonWidth:42*.8
+    property bool playerChromeVisible:true
+    property point playerPointer:Qt.point(-1,-1)
+    function revealPlayerChrome(){if(playerPresented){playerChromeVisible=true;playerChromeIdle.restart()}}
+    onPlayerPresentedChanged:if(playerPresented)revealPlayerChrome()
+    Binding {target:playbackBridge;property:"onlineVideoVisible";value:(root.playerPresented||root.videoExpandPending||(root.videoExpandEnabled&&!root.firstVideoStarted&&playbackBridge.video))&&!root.miniMode&&!root.miniSwitching&&root.visible&&root.visibility!==Window.Minimized}
+    property bool videoExpandPending:false
+    property bool firstVideoStarted:false
+    property bool videoExpandEnabled:settingsBridge.values.autoExpandVideo
+    onVideoExpandEnabledChanged:firstVideoStarted=false
+    function presentVideoWhenPlaying(){
+        if(playbackBridge.video&&playbackBridge.playing&&videoExpandEnabled&&!firstVideoStarted){
+            videoExpandPending=true;firstVideoStarted=true;const key=playbackBridge.trackId
+            Qt.callLater(function(){if(root.videoExpandEnabled&&playbackBridge.playing&&playbackBridge.video&&playbackBridge.trackId===key)root.showLyrics();root.videoExpandPending=false})
+        }
+    }
     component DeferredPage: Loader {
         property bool requested: false
         active: false
@@ -14,7 +31,7 @@ ApplicationWindow {
         Component.onCompleted: if (requested) active = true
     }
     objectName: "qmlMainWindow"
-    visible: true
+    visible: false
     width: 1240
     height: 790
     property bool miniMode:false
@@ -44,6 +61,8 @@ ApplicationWindow {
     property var miniReturnFrom:[]
     property var miniReturnTo:[]
     property bool miniEnteredByShortcut:false
+    property bool miniShortcutTransition:false
+    readonly property bool skipMiniAnimation:settingsBridge.values.animationMode===1&&miniShortcutTransition
     property var miniFlightParts:[]
     readonly property bool miniFlightActive:miniSwitching&&!miniMode&&miniFlightParts.length>0
     minimumWidth:miniMode||miniSwitching?miniWidth:414;minimumHeight:miniMode||miniSwitching?miniHeight:540
@@ -79,7 +98,12 @@ ApplicationWindow {
     Timer {id:playlistOrderExit;interval:settingsBridge.values.reduceMotion?0:360;onTriggered:{root.playlistOrderDraftActive=false;playlistOrderDraft.clear()}}
     property real sidebarCondenseProgress:sidebarCondensed?1:0
     Behavior on sidebarCondenseProgress {NumberAnimation{duration:settingsBridge.values.reduceMotion?0:280;easing.type:Easing.OutCubic}}
-    readonly property real sidebarBaseWidth:205-121*sidebarCondenseProgress
+    property real sidebarDragWidth:-1
+    readonly property real sidebarMaxWidth:Math.min(400,Math.max(160,normalShell.width-340))
+    readonly property real sidebarExpandedWidth:Math.min(sidebarMaxWidth,Math.max(160,sidebarDragWidth>=0?sidebarDragWidth:Number(settingsBridge.values.sidebarWidth||205)))
+    readonly property real sidebarBaseWidth:sidebarExpandedWidth+(84-sidebarExpandedWidth)*sidebarCondenseProgress
+    readonly property real sidebarRowHeight:36
+    readonly property real sidebarRowSpacing:5.5
     readonly property bool narrowLayout: (miniSwitching?miniNormalGeometry[2]:width) < 547
     property real narrowProgress:0
     NumberAnimation {id:narrowMotion;target:root;property:"narrowProgress";duration:320;easing.type:Easing.OutCubic}
@@ -111,6 +135,10 @@ ApplicationWindow {
         if(!backgrounded)return
         narrowQueue.close();compactNavigationMenu.close();playerBar.closeTransientPopups()
         if(miniLoader.item)miniLoader.item.closeTransientPopups()
+        const action=navigationAction;navigationAction=null
+        snapshotWarmup.stop();pageOut.stop();pageIn.stop();clearPageSnapshot()
+        pageSurface.opacity=1;pageSurface.y=0
+        if(action){root.clearBulk();action()}
     }
     readonly property var appearancePage: appearanceLoader.item
     readonly property var lyricsWorkspace: lyricsWorkspaceLoader.item
@@ -141,9 +169,11 @@ ApplicationWindow {
         target:root.popupLayer
         function onVisibleChanged(){if((root.miniMode||root.miniSwitching)&&root.popupLayer.visible)root.popupLayer.visible=false}
     }
+    property string initialVideoPreviewId:""
     property real playerProgress: 0
     readonly property real playerReveal: playerProgress
     property bool upcomingAtLeft: false
+    property bool upcomingRelocating:false
     property real upcomingTravel: 0
     property var coverFrom: ({x:0,y:0,width:62,height:62,radius:10})
     property var coverTo: ({x:0,y:0,width:62,height:62,radius:10})
@@ -225,9 +255,48 @@ ApplicationWindow {
         playerMotion.from = playerProgress; playerMotion.to = open ? 1 : 0
         playerMotion.duration = 420; coverMotion.duration=420; playerMotion.restart(); coverMotion.restart()
     }
+    property bool widthSwitchActive:false
+    property var widthSwitchGeometry:[]
+    property real widthSwitchProgress:0
+    readonly property bool widthSwitchRunning:widthSwitchMotion.running
+    onWidthSwitchProgressChanged: {
+        if(widthSwitchGeometry.length!==7)return
+        const g=widthSwitchGeometry,w=g[3]+(g[4]-g[3])*widthSwitchProgress
+        narrowProgress=g[5]+(g[6]-g[5])*widthSwitchProgress
+        uiIntegration.setWindowGeometry(g[0]-w,g[1],w,g[2])
+    }
+    NumberAnimation {
+        id:widthSwitchMotion;target:root;property:"widthSwitchProgress";from:0;to:1
+        duration:360;easing.type:Easing.InOutCubic
+        onFinished:{
+            root.narrowProgress=root.widthSwitchGeometry[6]
+            const g=root.widthSwitchGeometry
+            uiIntegration.setWindowGeometry(g[0]-g[4],g[1],g[4],g[2])
+            Qt.callLater(function(){root.widthSwitchActive=false;uiIntegration.endResizeAnchor()})
+        }
+    }
+    function toggleNarrowWindow() {
+        if(miniMode||miniSwitching||widthSwitchActive)return
+        function applySize(){
+            const right=root.x+root.width,top=root.y,keepHeight=root.height,initialWidth=root.width
+            const nextWidth=root.narrowLayout?Math.max(547,Number(settingsBridge.values.wideWindowWidth||1240)):root.minimumWidth
+            if(!root.narrowLayout)settingsBridge.setPreference("wideWindowWidth",Math.round(root.width))
+            narrowMotion.stop();playerBar.closeTransientPopups();upcoming.panelExpanded=false
+            // Capture the physical right edge before the first geometry change.
+            uiIntegration.beginResizeAnchor(Qt.LeftEdge)
+            widthSwitchGeometry=[right,top,keepHeight,initialWidth,nextWidth,narrowProgress,nextWidth<547?1:0]
+            widthSwitchActive=true
+            widthSwitchProgress=0
+            if(settingsBridge.values.reduceMotion){widthSwitchProgress=1;widthSwitchActive=false;uiIntegration.endResizeAnchor()}
+            else widthSwitchMotion.restart()
+        }
+        if(visibility===Window.Maximized||visibility===Window.FullScreen){showNormal();Qt.callLater(applySize)}
+        else applySize()
+    }
     function relocateUpcoming(left) {
+        root.upcomingRelocating=true
         upcomingOut.stop(); upcomingIn.stop()
-        if (settingsBridge.values.reduceMotion || root.narrowLayout) { upcomingAtLeft=left; upcomingTravel=0; return }
+        if (settingsBridge.values.reduceMotion || root.narrowLayout) { upcomingAtLeft=left; upcomingTravel=0; root.upcomingRelocating=false;return }
         if (upcomingAtLeft===left) { upcomingIn.from=upcomingTravel; upcomingIn.restart() }
         else { upcomingOut.from=upcomingTravel; upcomingOut.restart() }
     }
@@ -249,20 +318,24 @@ ApplicationWindow {
         }
         pendingPageAction = null
         const revision=++navigationRevision
-        snapshotWarmup.stop(); navigationAction=null; oldPage.visible=false
+        snapshotWarmup.stop(); navigationAction=null
         pageOut.stop(); pageIn.stop(); pageSurface.opacity=1; pageSurface.y=0
+        clearPageSnapshot()
         if (lyricsOpen) animatePlayer(false)
-        if (settingsBridge.values.reduceMotion || !pageSurface.visible) { root.clearBulk();action(); return }
+        if (settingsBridge.values.reduceMotion || root.backgrounded || !pageSurface.visible) { root.clearBulk();action(); return }
         // Capture the painted background as well as the controls. Capturing
         // only the transparent pageSurface produces a black backdrop when
         // its snapshot is composited by the software renderer.
-        paper.grabToImage(function(grab) {
+        const captured=paper.grabToImage(function(grab) {
             if (revision!==navigationRevision) return
+            if(root.backgrounded){root.clearBulk();action();return}
             pageGrab=grab; snapshotRevision=revision; navigationAction=action
             oldPage.opacity=.001; oldPage.scale=1; oldPage.source=grab.url
             if(oldPage.status===Image.Ready) warmSnapshot()
         })
+        if(!captured){root.clearBulk();action()}
     }
+    function clearPageSnapshot(){oldPage.visible=false;oldPage.source="";pageGrab=null}
     function warmSnapshot() {
         if(snapshotRevision!==navigationRevision || !navigationAction)return
         oldPage.visible=true
@@ -278,7 +351,7 @@ ApplicationWindow {
     function animateMiniGeometry(from,to,entering){
         miniMotionFrom=from;miniMotionTo=to
         miniTween.from=entering?0:1;miniTween.to=entering?1:0
-        miniTween.duration=settingsBridge.values.reduceMotion?0:300
+        miniTween.duration=settingsBridge.values.reduceMotion||skipMiniAnimation?0:300
         miniMotion.restart()
     }
     onMiniTransitionProgressChanged:{
@@ -289,7 +362,7 @@ ApplicationWindow {
     SequentialAnimation {
         id:miniMotion;objectName:"miniGeometryMotion"
         // Present the destination's first scene before native resize starts.
-        PauseAnimation {duration:settingsBridge.values.reduceMotion?0:16}
+        PauseAnimation {duration:settingsBridge.values.reduceMotion||root.skipMiniAnimation?0:16}
         NumberAnimation {id:miniTween;target:root;property:"miniTransitionProgress";easing.type:Easing.InOutCubic}
         onFinished:root.finishMiniTransition()
     }
@@ -302,6 +375,7 @@ ApplicationWindow {
         }
         miniSwitching=false
         miniFlightParts=[]
+        miniShortcutTransition=false
         if(windowResizeActive){
             miniResizeCursor=miniTransitionCursor;miniResizeGeometry=[x,y,width,height]
             Qt.callLater(function(){if(root.windowResizeActive)root.updateWindowResize(root.resizeLatestCursor)})
@@ -322,7 +396,7 @@ ApplicationWindow {
         if(appearancePage)appearancePage.retainDraftWhenHidden=true
         miniRestoreGeometry=[x,y,width,height];miniRestoreVisibility=visibility;miniRestoreFocus=activeFocusItem
         miniNormalGeometry=miniRestoreGeometry;miniRestorePlacement=true
-        miniEnteredByShortcut=!!byShortcut;miniTransitionCursor=resizeLatestCursor
+        miniEnteredByShortcut=!!byShortcut;miniShortcutTransition=!!byShortcut;miniTransitionCursor=resizeLatestCursor
         if(windowResizeActive)resizeMiniPinned=true
         miniSwitching=true;windowSave.stop()
         settleMiniLayout()
@@ -340,12 +414,13 @@ ApplicationWindow {
         }
         animateMiniGeometry([x,y,width,height],[targetX,targetY,miniWidth,miniHeight],true)
     }
-    function leaveMiniPlayer(){
+    function leaveMiniPlayer(byShortcut){
         if(!miniMode||miniSwitching)return
+        miniShortcutTransition=!!byShortcut
         restoreFromMini(miniRestoreGeometry,true)
     }
     function restoreFromMini(geometry,originalPlacement){
-        const parts=miniLoader.item?miniLoader.item.transitionParts():[]
+        const parts=!settingsBridge.values.reduceMotion&&!skipMiniAnimation&&miniLoader.item?miniLoader.item.transitionParts():[]
         miniElasticReturn.stop();miniTransitionCursor=resizeLatestCursor
         if(originalPlacement&&!windowResizeActive)uiIntegration.endResizeAnchor()
         if(miniLoader.item)miniLoader.item.closeTransientPopups()
@@ -435,20 +510,28 @@ ApplicationWindow {
     }
     function toggleMiniPlayer(){
         if(miniSwitching)return
-        if(miniMode){if(miniEnteredByShortcut)settingsBridge.saveMiniWindowPosition(x,y);leaveMiniPlayer()}
+        if(miniMode){if(miniEnteredByShortcut)settingsBridge.saveMiniWindowPosition(x,y);leaveMiniPlayer(true)}
         else enterMiniFromEdge(0,true)
     }
+    readonly property var sidebarSections: settingsBridge.values.sidebarSections.filter(row => (row.visible || row.id === 3&&settingsBridge.values.settingsEntryMode===0)&&!(row.id===3&&settingsBridge.values.settingsEntryMode===1)&&!(row.id===6&&settingsBridge.values.historyEntryMode===1))
+    readonly property var sectionNames: ["本地音乐","发现","个人","设置","我喜欢","歌单","历史记录"]
+    readonly property var sectionMarkers: ["music","mark-compass","person","settings","heart","playlist","history"]
+    function sectionSelected(id) {
+        return id===6?appBridge.page===5:id===5 ? appBridge.page===1 : id===4 ? appBridge.page===0&&libraryBridge.playlistId==="-1" : id===0 ? appBridge.page===0&&libraryBridge.playlistId==="0" : id===1 ? appBridge.page===4 : appBridge.page===id
+    }
     function navigateOriginal(index) {
-        const same = index === 0 ? appBridge.page === 0 && libraryBridge.playlistId === "0"
+        const same = index===6?appBridge.page===5:index === 0 ? appBridge.page === 0 && libraryBridge.playlistId === "0"
                    : index === 4 ? appBridge.page === 0 && libraryBridge.playlistId === "-1"
-                   : index===1 ? appBridge.page===4 : appBridge.page === index && (index !== 3 || settingsSection === "settings")
+                   : index===5 ? appBridge.page===1 : index===1 ? appBridge.page===4 : appBridge.page === index && (index !== 3 || settingsSection === "settings")
         if (same) { if (lyricsOpen) animatePlayer(false); return }
         changePage(function() {
             settingsSection="settings"
             if (index===0) { libraryBridge.openPlaylist("0"); appBridge.navigate(0) }
+            else if(index===5) appBridge.navigate(1)
             else if(index===1) appBridge.navigate(4)
             else if(index===2) { libraryBridge.openPlaylist("-2"); appBridge.navigate(2) }
             else if(index===3) appBridge.navigate(3)
+            else if(index===6) appBridge.navigate(5)
             else { libraryBridge.openPlaylist("-1"); appBridge.navigate(0) }
         })
     }
@@ -467,9 +550,17 @@ ApplicationWindow {
         lyricsSearchBridge.setTargetTrack(target); translationBridge.setTargetTrack(target)
         ensureLyricsWorkspace().open()
     }
+    readonly property url playerPreviewBackdropUrl: {
+        if(root.backgrounded || root.miniMode || !settingsBridge.values.playerCoverBackground)return ""
+        const thumbnail=String(onlineArtwork.thumbnailCover)
+        const file=thumbnail.length?thumbnail:String(playbackBridge.coverUrl)
+        if(!file.length || file.startsWith("http"))return ""
+        return "image://relaxer/blur?file="+encodeURIComponent(file)+"&resolution=96&seed="+encodeURIComponent(playbackBridge.title)+"&blur="+Number(settingsBridge.palette.blurExpanded||0)
+    }
+    Image {id:playerBackdropWarmup;objectName:"playerBackdropWarmup";visible:false;source:root.playerPreviewBackdropUrl;sourceSize.width:96;sourceSize.height:96;asynchronous:true}
     function backgroundUrl(file,blur){return root.backgrounded||(root.miniMode&&!root.miniSwitching) ? "" : String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
-    function applySettings() { Theme.fontFamily=root.restFontFamily; if(settingsBridge.values.reduceMotion)relocateUpcoming(lyricsOpen); Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}); Theme.customHighlights=!!settingsBridge.palette.custom }
-    Component.onCompleted: { width=settingsBridge.windowBounds.width;height=settingsBridge.windowBounds.height;applySettings(); if(settingsBridge.windowBounds.maximized)showMaximized() }
+    function applySettings() { Theme.fontScale=Number(settingsBridge.values.fontSize||15)/15;Theme.fontFamily=root.restFontFamily; if(settingsBridge.values.reduceMotion)relocateUpcoming(lyricsOpen); Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}); Theme.customHighlights=!!settingsBridge.palette.custom }
+    Component.onCompleted: { initialVideoPreviewId=playbackBridge.video&&!playbackBridge.playing?playbackBridge.trackId:"";width=settingsBridge.windowBounds.width;height=settingsBridge.windowBounds.height;applySettings() }
     Connections {
         target: lyricsSearchBridge
         function onLocalImportRequested(key) {
@@ -540,6 +631,7 @@ ApplicationWindow {
     onNarrowLayoutChanged: {
         narrowQueue.close();compactNavigationMenu.close();narrowMotion.stop()
         if(narrowLayout&&workspaceVisible&&!miniMode&&!miniSwitching)narrowWorkspaceExit.restart()
+        if(widthSwitchActive)return
         if(miniSwitching||miniMode||settingsBridge.values.reduceMotion)narrowProgress=narrowLayout?1:0
         else{narrowMotion.from=narrowProgress;narrowMotion.to=narrowLayout?1:0;narrowMotion.restart()}
     }
@@ -589,78 +681,113 @@ ApplicationWindow {
             }
             Binding {target:Theme;property:"sidebarBackdrop";value:sidebarBackdrop}
             ColumnLayout {
-                x:18; y:27; width:169-121*root.sidebarCondenseProgress; height:parent.height-47; spacing:14
+                x:18; y:27; width:parent.width-36; height:Math.max(0,parent.height-y); spacing:14
                 Item {
                     Layout.fillWidth: true; Layout.preferredHeight: 32
-                    AbstractButton {
-                        id:sidebarLogo;objectName:"sidebarLogo";x:8+root.sidebarCondenseProgress;width:30;height:30;padding:0;hoverEnabled:true;enabled:!root.lyricsOpen&&!root.playlistOrderEditing
-                        text:root.sidebarCondensed?"展开侧栏":"收起侧栏";Accessible.name:text
-                        HintBubble { visible:sidebarLogo.hovered; text:sidebarLogo.text }
-                        background:null
-                        contentItem:Image {source:"qrc:/icon.svg";fillMode:Image.PreserveAspectFit}
-                        onClicked:root.sidebarCondensed=!root.sidebarCondensed
+                    Item {
+                        id:sidebarBrand;objectName:"sidebarBrand"
+                        width:(41+brandCaption.implicitWidth)*(1-root.sidebarCondenseProgress)+30*root.sidebarCondenseProgress
+                        height:Math.max(32,brandCaption.implicitHeight)
+                        scale:Math.min(1,Math.max(0,parent.width)/width);transformOrigin:Item.TopLeft
+                        x:(parent.width-width*scale)/2;y:(parent.height-height*scale)/2
+                        AbstractButton {
+                            id:sidebarLogo;objectName:"sidebarLogo";x:0;width:30;height:30;padding:0;hoverEnabled:true;enabled:!root.lyricsOpen&&!root.playlistOrderEditing
+                            text:root.sidebarCondensed?"展开侧栏":"收起侧栏";Accessible.name:text
+                            HintBubble { visible:sidebarLogo.hovered; text:sidebarLogo.text }
+                            background:null
+                            contentItem:Image {source:"qrc:/icon.svg";fillMode:Image.PreserveAspectFit}
+                            onClicked:root.sidebarCondensed=!root.sidebarCondensed
+                        }
+                        UiText {id:brandCaption;objectName:"sidebarBrandCaption";opacity:1-root.sidebarCondenseProgress;visible:opacity>0;x:41;width:implicitWidth;anchors.verticalCenter:parent.verticalCenter; text:"Relaxer"; basePixelSize:23; font.weight:Font.DemiBold; color:Theme.text }
+                        MouseArea {objectName:"brandFallbackArea";anchors.fill:parent;acceptedButtons:Qt.RightButton;onClicked:mouse=>{if(root.sidebarSections.length===0)brandMenu.popup(sidebarBrand,mouse.x,mouse.y)}}
+                        MouseArea { x:sidebarLogo.x+sidebarLogo.width; width:Math.max(0,parent.width-x);height:parent.height;onPressed:root.startSystemMove() }
                     }
-                    UiText {opacity:1-root.sidebarCondenseProgress;visible:opacity>0;x:49;width:Math.max(0,parent.width-x);elide:Text.ElideRight; anchors.verticalCenter:parent.verticalCenter; text:"Relaxer"; font.pixelSize:23; font.weight:Font.DemiBold; color:Theme.text }
-                    MouseArea { x:sidebarLogo.x+sidebarLogo.width; width:parent.width-x;height:parent.height;onPressed:root.startSystemMove() }
                 }
                 Item { Layout.preferredHeight: 2 }
-                Item {
-                    Layout.fillWidth:true;Layout.preferredHeight:26
-                    UiText {id:libraryCaption;anchors.fill:parent;verticalAlignment:Text.AlignVCenter;opacity:1-root.sidebarCondenseProgress;visible:opacity>0;text:"音乐资料库";color:Theme.text;font.pixelSize:14;font.weight:Font.DemiBold}
-                    Rectangle {objectName:"librarySectionDivider";visible:opacity>0;anchors.centerIn:parent;width:20;height:2;radius:1;color:Theme.secondary;opacity:.5*root.sidebarCondenseProgress}
-                }
-                Column {
-                    Layout.fillWidth:true; spacing:8
-                    Repeater {
-                        model:["本地音乐","发现","个人","设置","我喜欢"]
-                        NavigationButton {
-                            required property int index; required property string modelData
-                            objectName:"navigation"+index; width:parent.width; text:modelData;compact:root.sidebarCondensed
-                            marker:["music","mark-compass","person","settings","heart"][index]
-                            selected:!root.lyricsOpen && (index===4 ? appBridge.page===0&&libraryBridge.playlistId==="-1" : index===0 ? appBridge.page===0&&libraryBridge.playlistId==="0" : index===1?appBridge.page===4:appBridge.page===index)
-                            onClicked:root.navigateOriginal(index)
-                        }
-                    }
-                }
-                Item {
-                    Layout.fillWidth:true;Layout.preferredHeight:26
-                    Rectangle {objectName:"playlistSectionDivider";visible:opacity>0;anchors.centerIn:parent;width:20;height:2;radius:1;color:Theme.secondary;opacity:.5*root.sidebarCondenseProgress}
-                    RowLayout {
-                        opacity:1-root.sidebarCondenseProgress;visible:opacity>0;enabled:!root.sidebarCondensed;anchors.fill:parent;spacing:4
-                        UiText { text:"我的歌单"; color:Theme.text; font.pixelSize: 14;font.weight:Font.DemiBold; Layout.fillWidth:true;Layout.fillHeight:true;verticalAlignment:Text.AlignVCenter }
-                        IconButton {
-                            objectName:root.playlistOrderEditing?"savePlaylistOrder":"sidebarPlaylistOptions";implicitWidth:26;implicitHeight:26;padding:5
-                            text:root.playlistOrderEditing?"保存排序":"歌单管理";showTooltip:true
-                            contentItem:Item {
-                                Symbol{anchors.fill:parent;name:"more";opacity:1-root.playlistOrderProgress;scale:1-.2*root.playlistOrderProgress}
-                                Symbol{anchors.fill:parent;name:"check";opacity:root.playlistOrderProgress;scale:.8+.2*root.playlistOrderProgress}
-                            }
-                            onClicked:if(root.playlistOrderEditing)root.savePlaylistOrder();else playlistNavigationOptions.popup(this,0,height)
-                        }
-                        IconButton {
-                            objectName:root.playlistOrderEditing?"cancelPlaylistOrder":"sidebarCreatePlaylist";implicitWidth:26;implicitHeight:26;padding:5
-                            text:root.playlistOrderEditing?"取消排序":"创建歌单";showTooltip:true
-                            contentItem:Symbol {objectName:"sidebarCreateRotation";name:"plus";rotation:45*root.playlistOrderProgress}
-                            onClicked:if(root.playlistOrderEditing)root.cancelPlaylistOrder();else root.ensurePlaylistEditor().create()
-                        }
-                    }
-                }
                 ListView {
-                    id: sidebarLists;objectName:"playlistNavigation"; Layout.fillWidth:true;Layout.fillHeight:true
+                    id: sidebarLists;objectName:"playlistNavigation"; Layout.fillWidth:true;Layout.fillHeight:true;Layout.minimumHeight:0
+                    currentIndex:-1
+                    Component.onCompleted:Qt.callLater(function(){sidebarLists.forceLayout();sidebarLists.positionViewAtBeginning()})
                     SmoothWheelHandler { flickable: sidebarLists }
-                    model:root.playlistOrderDraftActive?playlistOrderDraft:playlistModel;clip:true;spacing:3
+                    headerPositioning:ListView.InlineHeader
+                    header:Column {
+                        width:sidebarLists.width;spacing:14;bottomPadding:14
+                        Item {
+                            width:parent.width;height:26
+                            visible:root.sidebarSections.length>0
+                            RowLayout {anchors.fill:parent;spacing:4;opacity:1-root.sidebarCondenseProgress;visible:opacity>0
+                                UiText {id:libraryCaption;Layout.fillWidth:true;elide:Text.ElideRight;verticalAlignment:Text.AlignVCenter;text:"音乐资料库";color:Theme.text;basePixelSize:14;font.weight:Font.DemiBold}
+                                IconButton {objectName:"sidebarHistoryButton";visible:settingsBridge.values.historyEntryMode===1;implicitWidth:28;implicitHeight:28;padding:4;symbol:"history";tip:"历史记录";showTooltip:true;onClicked:root.navigateOriginal(6)}
+                                IconButton {objectName:"sidebarSettingsButton";visible:settingsBridge.values.settingsEntryMode===1;implicitWidth:28;implicitHeight:28;padding:4;symbol:"settings";tip:"设置";showTooltip:true;onClicked:root.navigateOriginal(3)}
+                            }
+                            Rectangle {objectName:"librarySectionDivider";visible:opacity>0;anchors.centerIn:parent;width:20;height:2;radius:1;color:Theme.secondary;opacity:.5*root.sidebarCondenseProgress}
+                        }
+                        Column {
+                            width:parent.width;spacing:root.sidebarRowSpacing
+                            Repeater {
+                                model:root.sidebarSections
+                                NavigationButton {
+                                    required property int index; required property var modelData
+                                    objectName:"navigation"+modelData.id; width:parent.width;height:root.sidebarRowHeight; text:root.sectionNames[modelData.id];compact:root.sidebarCondensed
+                                    marker:root.sectionMarkers[modelData.id]
+                                    selected:!root.lyricsOpen && root.sectionSelected(modelData.id)
+                                    onClicked:root.navigateOriginal(modelData.id)
+                                }
+                            }
+                        }
+                        Item {
+                            width:parent.width;height:28
+                            Rectangle {objectName:"playlistSectionDivider";visible:opacity>0;anchors.centerIn:parent;width:20;height:2;radius:1;color:Theme.secondary;opacity:.5*root.sidebarCondenseProgress}
+                            RowLayout {
+                                opacity:1-root.sidebarCondenseProgress;visible:opacity>0;enabled:!root.sidebarCondensed;anchors.fill:parent;spacing:4
+                                UiText { text:"我的歌单"; color:Theme.text; basePixelSize: 14;font.weight:Font.DemiBold; Layout.fillWidth:true;Layout.fillHeight:true;verticalAlignment:Text.AlignVCenter }
+                                IconButton {
+                                    objectName:root.playlistOrderEditing?"savePlaylistOrder":"sidebarPlaylistOptions";implicitWidth:28;implicitHeight:28;padding:4
+                                    text:root.playlistOrderEditing?"保存排序":"歌单管理";showTooltip:true
+                                    contentItem:Item {
+                                        Symbol{anchors.fill:parent;name:"more";opacity:1-root.playlistOrderProgress;scale:1-.2*root.playlistOrderProgress}
+                                        Symbol{anchors.fill:parent;name:"check";opacity:root.playlistOrderProgress;scale:.8+.2*root.playlistOrderProgress}
+                                    }
+                                    onClicked:if(root.playlistOrderEditing)root.savePlaylistOrder();else playlistNavigationOptions.popup(this,0,height)
+                                }
+                                IconButton {
+                                    objectName:root.playlistOrderEditing?"cancelPlaylistOrder":"sidebarCreatePlaylist";implicitWidth:28;implicitHeight:28;padding:4
+                                    text:root.playlistOrderEditing?"取消排序":"创建歌单";showTooltip:true
+                                    contentItem:Symbol {objectName:"sidebarCreateRotation";name:"plus";rotation:45*root.playlistOrderProgress}
+                                    onClicked:if(root.playlistOrderEditing)root.cancelPlaylistOrder();else root.ensurePlaylistEditor().create()
+                                }
+                            }
+                        }
+                    }
+                    model:root.playlistOrderDraftActive?playlistOrderDraft:playlistModel;clip:true;spacing:root.sidebarRowSpacing
                     move:Transition {NumberAnimation{properties:"y";duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.InOutCubic}}
                     moveDisplaced:Transition {NumberAnimation{properties:"y";duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.InOutCubic}}
-                    ScrollBar.vertical:ScrollBar{}
+                    ScrollBar.vertical:ScrollBar {
+                        objectName:"sidebarScrollBar";parent:sidebar;width:10;z:2
+                        x:sidebar.width-width-4;y:sidebarLists.parent.y+sidebarLists.y;height:sidebarLists.height
+                    }
                     delegate:PlaylistNavigationRow {
                         objectName:"sidebarPlaylist-"+playlistKey
-                        width:sidebarLists.width;compact:root.sidebarCondensed
+                        width:sidebarLists.width;height:root.sidebarRowHeight;compact:root.sidebarCondensed
                         listView:sidebarLists;orderModel:playlistOrderDraft;sorting:root.playlistOrderEditing
                         selected:!root.lyricsOpen&&appBridge.page===0&&libraryBridge.playlistId===playlistKey
                         onActivated:root.openPlaylist(playlistKey)
                     }
                 }
             }
+        }
+        MouseArea {
+            id:sidebarResize;objectName:"sidebarResizeHandle"
+            x:sidebar.width-width/2;y:0;width:8;height:parent.height;z:4
+            enabled:sidebar.enabled&&!root.sidebarCondensed&&!root.lyricsOpen
+            visible:enabled;hoverEnabled:true;cursorShape:Qt.SplitHCursor;acceptedButtons:Qt.LeftButton
+            property real startX:0
+            property real startWidth:205
+            Accessible.name:"调整侧栏宽度"
+            onPressed:mouse=>{startX=mapToGlobal(mouse.x,mouse.y).x;startWidth=root.sidebarExpandedWidth;root.sidebarDragWidth=startWidth}
+            onPositionChanged:mouse=>{if(pressed)root.sidebarDragWidth=Math.round(Math.max(160,Math.min(root.sidebarMaxWidth,startWidth+mapToGlobal(mouse.x,mouse.y).x-startX)))}
+            onReleased:{settingsBridge.setPreference("sidebarWidth",Math.round(root.sidebarExpandedWidth));root.sidebarDragWidth=-1}
+            onCanceled:root.sidebarDragWidth=-1
         }
         Item {
             id: paper; objectName:"paperSurface"; x:sidebar.width;width:parent.width-x;height:parent.height;clip:true;enabled:!root.playerSettled
@@ -672,7 +799,7 @@ ApplicationWindow {
             Item {
                 id: pageSurface;objectName:"pageSurface";width:parent.width;height:parent.height
                 StackLayout {
-                    id: pages;objectName:"pageStack";anchors.fill:parent;anchors.topMargin:Theme.pageContentOffset;currentIndex:appBridge.page
+                    id: pages;objectName:"pageStack";anchors.fill:parent;anchors.topMargin:Math.max(0,Theme.pageContentOffset-(32-root.captionHeight));currentIndex:appBridge.page
                     LocalPage { id:localPage;backdropSource:paper;onBulkChanged:(active,keys)=>root.updateBulk(localPage,active,keys);onLyricsRequested:(keys,missing)=>root.openLyricsTools(keys,missing);onImportRequested:anchor=>root.ensureImportDialog().openMenu(anchor);onEditRequested:(key,name)=>root.ensurePlaylistEditor().edit(key,name) }
                     DeferredPage {
                         id: playlistsLoader
@@ -687,11 +814,11 @@ ApplicationWindow {
                     Item {
                         StackLayout {
                             anchors.fill:parent
-                            currentIndex:root.settingsSection==="ai"?1:root.settingsSection==="appearance"?2:root.settingsSection==="log"?3:0
+                            currentIndex:root.settingsSection==="ai"?1:root.settingsSection==="appearance"?2:root.settingsSection==="log"?3:root.settingsSection==="platforms"?4:0
                             DeferredPage {
                                 id: settingsLoader
                                 requested: appBridge.page === 3 && root.settingsSection === "settings"
-                                sourceComponent: Item { SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:28;anchors.bottomMargin:0;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
+                                sourceComponent: Item { SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:28;anchors.bottomMargin:0;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onPlatformsRequested:root.changePage(function(){root.settingsSection="platforms"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
                             }
                             DeferredPage {
                                 id: aiLoader
@@ -733,12 +860,23 @@ ApplicationWindow {
                                 requested: appBridge.page === 3 && root.settingsSection === "log"
                                 sourceComponent: VersionLogPage{onBackRequested:root.changePage(function(){root.settingsSection="settings"})}
                             }
+                            DeferredPage {
+                                requested:appBridge.page===3&&root.settingsSection==="platforms"
+                                sourceComponent:ScrollView {
+                                    id:platformScroll;objectName:"platformSettingsScroll";contentWidth:availableWidth;clip:true
+                                    leftPadding:Theme.pageMargin;rightPadding:Theme.pageMargin;topPadding:28;bottomPadding:16
+                                    SmoothWheelHandler {flickable:platformScroll.contentItem as Flickable}
+                                    PlatformAccounts {width:platformScroll.availableWidth;onBackRequested:root.changePage(function(){root.settingsSection="settings"})}
+                                }
+                            }
                         }
                     }
                     DeferredPage {
                         requested:appBridge.page===4
                         sourceComponent:DiscoverPage {backdropSource:paper}
                     }
+                    DeferredPage {requested:appBridge.page===5;sourceComponent:HistoryPage {backdropSource:paper}}
+
                 }
             }
             Image { id:oldPage;anchors.fill:parent;visible:false;fillMode:Image.Stretch;cache:false;asynchronous:false;onStatusChanged:if(status===Image.Ready)root.warmSnapshot() }
@@ -758,6 +896,7 @@ ApplicationWindow {
                 id:nowPlayingLoader;active:false;x:0;y:-playerClip.y;width:contentHost.width;height:contentHost.height
                 sourceComponent:LyricsPage {
                     objectName:"nowPlayingPage"
+                    previewBackdrop:root.playerPreviewBackdropUrl
                     detailsOpacity:root.lyricsOpen ? Math.max(0,Math.min(1,(root.playerProgress-.52)/.48)) : Math.max(0,root.playerProgress)
                     artworkTravelling:root.coverTravelling||root.miniFlightActive;metadataTravelling:root.metadataTravelling||root.miniFlightActive;fullScreen:root.fullScreenMode
                     onCollapseRequested:root.closeLyrics()
@@ -774,11 +913,16 @@ ApplicationWindow {
             }
         }
     }
+    Connections {target:playbackBridge;function onTrackChanged(){if(root.initialVideoPreviewId!==playbackBridge.trackId)root.initialVideoPreviewId="";if(playbackBridge.video)nowPlayingLoader.active=true;root.presentVideoWhenPlaying()}function onPlayingChanged(){root.presentVideoWhenPlaying()}function onCapabilitiesChanged(){root.presentVideoWhenPlaying()}}
     PlayerBar {
         id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:implicitHeight
+        popupBackdrop:contentHost
         visible:!root.bulkActive&&!root.workspaceOpened;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling||root.miniFlightActive;miniControlsTravelling:root.miniFlightActive
+        wideLayoutWidth:root.widthSwitchActive?Math.max(root.widthSwitchGeometry[3],root.widthSwitchGeometry[4]):width
+        compactLayoutWidth:root.widthSwitchActive?Math.min(root.widthSwitchGeometry[3],root.widthSwitchGeometry[4]):width
         backgroundCanvasHeight: normalShell.height; backgroundOffsetY: playerBar.y
         onExpandRequested:root.animatePlayer(!root.lyricsOpen)
+        onNarrowRequested:root.toggleNarrowWindow()
         onQueueRequested: anchor => {
             if(narrowQueue.visible){narrowQueue.close();return}
             const p=anchor.mapToItem(root.contentItem,0,0)
@@ -795,7 +939,7 @@ ApplicationWindow {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;anchors.topMargin:10;anchors.bottomMargin:10;spacing:4
             Flow {
                 Layout.fillWidth:true;  spacing:8
-                UiText {objectName:"bulkCount";text:"已选 "+root.bulkKeys.length+" 首歌曲"+(lyricsSearchBridge.batchRunning?" · 剩余 "+lyricsSearchBridge.batchResult.pending:"");color:Theme.text;font.pixelSize: 15}
+                UiText {objectName:"bulkCount";text:"已选 "+root.bulkKeys.length+" 首歌曲"+(lyricsSearchBridge.batchRunning?" · 剩余 "+lyricsSearchBridge.batchResult.pending:"");color:Theme.text;basePixelSize: 15}
                 ShellButton{objectName:"bulkSelectAll";text:"全选";flat:true;onClicked:root.selectBulk(true)}
                 ShellButton{objectName:"bulkClear";text:"取消选择";flat:true;onClicked:root.selectBulk(false)}
                 ShellButton{objectName:"bulkLyrics";text:"查找歌词";flat:true;enabled:root.bulkKeys.length>0;onClicked:root.openLyricsTools(root.bulkKeys,false)}
@@ -843,9 +987,9 @@ ApplicationWindow {
         Timer{id:completionTimer;objectName:"importCompletionTimer";interval:4000;onTriggered:importPanel.completionVisible=false}
         RowLayout {
             anchors.fill:parent;anchors.leftMargin:22;anchors.rightMargin:22;spacing:16
-            UiText {id:importStatus;objectName:"importStatusText";Layout.fillWidth:true;text:importPanel.shownStatus;color:Theme.secondary;font.pixelSize:14;textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:5;elide:Text.ElideRight}
+            UiText {id:importStatus;objectName:"importStatusText";Layout.fillWidth:true;text:importPanel.shownStatus;color:Theme.secondary;basePixelSize:14;textFormat:Text.PlainText;wrapMode:Text.Wrap;maximumLineCount:5;elide:Text.ElideRight}
             ProgressBar{objectName:"importProgress";visible:importBridge.busy;Layout.preferredWidth:Math.min(230,root.width*.22);from:0;to:Math.max(1,importBridge.total);value:importBridge.current;indeterminate:importBridge.total===0}
-            UiText { objectName:"importProgressCount"; visible:importBridge.busy&&importBridge.total>0; text:importBridge.current+"/"+importBridge.total; color:Theme.text; font.pixelSize:14 }
+            UiText { objectName:"importProgressCount"; visible:importBridge.busy&&importBridge.total>0; text:importBridge.current+"/"+importBridge.total; color:Theme.text; basePixelSize:14 }
             ShellButton{objectName:"importResultDetails";visible:!importBridge.busy;text:"详情";implicitHeight:28;onClicked:feedbackPanel.openDetails({message:importPanel.completionText,details:importBridge.result.details})}
             ShellButton{visible:importBridge.busy;text:"取消导入";implicitHeight:28;onClicked:importBridge.cancel()}
         }
@@ -870,19 +1014,21 @@ ApplicationWindow {
             expandedPlayer:root.upcomingAtLeft
             readonly property real edgeMargin:root.upcomingAtLeft?8:playerBar.coverMargin
             dockedHeight:Math.max(0,playerBar.height-2*edgeMargin)
-            width:root.upcomingAtLeft?Math.min(implicitWidth,Math.max(160,playerBar.wideCenterX-24))
-                :Math.min(implicitWidth,Math.max(0,playerBar.wideRightSpace-24))
-            x:root.upcomingAtLeft?edgeMargin+(playerBar.x+playerBar.queueControlX-edgeMargin)*root.narrowProgress:normalShell.width-playerBar.coverMargin-width
+            readonly property real inlineDockX:playerBar.x+playerBar.wideVolumeIconX-inlineIconLeft
+            readonly property real inlineDockWidth:Math.max(0,playerBar.wideLayoutWidth-playerBar.coverMargin-inlineDockX)
+            width:root.upcomingAtLeft?Math.min(implicitWidth,Math.max(0,playerBar.wideCenterX-edgeMargin-2*playerBar.coverMargin))
+                :inlinePreview?inlineDockWidth:Math.max(inlineDockWidth,Math.min(implicitWidth,Math.max(0,playerBar.wideRightSpace-24)))
+            x:root.upcomingAtLeft?edgeMargin+(playerBar.x+playerBar.queueControlX-edgeMargin)*root.narrowProgress:normalShell.width-playerBar.coverMargin-width+(root.widthSwitchActive?(width+playerBar.coverMargin)*root.narrowProgress:0)
             y:root.upcomingAtLeft
                 ?(normalShell.height-edgeMargin-height)*(1-root.narrowProgress)+(playerBar.y+playerBar.queueControlY)*root.narrowProgress+(height+edgeMargin)*root.upcomingTravel
-                :normalShell.height-playerBar.coverMargin-height+(height+playerBar.coverMargin)*root.upcomingTravel+(height+playerBar.coverMargin)*root.narrowProgress
+                :normalShell.height-7-height+(height+7)*root.upcomingTravel+(root.widthSwitchActive?0:(height+7)*root.narrowProgress)
             opacity:1-root.narrowProgress
             transform:Scale {
                 origin.x:0;origin.y:0
                 xScale:root.upcomingAtLeft?1+(36/upcoming.width-1)*root.narrowProgress:1
                 yScale:root.upcomingAtLeft?1+(36/upcoming.height-1)*root.narrowProgress:1
             }
-            relocating:upcomingOut.running||upcomingIn.running
+            relocating:root.upcomingRelocating||root.widthSwitchActive||root.narrowLayout
             enabled:!relocating&&!root.narrowLayout
             visible:!root.bulkActive
         }
@@ -891,10 +1037,11 @@ ApplicationWindow {
         id:upcomingOut;target:root;property:"upcomingTravel";to:1;duration:210;easing.type:Easing.OutCubic
         onFinished:{root.upcomingAtLeft=root.lyricsOpen;upcomingIn.from=1;upcomingIn.restart()}
     }
-    NumberAnimation {id:upcomingIn;target:root;property:"upcomingTravel";to:0;duration:210;easing.type:Easing.OutCubic}
+    NumberAnimation {id:upcomingIn;target:root;property:"upcomingTravel";to:0;duration:210;easing.type:Easing.OutCubic;onFinished:root.upcomingRelocating=false}
     Artwork {
         id:flight;objectName:"sharedArtworkFlight";z:4;visible:root.coverTravelling&&!root.workspaceOpened
-        file:root.flightFile;seed:root.flightSeed;resolution:768
+        file:root.flightFile;seed:root.flightSeed;resolution:768;videoCover:playbackBridge.video
+        coverAspect:playbackBridge.video?16/9:1
         x:root.coverFrom.x+(root.coverTo.x-root.coverFrom.x)*root.coverProgress
         y:root.coverFrom.y+(root.coverTo.y-root.coverFrom.y)*root.coverProgress
         width:root.coverFrom.width+(root.coverTo.width-root.coverFrom.width)*root.coverProgress
@@ -909,13 +1056,13 @@ ApplicationWindow {
         // size and interpolate a real-valued transform instead of reshaping it.
         readonly property real flightScale:(root.titleFrom.pixelSize+(root.titleTo.pixelSize-root.titleFrom.pixelSize)*root.coverProgress)/font.pixelSize
         opacity:root.narrowLayout&&!playerBar.metadataTitle.visible?(root.lyricsOpen?root.coverProgress:1-root.coverProgress):1
-        text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideNone;color:Theme.text
+        text:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";textFormat:Text.PlainText;elide:Text.ElideRight;color:Theme.text
         x:root.titleFrom.x+(root.titleTo.x-root.titleFrom.x)*root.coverProgress
         y:root.titleFrom.y+(root.titleTo.y-root.titleFrom.y)*root.coverProgress
-        width:(!root.lyricsOpen&&root.narrowLayout?root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress:Math.max(root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress,titleExpandedMetrics.advanceWidth<=(root.lyricsOpen?root.titleTo.width:root.titleFrom.width)?titleFlightMetrics.advanceWidth*flightScale+2:0))/flightScale
+        width:(root.titleFrom.width+(root.titleTo.width-root.titleFrom.width)*root.coverProgress)/flightScale
         clip:true
         height:(root.titleFrom.height+(root.titleTo.height-root.titleFrom.height)*root.coverProgress)/flightScale
-        font.pixelSize:Math.max(1,Math.ceil(Math.max(root.titleFrom.pixelSize,root.titleTo.pixelSize)))
+        basePixelSize:Math.max(1,Math.ceil(Math.max(root.titleFrom.pixelSize,root.titleTo.pixelSize)))/Theme.fontScale
         font.family:root.titleTo.family;font.weight:root.titleTo.weight
         transform:Scale {xScale:titleFlight.flightScale;yScale:titleFlight.flightScale}
         MouseArea {anchors.fill:parent;acceptedButtons:Qt.AllButtons;onWheel:wheel=>{wheel.accepted=true}}
@@ -924,45 +1071,57 @@ ApplicationWindow {
         id:artistFlight;objectName:"sharedArtistFlight";z:4;visible:root.metadataTravelling&&!root.workspaceOpened
         readonly property real flightScale:(root.artistFrom.pixelSize+(root.artistTo.pixelSize-root.artistFrom.pixelSize)*root.coverProgress)/font.pixelSize
         opacity:root.narrowLayout&&!playerBar.metadataArtist.visible?(root.lyricsOpen?root.coverProgress:1-root.coverProgress):1
-        text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideNone;color:Theme.secondary
+        text:playbackBridge.hasTrack?playbackBridge.artist:"选一首歌，开始放松。";textFormat:Text.PlainText;elide:Text.ElideRight;color:Theme.secondary
         x:root.artistFrom.x+(root.artistTo.x-root.artistFrom.x)*root.coverProgress
         y:root.artistFrom.y+(root.artistTo.y-root.artistFrom.y)*root.coverProgress
-        width:(!root.lyricsOpen&&root.narrowLayout?root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress:Math.max(root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress,artistExpandedMetrics.advanceWidth<=(root.lyricsOpen?root.artistTo.width:root.artistFrom.width)?artistFlightMetrics.advanceWidth*flightScale+2:0))/flightScale
+        width:(root.artistFrom.width+(root.artistTo.width-root.artistFrom.width)*root.coverProgress)/flightScale
         clip:true
         height:(root.artistFrom.height+(root.artistTo.height-root.artistFrom.height)*root.coverProgress)/flightScale
-        font.pixelSize:Math.max(1,Math.ceil(Math.max(root.artistFrom.pixelSize,root.artistTo.pixelSize)))
+        basePixelSize:Math.max(1,Math.ceil(Math.max(root.artistFrom.pixelSize,root.artistTo.pixelSize)))/Theme.fontScale
         font.family:root.artistTo.family;font.weight:root.artistTo.weight
         transform:Scale {xScale:artistFlight.flightScale;yScale:artistFlight.flightScale}
         MouseArea {anchors.fill:parent;acceptedButtons:Qt.AllButtons;onWheel:wheel=>{wheel.accepted=true}}
     }
-    // Measure the fixed glyph layout independently of the animated clip width.
-    TextMetrics { id:titleFlightMetrics; text:titleFlight.text; font:titleFlight.font }
-    TextMetrics { id:artistFlightMetrics; text:artistFlight.text; font:artistFlight.font }
-    TextMetrics {
-        id:titleExpandedMetrics; text:titleFlight.text
-        font.family:root.lyricsOpen?root.titleTo.family:root.titleFrom.family
-        font.pixelSize:root.lyricsOpen?root.titleTo.pixelSize:root.titleFrom.pixelSize
-        font.weight:root.lyricsOpen?root.titleTo.weight:root.titleFrom.weight
-    }
-    TextMetrics {
-        id:artistExpandedMetrics; text:artistFlight.text
-        font.family:root.lyricsOpen?root.artistTo.family:root.artistFrom.family
-        font.pixelSize:root.lyricsOpen?root.artistTo.pixelSize:root.artistFrom.pixelSize
-        font.weight:root.lyricsOpen?root.artistTo.weight:root.artistFrom.weight
-    }
     DropArea{anchors.fill:parent;onDropped:drop=>{if(drop.hasUrls&&!importBridge.busy){importBridge.start(drop.urls,Number(libraryBridge.playlistId)>0?libraryBridge.playlistId:"0");drop.acceptProposedAction()}}}
-    MouseArea{objectName:"windowDragArea";z:5;x:root.narrowLayout?54:root.playerPresented?0:sidebar.width;y:0;width:Math.max(0,root.width-x-titleBar.width);height:26;onPressed:root.startSystemMove();onDoubleClicked:root.visibility===Window.Maximized?root.showNormal():root.showMaximized()}
+    HoverHandler {parent:root.contentItem;onPointChanged:{const p=point.scenePosition;if(p.x!==root.playerPointer.x||p.y!==root.playerPointer.y){root.playerPointer=p;root.revealPlayerChrome()}}}
+    Timer {
+        id:playerChromeIdle;interval:3000
+        onTriggered:if(playerCollapse.hovered||videoPartsEntry.hovered||localVideoLyricsSearch.hovered||(root.nowPage&&(root.nowPage.partsVisible||root.nowPage.chromeHovered)))restart();else root.playerChromeVisible=false
+    }
+    IconButton {
+        id:playerCollapse;objectName:"compactPlayerCollapse";x:0;y:0;z:8;width:root.captionButtonWidth;height:root.captionHeight;padding:6
+        visible:Theme.compact&&root.playerPresented&&!root.miniMode&&!root.miniSwitching
+        opacity:root.playerChromeVisible?1:0;enabled:opacity>0&&!playerMotion.running
+        symbol:"collapse";tip:"收起播放";showTooltip:true;onClicked:root.closeLyrics()
+        Behavior on opacity {NumberAnimation {duration:settingsBridge.values.reduceMotion?0:180}}
+    }
+    IconButton {
+        id:videoPartsEntry;objectName:"compactVideoPartsEntry";x:titleBar.x-width-4;y:0;z:8;width:root.captionButtonWidth;height:root.captionHeight;padding:6
+        readonly property var parts:{const key=playbackBridge.trackId;return bilibili.videoParts}
+        visible:Theme.compact&&root.playerPresented&&!root.miniMode&&!root.miniSwitching&&playbackBridge.video&&playbackBridge.onlineActive&&parts.length>0
+        opacity:root.playerChromeVisible?1:0;enabled:opacity>0&&!playerMotion.running&&parts.length>1
+        symbol:"parts";tip:"选集 · P"+bilibili.currentPart+"/"+parts.length;showTooltip:true
+        onClicked:root.ensureNowPlaying().toggleParts()
+        Behavior on opacity {NumberAnimation {duration:settingsBridge.values.reduceMotion?0:180}}
+    }
+    IconButton {
+        id:localVideoLyricsSearch;objectName:"compactVideoLyricsSearch";x:titleBar.x-width-4;y:0;z:8;width:root.captionButtonWidth;height:root.captionHeight;padding:6
+        visible:Theme.compact&&root.playerPresented&&playbackBridge.video&&!playbackBridge.onlineActive&&settingsBridge.values.localVideoMode===0&&!root.miniMode&&!root.miniSwitching
+        opacity:root.playerChromeVisible?1:0;enabled:opacity>0;symbol:"search";tip:"查找本地视频歌词";showTooltip:true
+        onClicked:root.ensureNowPlaying().translationRequested()
+    }
+    MouseArea{objectName:"windowDragArea";z:5;x:root.playerPresented?root.captionButtonWidth:root.narrowLayout?54:sidebar.width;y:0;width:Math.max(0,root.width-x-titleBar.width-(videoPartsEntry.visible?videoPartsEntry.width+4:localVideoLyricsSearch.visible?localVideoLyricsSearch.width+4:0));height:root.captionHeight;onPressed:root.startSystemMove();onDoubleClicked:root.visibility===Window.Maximized?root.showNormal():root.showMaximized()}
     Row {
-        id:titleBar;objectName:"titleBar";anchors.top:parent.top;anchors.right:parent.right;z:7;height:32
+        id:titleBar;objectName:"titleBar";anchors.top:parent.top;anchors.right:parent.right;z:7;height:root.captionHeight
         AbstractButton {
             id:windowPin;objectName:"windowPinButton"
-            width:42;height:32;hoverEnabled:true;checkable:true;checked:root.windowPinned
+            width:root.captionButtonWidth;height:root.captionHeight;hoverEnabled:true;checkable:true;checked:root.windowPinned
             Accessible.name:root.windowPinned?"取消置顶":"置顶窗口"
             HintBubble {visible:windowPin.hovered;text:windowPin.Accessible.name}
             background:Rectangle {color:windowPin.down?Theme.pressed:windowPin.hovered?Theme.hover:"transparent"}
             contentItem:Item {
                 Symbol {
-                    objectName:"windowPinIcon";anchors.centerIn:parent;width:18;height:18
+                    objectName:"windowPinIcon";anchors.centerIn:parent;width:18*.8;height:18*.8
                     name:"pin";color:root.windowPinned?Theme.accent:Theme.text
                     rotation:root.windowPinned?0:45
                     Behavior on rotation {NumberAnimation{duration:settingsBridge.values.reduceMotion?0:200;easing.type:Easing.OutCubic}}
@@ -976,13 +1135,13 @@ ApplicationWindow {
                 id: windowControl
                 required property int index;required property string modelData
                 objectName: "windowControl" + index
-                width:42;height:32;hoverEnabled:true
+                width:root.captionButtonWidth;height:root.captionHeight;hoverEnabled:true
                 Accessible.name: index===1 && root.visibility===Window.Maximized ? "还原窗口" : modelData
                 HintBubble { visible:windowControl.hovered; text:windowControl.Accessible.name }
                 background:Rectangle{color:windowControl.down?(index===2?Qt.darker(Theme.accent,1.15):Theme.pressed):windowControl.hovered?(index===2?Theme.accent:Theme.hover):"transparent"}
                 contentItem: Item {
                     Canvas {
-                        anchors.centerIn: parent; width:14; height:14
+                        anchors.centerIn: parent; width:14; height:14;scale:.8
                         property color ink: windowControl.hovered && windowControl.index===2 ? "white" : Theme.text
                         property bool maximized: root.visibility===Window.Maximized
                         onInkChanged: requestPaint()
@@ -1009,12 +1168,17 @@ ApplicationWindow {
         contentItem:Item { Repeater{model:3;Rectangle{required property int index;x:(parent.width-width)/2;y:(parent.height-12)/2+index*5;width:16;height:2;radius:1;color:Theme.text}} }
         onClicked:{if(compactNavigationMenu.visible)compactNavigationMenu.close();else compactNavigationMenu.open()}
     }
+    RoundMenu {id:brandMenu;objectName:"brandFallbackMenu";parent:root.Overlay.overlay;width:160
+        RoundMenuItem {objectName:"fallbackHistory";text:"历史记录";onTriggered:{compactNavigationMenu.close();root.navigateOriginal(6)}}
+        RoundMenuItem {objectName:"fallbackSettings";text:"设置";onTriggered:{compactNavigationMenu.close();root.navigateOriginal(3)}}
+    }
     Popup {
         id:compactNavigationMenu;objectName:"compactNavigationPanel";parent:compactNavigation;popupType:Popup.Item
         x:8;y:34;width:Math.min(168,root.width-32)
         height:Math.min(compactNavigationContent.implicitHeight+topPadding+bottomPadding,normalShell.height-playerBar.height-52)
         padding:14;modal:false;dim:false
         property real slideProgress:0
+        onAboutToShow:Qt.callLater(function(){compactPlaylists.forceLayout();compactPlaylists.positionViewAtBeginning()})
         closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutsideParent
         enter:Transition {NumberAnimation{target:compactNavigationMenu;property:"slideProgress";from:0;to:1;duration:settingsBridge.values.reduceMotion?0:280;easing.type:Easing.OutCubic}}
         exit:Transition {NumberAnimation{target:compactNavigationMenu;property:"slideProgress";to:0;duration:settingsBridge.values.reduceMotion?0:220;easing.type:Easing.InCubic}}
@@ -1026,54 +1190,68 @@ ApplicationWindow {
             id:compactNavigationContent
             spacing:10
             transform:Translate{x:-(compactNavigationMenu.width+8)*(1-compactNavigationMenu.slideProgress)}
-            UiText {text:"Relaxer";font.pixelSize:23;font.weight:Font.DemiBold;color:Theme.text;Layout.preferredHeight:34}
-            UiText {text:"音乐资料库";color:Theme.secondary;font.pixelSize:13}
-            Column {
-                Layout.fillWidth:true;spacing:5
-                Repeater {
-                    model:["本地音乐","发现","个人","设置","我喜欢"]
-                    NavigationButton {
-                        required property int index;required property string modelData
-                        objectName:"compactNavigate-"+index;width:parent.width;text:modelData
-                        marker:["music","mark-compass","person","settings","heart"][index]
-                        selected:index===4?appBridge.page===0&&libraryBridge.playlistId==="-1":index===0?appBridge.page===0&&libraryBridge.playlistId==="0":index===1?appBridge.page===4:appBridge.page===index
-                        onClicked:{compactNavigationMenu.close();root.navigateOriginal(index)}
-                    }
-                }
-            }
-            Rectangle{Layout.fillWidth:true;height:1;color:Theme.border}
-            RowLayout {
-                Layout.fillWidth:true;spacing:4
-                UiText {text:"我的歌单";color:Theme.secondary;font.pixelSize:13;Layout.fillWidth:true}
-                IconButton {
-                    objectName:root.playlistOrderEditing?"compactSavePlaylistOrder":"compactPlaylistOptions";width:26;height:26;padding:5
-                    text:root.playlistOrderEditing?"保存排序":"歌单管理";showTooltip:true
-                    contentItem:Item {
-                        Symbol{anchors.fill:parent;name:"more";opacity:1-root.playlistOrderProgress;scale:1-.2*root.playlistOrderProgress}
-                        Symbol{anchors.fill:parent;name:"check";opacity:root.playlistOrderProgress;scale:.8+.2*root.playlistOrderProgress}
-                    }
-                    onClicked:if(root.playlistOrderEditing)root.savePlaylistOrder();else playlistNavigationOptions.popup(this,0,height)
-                }
-                IconButton {
-                    objectName:root.playlistOrderEditing?"compactCancelPlaylistOrder":"compactCreatePlaylist";width:26;height:26;padding:5
-                    text:root.playlistOrderEditing?"取消排序":"创建歌单";showTooltip:true
-                    contentItem:Symbol {objectName:"compactCreateRotation";name:"plus";rotation:45*root.playlistOrderProgress}
-                    onClicked:if(root.playlistOrderEditing)root.cancelPlaylistOrder();else{compactNavigationMenu.close();root.ensurePlaylistEditor().create()}
-                }
+            UiText {text:"Relaxer";basePixelSize:23;font.weight:Font.DemiBold;color:Theme.text;Layout.preferredHeight:34;Layout.fillWidth:true
+                MouseArea {anchors.fill:parent;acceptedButtons:Qt.RightButton;onClicked:mouse=>{if(root.sidebarSections.length===0)brandMenu.popup(parent,mouse.x,mouse.y)}}
             }
             ListView {
                 id:compactPlaylists;objectName:"compactPlaylistNavigation"
+                currentIndex:-1
+                Component.onCompleted:Qt.callLater(function(){compactPlaylists.forceLayout();compactPlaylists.positionViewAtBeginning()})
                 SmoothWheelHandler { flickable: compactPlaylists }
-                Layout.fillWidth:true;Layout.fillHeight:true
-                Layout.preferredHeight:count*36+Math.max(0,count-1)*spacing
-                Layout.minimumHeight:0
-                clip:true;model:root.playlistOrderDraftActive?playlistOrderDraft:playlistModel;spacing:4
+                Layout.fillWidth:true;Layout.fillHeight:true;Layout.minimumHeight:0
+                Layout.preferredHeight:count*root.sidebarRowHeight+Math.max(0,count-1)*spacing+(headerItem?headerItem.height:0)
+                headerPositioning:ListView.InlineHeader
+                header:Column {
+                    width:compactPlaylists.width;spacing:10;bottomPadding:10
+                    RowLayout {width:parent.width;height:28;visible:root.sidebarSections.length>0;spacing:2
+                        UiText {text:"音乐资料库";color:Theme.secondary;basePixelSize:13;Layout.fillWidth:true;elide:Text.ElideRight}
+                        IconButton {objectName:"compactHistoryButton";visible:settingsBridge.values.historyEntryMode===1;implicitWidth:28;implicitHeight:28;padding:4;symbol:"history";tip:"历史记录";onClicked:{compactNavigationMenu.close();root.navigateOriginal(6)}}
+                        IconButton {objectName:"compactSettingsButton";visible:settingsBridge.values.settingsEntryMode===1;implicitWidth:28;implicitHeight:28;padding:4;symbol:"settings";tip:"设置";onClicked:{compactNavigationMenu.close();root.navigateOriginal(3)}}
+                    }
+                    Column {
+                        width:parent.width;spacing:root.sidebarRowSpacing
+                        Repeater {
+                            model:root.sidebarSections
+                            NavigationButton {
+                                required property int index;required property var modelData
+                                objectName:"compactNavigate-"+modelData.id;width:parent.width;height:root.sidebarRowHeight;text:root.sectionNames[modelData.id]
+                                marker:root.sectionMarkers[modelData.id]
+                                selected:root.sectionSelected(modelData.id)
+                                onClicked:{compactNavigationMenu.close();root.navigateOriginal(modelData.id)}
+                            }
+                        }
+                    }
+                    Rectangle{width:parent.width;height:1;color:Theme.border}
+                    RowLayout {
+                        width:parent.width;height:26;spacing:4
+                        UiText {text:"我的歌单";color:Theme.secondary;basePixelSize:13;Layout.fillWidth:true}
+                        IconButton {
+                            objectName:root.playlistOrderEditing?"compactSavePlaylistOrder":"compactPlaylistOptions";width:26;height:26;padding:5
+                            text:root.playlistOrderEditing?"保存排序":"歌单管理";showTooltip:true
+                            contentItem:Item {
+                                Symbol{anchors.fill:parent;name:"more";opacity:1-root.playlistOrderProgress;scale:1-.2*root.playlistOrderProgress}
+                                Symbol{anchors.fill:parent;name:"check";opacity:root.playlistOrderProgress;scale:.8+.2*root.playlistOrderProgress}
+                            }
+                            onClicked:if(root.playlistOrderEditing)root.savePlaylistOrder();else playlistNavigationOptions.popup(this,0,height)
+                        }
+                        IconButton {
+                            objectName:root.playlistOrderEditing?"compactCancelPlaylistOrder":"compactCreatePlaylist";width:26;height:26;padding:5
+                            text:root.playlistOrderEditing?"取消排序":"创建歌单";showTooltip:true
+                            contentItem:Symbol {objectName:"compactCreateRotation";name:"plus";rotation:45*root.playlistOrderProgress}
+                            onClicked:if(root.playlistOrderEditing)root.cancelPlaylistOrder();else{compactNavigationMenu.close();root.ensurePlaylistEditor().create()}
+                        }
+                    }
+                }
+                clip:true;model:root.playlistOrderDraftActive?playlistOrderDraft:playlistModel;spacing:root.sidebarRowSpacing
                 move:Transition {NumberAnimation{properties:"y";duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.InOutCubic}}
                 moveDisplaced:Transition {NumberAnimation{properties:"y";duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.InOutCubic}}
-                ScrollBar.vertical:ScrollBar{}
+                ScrollBar.vertical:ScrollBar {
+                    objectName:"compactSidebarScrollBar";parent:compactNavigationMenu.background;width:10;z:2
+                    x:parent.width-width-4;y:compactNavigationContent.y+compactPlaylists.y;height:compactPlaylists.height
+                }
                 delegate:PlaylistNavigationRow {
                     objectName:"compactSidebarPlaylist-"+playlistKey
-                    width:compactPlaylists.width;listView:compactPlaylists;orderModel:playlistOrderDraft;sorting:root.playlistOrderEditing
+                    width:compactPlaylists.width;height:root.sidebarRowHeight;listView:compactPlaylists;orderModel:playlistOrderDraft;sorting:root.playlistOrderEditing
                     selected:appBridge.page===0&&libraryBridge.playlistId===playlistKey
                     onActivated:{compactNavigationMenu.close();root.openPlaylist(playlistKey)}
                 }
@@ -1106,13 +1284,13 @@ ApplicationWindow {
         id:pageOut
         NumberAnimation{target:oldPage;property:"opacity";to:0;duration:84;easing.type:Easing.OutCubic}
         NumberAnimation{target:oldPage;property:"scale";to:.99;duration:84;easing.type:Easing.OutCubic}
-        onFinished:{oldPage.visible=false}
+        onFinished:root.clearPageSnapshot()
     }
     ParallelAnimation {
         id:pageIn
         NumberAnimation{target:pageSurface;property:"opacity";to:1;duration:136;easing.type:Easing.OutCubic}
         NumberAnimation{target:pageSurface;property:"y";to:0;duration:136;easing.type:Easing.OutCubic}
-        onFinished:{root.pageGrab=null;oldPage.visible=false;oldPage.source=""}
+        onFinished:root.clearPageSnapshot()
     }
     Timer {
         id:snapshotWarmup;interval:32
@@ -1166,7 +1344,7 @@ ApplicationWindow {
             width:blend(modelData.from.width,modelData.to.width);height:blend(modelData.from.height,modelData.to.height)
             Loader {
                 anchors.fill:parent;active:modelData.kind==="art"
-                sourceComponent:Artwork {file:playbackBridge.coverUrl;revision:playbackBridge.artworkRevision;seed:playbackBridge.title;radius:flightPart.blend(8,modelData.toRadius);resolution:320;animated:false}
+                sourceComponent:Artwork {videoCover:playbackBridge.video;coverAspect:playbackBridge.video?(root.lyricsOpen?16/9:4/3):1;file:playbackBridge.coverUrl;revision:playbackBridge.artworkRevision;seed:playbackBridge.title;radius:flightPart.blend(8,modelData.toRadius);resolution:320;animated:false}
             }
             UiText {
                 id:flightText
@@ -1177,7 +1355,7 @@ ApplicationWindow {
                 width:parent.width/flightScale;height:parent.height/flightScale
                 transform:Scale{xScale:flightText.flightScale;yScale:flightText.flightScale}
                 text:modelData.text;textFormat:Text.PlainText;elide:Text.ElideRight;color:modelData.color
-                font.family:modelData.kind==="text"?modelData.toFamily:Theme.fontFamily;font.pixelSize:modelData.kind==="text"?modelData.toPixelSize:14;font.weight:modelData.kind==="text"?modelData.toWeight:Font.Normal
+                font.family:modelData.kind==="text"?modelData.toFamily:Theme.fontFamily;basePixelSize:modelData.kind==="text"?modelData.toPixelSize/Theme.fontScale:14;font.weight:modelData.kind==="text"?modelData.toWeight:Font.Normal
             }
             Rectangle {
                 anchors.fill:parent;visible:modelData.kind==="icon";color:modelData.filled?Theme.accent:"transparent";radius:modelData.filled?width/2:0

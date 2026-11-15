@@ -30,6 +30,9 @@ class SettingsBridge final : public QObject {
     Q_PROPERTY(QVariantMap windowBounds READ windowBounds NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList shortcutActions READ shortcutActions CONSTANT)
     Q_PROPERTY(QString dataRoot READ dataRoot CONSTANT)
+    Q_PROPERTY(QString cacheRoot READ cacheRoot CONSTANT)
+    Q_PROPERTY(QString legacyCacheRoot READ legacyCacheRoot NOTIFY settingsChanged)
+    Q_PROPERTY(double cacheUsageMB READ cacheUsageMB NOTIFY settingsChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
 public:
     // Explicit C++ instance injection, never a QML or environment override.
@@ -51,11 +54,17 @@ public:
     QVariantMap fontFiles() const;
     QVariantList shortcutActions() const;
     QString dataRoot() const { return m_library->root(); }
+    QString cacheRoot()const;
+    QString legacyCacheRoot()const;
+    double cacheUsageMB()const;
+    Q_INVOKABLE bool openCacheRoot();
     QString status() const { return m_status; }
     Q_INVOKABLE void resetDraft();
     Q_INVOKABLE bool edit(const QString &key, const QVariant &value);
     Q_INVOKABLE bool save();
     Q_INVOKABLE bool setPreference(const QString &key, const QVariant &value);
+    Q_INVOKABLE bool saveSidebarSections(const QVariantList &sections) { return setPreference("sidebarSections", sections); }
+    Q_INVOKABLE bool saveDiscoveryActionLayout(const QVariantList &rows);
     Q_INVOKABLE QVariantMap miniWindowPosition() const;
     Q_INVOKABLE bool saveMiniWindowPosition(int x,int y);
     Q_INVOKABLE bool setTheme(int theme);
@@ -63,7 +72,7 @@ public:
     Q_INVOKABLE bool openDataRoot();
     Q_INVOKABLE QString fontFamilyFor(const QString &region) const;
     Q_INVOKABLE bool saveFont(const QUrl &source, const QVariantMap &regions);
-    Q_INVOKABLE bool saveFonts(const QVariantMap &files);
+    Q_INVOKABLE bool saveFonts(const QVariantMap &files,int fontSize=-1);
     Q_INVOKABLE bool resetFont();
     Q_INVOKABLE bool chooseLyricColor(QObject *ownerWindow);
     Q_INVOKABLE bool chooseLyricColorDraft(const QString &color,QObject *ownerWindow);
@@ -88,6 +97,7 @@ signals:
     void statusChanged();
     void appearanceChanged();
 private:
+    QVariantList discoveryActionLayout()const;
     Library *m_library;
     SettingsStore m_store;
     AppearanceStore m_appearance;

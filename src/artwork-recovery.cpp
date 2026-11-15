@@ -69,6 +69,7 @@ QString artworkVersionKey(const ArtworkFileVersion &v) {
 }
 bool isLegacyArtwork(const Track &t) {
     static const QRegularExpression safe("^[A-Za-z0-9_-]{1,128}$");
+    if(t.id>0&&safe.match(t.hash).hasMatch()&&isVideoFile(t.file)&&t.cover.isEmpty()&&(t.coverOrigin.isEmpty()||t.coverOrigin=="none"))return true;
     return t.id>0 && t.coverOrigin.isEmpty() && safe.match(t.hash).hasMatch() && t.cover=="Artwork/"+t.hash+".png";
 }
 bool managedArtworkSource(const QString &root,const Track &track) {

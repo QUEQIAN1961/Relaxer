@@ -31,7 +31,7 @@ QHash<int, QByteArray> TrackListModel::roleNames() const {
     return {{TrackId, "trackId"}, {Title, "title"}, {Artist, "artist"}, {Album, "album"},
             {Duration, "duration"}, {Favorite, "favorite"}, {File, "file"}, {TrackKey, "trackKey"},
             {Cover, "cover"}, {Plays, "plays"}, {Heard, "heard"}, {ImportedAt, "importedAt"},
-            {LyricsAvailable, "lyricsAvailable"}, {FileSize, "fileSize"}};
+            {LyricsAvailable, "lyricsAvailable"}, {FileSize, "fileSize"}, {RequiresSubscription,"requiresSubscription"},{VideoTrack,"videoTrack"}};
 }
 QVariant TrackListModel::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.column() != 0 || index.row() < 0 || index.row() >= m_tracks.size()) return {};
@@ -41,6 +41,8 @@ QVariant TrackListModel::data(const QModelIndex &index, int role) const {
     case TrackKey: return QString::number(t.id); // Lossless command key across QML/JS.
     case Title: case Qt::DisplayRole: return t.title;
     case Artist: return t.artist;
+    case RequiresSubscription: return t.requiresSubscription;
+    case VideoTrack: return isVideoTrack(t);
     case Album: return t.album;
     case Duration: return t.duration;
     case Favorite: return t.favorite;
@@ -81,7 +83,13 @@ void TrackListModel::setPlaylist(qint64 playlist) {
     if(m_library)for(const auto &list:m_library->playlists())if(list.id==playlist){m_cloud=!list.provider.isEmpty();break;}
     m_refresh.stop(); refresh();
 }
-void TrackListModel::setCloudTracks(qint64 playlist,const QVector<Track> &tracks){if(m_cloud&&m_playlist==playlist){m_cloudTracks=tracks;refresh();}}
+void TrackListModel::setCloudTracks(qint64 playlist,const QVector<Track> &tracks){
+    if(!m_cloud||m_playlist!=playlist)return;
+    const int before=m_tracks.size();bool append=tracks.size()>before;
+    for(int i=0;append&&i<before;++i)append=tracks[i].id==m_tracks[i].id;
+    if(append&&before>0){beginInsertRows({},before,tracks.size()-1);m_cloudTracks=tracks;m_tracks=tracks;for(int i=before;i<tracks.size();++i)m_rows.insert(tracks[i].id,i);endInsertRows();return;}
+    m_cloudTracks=tracks;refresh();
+}
 void TrackListModel::updateCloudTrack(const Track &track){
     if(!m_cloud)return;const auto row=rowForId(track.id);if(row<0)return;auto updated=track;updated.plays=m_tracks[row].plays;updated.heard=m_tracks[row].heard;if(!updated.matchedLocalId)updated.matchedLocalId=m_tracks[row].matchedLocalId;m_tracks[row]=updated;m_cloudTracks[row]=updated;emit dataChanged(index(row),index(row),{Cover,Favorite});
 }

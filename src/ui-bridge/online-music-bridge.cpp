@@ -1,4 +1,6 @@
 #include "online-music-bridge.h"
+#include "disk-cache.h"
+#include "account-membership.h"
 #include "online-recommendation.h"
 #include "online-artwork-cache.h"
 #include "../../third_party/qrcodegen/qrcodegen.hpp"
@@ -99,8 +101,8 @@ bool MusicCookieJar::hasSession() const {
     return false;
 }
 QByteArray MusicCookieJar::protect(const QByteArray &bytes,bool decrypt){return protectSession(bytes,decrypt);}
-OnlineMusicBridge::OnlineMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel *lyrics,ai::AiRuntime *ai,OnlineArtworkCache *artwork,QObject *parent)
-    :QObject(parent),m_library(library),m_facade(facade),m_lyrics(lyrics),m_ai(ai),m_artwork(artwork),m_pageCache(library,"netease"),m_network(this),m_cookies(new MusicCookieJar(&m_network)){
+OnlineMusicBridge::OnlineMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel *lyrics,ai::AiRuntime *ai,OnlineArtworkCache *artwork,QObject *parent,QNetworkAccessManager *transport)
+    :QObject(parent),m_library(library),m_facade(facade),m_lyrics(lyrics),m_ai(ai),m_artwork(artwork),m_pageCache(library,"netease"),m_network(this),m_transport(transport?transport:&m_network),m_cookies(new MusicCookieJar(&m_network)){
     m_network.setCookieJar(m_cookies);m_poll.setInterval(1800);
     m_pageCommit.setSingleShot(true);connect(this,&OnlineMusicBridge::changed,this,[this]{if(m_pageCache.pending())m_pageCommit.start(0);});
     connect(&m_pageCommit,&QTimer::timeout,this,[this]{
@@ -125,7 +127,7 @@ OnlineMusicBridge::OnlineMusicBridge(Library *library,PlaybackFacade *facade,Lyr
         }
         if(ranked.isEmpty()){setStatus("AI 未返回有效候选，请重试");return;}
         m_songs=ranked;emit songsChanged();
-        QSaveFile cache(onlinePath("recommendations.json"));if(cache.open(QIODevice::WriteOnly)){cache.write(QJsonDocument(QJsonArray::fromVariantList(m_songs)).toJson(QJsonDocument::Compact));cache.commit();}
+        QSaveFile cache(QDir(DiskCache::online(m_library)).filePath("recommendations.json"));if(cache.open(QIODevice::WriteOnly)){cache.write(QJsonDocument(QJsonArray::fromVariantList(m_songs)).toJson(QJsonDocument::Compact));cache.commit();DiskCache::trim(m_library);}
         setStatus(QString("AI 已结合本地收听偏好推荐 %1 首歌曲").arg(m_songs.size()));
     });
 }
@@ -154,7 +156,7 @@ void OnlineMusicBridge::traceLogin(const QString &message) const {
 }
 QNetworkReply *OnlineMusicBridge::post(const QString &path,const QJsonObject &data,std::function<void(const QJsonObject &)> done){
     const bool desktopLogin=path.startsWith("/api/login/qrcode/")||path=="/api/song/enhance/download/url/v1";
-    QNetworkRequest request(QUrl(desktopLogin?"https://interfacepc.music.163.com/eapi/"+path.mid(5):"https://music.163.com"+path));request.setTransferTimeout(15000);
+    QNetworkRequest request(QUrl(desktopLogin?"https://interfacepc.music.163.com/eapi/"+path.mid(5):"https://music.163.com"+path));request.setTransferTimeout(15000);request.setAttribute(QNetworkRequest::Http2AllowedAttribute,false);
     request.setRawHeader("User-Agent","Mozilla/5.0");request.setRawHeader("Referer","https://music.163.com/");
     request.setHeader(QNetworkRequest::ContentTypeHeader,"application/x-www-form-urlencoded");
     QByteArray form;for(auto it=data.begin();it!=data.end();++it){
@@ -178,7 +180,7 @@ QNetworkReply *OnlineMusicBridge::post(const QString &path,const QJsonObject &da
         form=desktopLoginForm(path,data,header);
         if(form.isEmpty()){setStatus("网易云登录请求生成失败，请重试");done({});return nullptr;}
     }
-    auto *reply=m_network.post(request,form);m_requests.insert(reply);emit changed();
+    auto *reply=m_transport->post(request,form);m_requests.insert(reply);emit changed();
     connect(reply,&QNetworkReply::finished,this,[this,reply,path,done=std::move(done)]{
         m_requests.remove(reply);const auto object=QJsonDocument::fromJson(reply->readAll()).object();const bool ok=reply->error()==QNetworkReply::NoError;
         if(path.contains("/login/qrcode/")||path=="/api/w/nuser/account/get")
@@ -190,7 +192,7 @@ QNetworkReply *OnlineMusicBridge::post(const QString &path,const QJsonObject &da
 }
 void OnlineMusicBridge::activate(){
     if(m_activated)return;m_activated=true;restoreSession();
-    QFile cache(onlinePath("recommendations.json"));if(cache.open(QIODevice::ReadOnly)){m_songs=QJsonDocument::fromJson(cache.readAll()).array().toVariantList();for(auto &v:m_songs){auto row=v.toMap();const auto cover=row.value("cover").toString();row["cover"]=artworkUrl(cover,1024);row["thumbnail"]=artworkUrl(cover,128);v=row;m_catalog.insert(row.value("id").toLongLong(),row);}emit songsChanged();}
+    QFile cache(QDir(DiskCache::online(m_library)).filePath("recommendations.json"));if(!cache.exists())cache.setFileName(onlinePath("recommendations.json"));if(cache.open(QIODevice::ReadOnly)){m_songs=QJsonDocument::fromJson(cache.readAll()).array().toVariantList();for(auto &v:m_songs){auto row=v.toMap();const auto cover=row.value("cover").toString();row["cover"]=artworkUrl(cover,1024);row["thumbnail"]=artworkUrl(cover,128);v=row;m_catalog.insert(row.value("id").toLongLong(),row);}emit songsChanged();}
     if(m_cookies->hasSession())refreshAccount();
 }
 void OnlineMusicBridge::saveSession(){
@@ -202,8 +204,9 @@ void OnlineMusicBridge::refreshAccount(){
     const auto revision=m_loginRevision;
     post("/api/w/nuser/account/get",{},[this,revision](const QJsonObject &object){
         if(revision!=m_loginRevision)return;
-        const auto profile=object.value("profile").toObject();m_loggedIn=!profile.isEmpty();m_userId=stringId(profile.value("userId"));m_nickname=profile.value("nickname").toString();m_avatarUrl=QUrl(profile.value("avatarUrl").toString());
+        const auto profile=object.value("profile").toObject();m_loggedIn=!profile.isEmpty();m_userId=stringId(profile.value("userId"));m_nickname=profile.value("nickname").toString();m_avatarUrl=QUrl(artworkUrl(profile.value("avatarUrl").toString(),256));m_membership=accountMembership("netease",profile);
         setStatus(m_loggedIn?"已登录网易云 · "+m_nickname:"请使用网易云 App 扫码登录");
+        if(m_loggedIn&&!m_qrKey.isEmpty()){m_qrKey.clear();emit loginCompleted();}
     });
 }
 void OnlineMusicBridge::startLogin(){
@@ -239,7 +242,7 @@ void OnlineMusicBridge::pollLogin(){
 void OnlineMusicBridge::logout(){
     m_pageCache.clearPrivate();
     stopLogin();++m_playRevision;++m_listRevision;cancelRecommendation();m_cookies->restore({});QFile::remove(onlinePath("netease-session.bin"));
-    m_loggedIn=false;m_userId.clear();m_nickname.clear();m_avatarUrl.clear();m_qrImage.clear();m_playlists.clear();
+    m_loggedIn=false;m_membership.clear();m_userId.clear();m_nickname.clear();m_avatarUrl.clear();m_qrImage.clear();m_playlists.clear();
     if(m_facade->onlineActive()&&m_facade->current().hash.startsWith("netease:"))m_facade->stopOnline();setStatus("已退出网易云账号");
 }
 QVariantMap OnlineMusicBridge::song(const QJsonObject &object) const {
@@ -247,6 +250,7 @@ QVariantMap OnlineMusicBridge::song(const QJsonObject &object) const {
     const auto album=value.value(value.contains("al")?"al":"album").toObject();
     QStringList artists;for(const auto &v:value.value(value.contains("ar")?"ar":"artists").toArray())artists.append(v.toObject().value("name").toString());
     return {{"id",stringId(value.value("id"))},{"title",value.value("name").toString()},{"artist",artists.join(" / ")},
+            {"requiresSubscription",value.value("fee").toInt()==1 || value.value("fee").toInt()==4 || value.value("privilege").toObject().value("fee").toInt()==1},
             {"album",album.value("name").toString()},{"cover",artworkUrl(album.value("picUrl").toString(),1024)},
             {"thumbnail",artworkUrl(album.value("picUrl").toString(),128)},
             {"duration",value.value(value.contains("dt")?"dt":"duration").toVariant()},{"reason",QString()}};
@@ -340,8 +344,9 @@ struct OnlineMusicBridge::PlaylistLoad {
 void OnlineMusicBridge::openPlaylist(const QString &id){
     if(id.toLongLong()<=0||beginPage("playlist:"+id))return;
     if(id.toLongLong()<=0)return;cancelRecommendation();const auto revision=++m_listRevision;if(!m_pageCache.quiet())setSongs({});setStatus("正在读取歌单…");
-    post("/api/v6/playlist/detail",{{"id",id},{"n",100},{"s",0}},[this,revision](const QJsonObject &object){
+    post("/api/v6/playlist/detail",{{"id",id},{"n",100},{"s",0}},[this,revision,id](const QJsonObject &object){
         if(revision!=m_listRevision)return;
+        if(object.value("code").toInt()==404||playlistReportedMissing(object)){setStatus("网易云歌单已不存在");emit playlistMissing(id);return;}
         if(object.value("code").toInt()!=200){setStatus("网易云歌单读取失败，请稍后重试");return;}
         const auto playlist=object.value("playlist").toObject();auto load=std::make_shared<PlaylistLoad>();load->revision=revision;load->expected=playlist.value("trackCount").toInt();
         m_currentPlaylist={{"id",stringId(playlist.value("id"))},{"provider","netease"},{"name",playlist.value("name").toString()},{"cover",artworkUrl(playlist.value("coverImgUrl").toString(),300)},{"count",load->expected}};
@@ -394,19 +399,35 @@ void OnlineMusicBridge::playSong(const QString &id){
     }
     QStringList ids;for(const auto &value:m_songs)ids.append(value.toMap().value("id").toString());playSongs(ids,id);
 }
-void OnlineMusicBridge::playSongs(const QStringList &ids,const QString &start){
+QVector<Track> OnlineMusicBridge::tracksFor(const QStringList &ids){
     QVector<Track> tracks;
-    for(const auto &id:ids){const auto row=m_catalog.value(id.toLongLong());if(row.isEmpty())continue;Track track;track.id=TrackBase+row.value("id").toLongLong();track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.album=row.value("album").toString();track.duration=row.value("duration").toLongLong();track.hash="netease:"+row.value("id").toString();
-        const auto cover=row.value("cover").toString();m_artwork->prepare(track,QUrl(artworkUrl(cover,128)),QUrl(artworkUrl(cover,1024)),onlinePath(QString("cover-%1.png").arg(row.value("id").toString())));tracks.append(track);}
-    m_facade->playOnline(tracks,TrackBase+start.toLongLong());
+    for(const auto &id:ids){const auto row=m_catalog.value(id.toLongLong());if(row.isEmpty())continue;Track track;track.id=TrackBase+row.value("id").toLongLong();track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.requiresSubscription=row.value("requiresSubscription").toBool();track.album=row.value("album").toString();track.duration=row.value("duration").toLongLong();track.hash="netease:"+row.value("id").toString();track.onlineMetadata=QJsonObject::fromVariantMap(row);
+        const auto cover=row.value("cover").toString();m_artwork->prepare(track,QUrl(artworkUrl(cover,128)),QUrl(artworkUrl(cover,1024)),QDir(DiskCache::online(m_library)).filePath(QString("cover-%1.png").arg(row.value("id").toString())));tracks.append(track);}
+    return tracks;
 }
+void OnlineMusicBridge::playSongs(const QStringList &ids,const QString &start){
+    const auto tracks=tracksFor(ids);if(tracks.isEmpty())return;
+    qint64 first=tracks.first().id;
+    for(const auto &track:tracks)if(track.hash.endsWith(":"+start)||track.id==TrackBase+start.toLongLong())first=track.id;
+    m_facade->playOnline(tracks,first);
+}
+bool OnlineMusicBridge::batchSongs(const QStringList &ids,const QString &action){
+    const bool ok=m_facade->batchOnline(tracksFor(ids),action);
+    if(!ok)setStatus("请先播放在线歌曲，再向在线队列添加所选歌曲；当前播放歌曲不会重复加入");
+    return ok;
+}
+
 void OnlineMusicBridge::requestSource(qint64 internalId){
-    if(internalId<TrackBase||internalId>=TrackBase*2)return;
+    if(internalId<TrackBase||internalId>=TrackBase*2)return;activate();
     const auto revision=++m_playRevision;const auto id=QString::number(internalId-TrackBase);setStatus("正在获取网易云播放地址…");
     post("/api/song/enhance/player/url/v1",{{"ids","["+id+"]"},{"level",m_quality},{"encodeType","flac"}},[this,internalId,revision](const QJsonObject &object){
         if(revision!=m_playRevision||!m_facade->onlineActive()||m_facade->current().id!=internalId)return;
         const auto data=object.value("data").toArray();const auto entry=data.isEmpty()?QJsonObject():data.first().toObject();const QUrl url(entry.value("url").toString());
-        if(url.isEmpty()){const QString message="当前账号暂不能播放这首歌，请检查登录状态或歌曲权限";setStatus(message);m_facade->failOnlineSource(internalId,message);return;}
+        if(url.isEmpty()){
+            const auto code=object.value("code").toInt();const bool temporary=object.isEmpty()||code==429||code>=500||(code==200&&data.isEmpty());
+            const QString message=temporary?QStringLiteral("网易云音源暂时连接失败，请稍后重试"):QStringLiteral("当前账号暂不能播放这首歌，请检查登录状态或歌曲权限");
+            setStatus(message);m_facade->failOnlineSource(internalId,message,temporary);return;
+        }
         const bool trial=entry.value("freeTrialInfo").isObject();setStatus(trial?"当前账号获得的是试听片段":"正在播放 · 网易云音乐");
         m_facade->setOnlineSource(internalId,url);loadExtras(internalId);
     });

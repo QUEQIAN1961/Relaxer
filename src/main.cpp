@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
 #ifdef RELAXER_ENABLE_QML
     if (qmlRuntime) {
         const QmlLaunchOptions options{QDir(root).absolutePath(), parser.value("screenshot"),
-            parser.value("diagnostics"), qmlPages.indexOf(parser.value("page")),
+            parser.value("diagnostics"), parser.isSet("page")?int(qmlPages.indexOf(parser.value("page"))):-1,
             parser.isSet("quit-after") ? quitAfter : 0};
         return qmlRuntime->run(&app, options, diagnostics);
     }

@@ -55,6 +55,8 @@ static QImage iconImage(const QString &name, const QColor &c) {
         p.setBrush(c);
         p.drawEllipse(QRectF(6, 21, 7, 5));
         p.drawEllipse(QRectF(18, 18, 7, 5));
+    } else if (name == "video") {
+        p.drawRoundedRect(QRectF(4,7,24,19),3,3);p.drawLine(10,3,14,7);p.drawLine(22,3,18,7);p.drawLine(11,13,11,19);p.drawLine(21,13,21,19);
     } else if (name == "playlist") {
         for (int y : {9, 16, 23})
             p.drawLine(6, y, 19, y);
@@ -165,6 +167,19 @@ static QImage iconImage(const QString &name, const QColor &c) {
     } else if (name == "collapse") {
         p.drawLine(7, 11, 16, 20);
         p.drawLine(16, 20, 25, 11);
+    } else if (name == "parts") {
+        // Lucide arrow-up-down, as shown in the Morphicons playground (ISC).
+        p.save();p.scale(4.0/3,4.0/3);p.setPen(QPen(c,2,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+        p.drawPolyline(QPolygonF{{21,16},{17,20},{13,16}});p.drawLine(17,20,17,4);
+        p.drawPolyline(QPolygonF{{3,8},{7,4},{11,8}});p.drawLine(7,4,7,20);p.restore();
+    } else if (name == "log-out") {
+        // Lucide log-out as used by Morphicons; original 24-unit geometry.
+        p.save();p.scale(4.0/3,4.0/3);
+        p.setPen(QPen(c,2,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+        p.drawPolyline(QPolygonF{{16,17},{21,12},{16,7}});p.drawLine(21,12,9,12);
+        QPainterPath door;door.moveTo(9,21);door.lineTo(5,21);
+        door.cubicTo(3.8954,21,3,20.1046,3,19);door.lineTo(3,5);
+        door.cubicTo(3,3.8954,3.8954,3,5,3);door.lineTo(9,3);p.drawPath(door);p.restore();
     } else if (name == "arrow-left") {
         // Lucide arrow-left, also used by the Morphicons demo.
         p.setPen(QPen(c,2.4,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
@@ -194,6 +209,10 @@ static QImage iconImage(const QString &name, const QColor &c) {
         p.drawLine(16, 7, 23, 14);
     } else if (name == "cloud") {
         QPainterPath cloud;cloud.moveTo(9,24);cloud.cubicTo(1,24,1,13,8,13);cloud.cubicTo(9,3,24,3,25,14);cloud.cubicTo(33,15,31,24,25,24);cloud.closeSubpath();p.drawPath(cloud);
+    } else if (name == "history") {
+        // Lucide clock from Morphicons; original 24-unit geometry (ISC).
+        p.save();p.scale(4.0/3,4.0/3);p.setPen(QPen(c,2,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+        p.drawEllipse(QPointF(12,12),10,10);p.drawPolyline(QPolygonF{{12,6},{12,12},{16,14}});p.restore();
     } else if (name == "clock") {
         p.drawEllipse(QRectF(5, 5, 22, 22));
         p.drawLine(16, 10, 16, 16);
@@ -228,8 +247,10 @@ QImage UiImages::requestImage(const QString &id,QSize *resultSize,const QSize &r
     }
 
     if(file.isLocalFile()) {
-        out=readArtworkImage(file.toLocalFile(),QSize(size,size),Qt::KeepAspectRatioByExpanding);
-        if(!out.isNull()){out=out.scaled(size,size,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation);out=out.copy((out.width()-size)/2,(out.height()-size)/2,size,size);}
+        const auto aspect=qBound(1.,query.queryItemValue("aspect").toDouble(),4.);
+        const int height=qMax(1,qRound(size/aspect));
+        out=readArtworkImage(file.toLocalFile(),QSize(size,height),Qt::KeepAspectRatioByExpanding);
+        if(!out.isNull()){out=out.scaled(size,height,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation);out=out.copy((out.width()-size)/2,(out.height()-height)/2,size,height);}
     }
     if (out.isNull()) {
         auto h = QCryptographicHash::hash(seed.toUtf8(), QCryptographicHash::Sha256);

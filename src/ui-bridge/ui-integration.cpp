@@ -8,6 +8,7 @@
 #include <QPlatformSurfaceEvent>
 #include <QScreen>
 #include <QMouseEvent>
+#include "client-frame-windows.h"
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -16,7 +17,9 @@
 #include <dwmapi.h>
 #endif
 namespace relaxer {
-UiIntegration::UiIntegration(Library *library,PlaybackBridge *playback,QObject *parent):QObject(parent),m_library(library),m_playback(playback){static int base=0x5300;m_base=base;base+=8;QCoreApplication::instance()->installNativeEventFilter(this);QCoreApplication::instance()->installEventFilter(this);}
+UiIntegration::UiIntegration(Library *library,PlaybackBridge *playback,QObject *parent):QObject(parent),m_library(library),m_playback(playback){static int base=0x5300;m_base=base;base+=8;QCoreApplication::instance()->installNativeEventFilter(this);QCoreApplication::instance()->installEventFilter(this);
+    connect(library,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("qml.reduceMotion"))updateWindowShadow();});
+}
 UiIntegration::~UiIntegration(){releaseGlobals();QCoreApplication::instance()->removeEventFilter(this);QCoreApplication::instance()->removeNativeEventFilter(this);}
 bool UiIntegration::trayAvailable()const{return QSystemTrayIcon::isSystemTrayAvailable();}
 void UiIntegration::attach(QQuickWindow *window){
@@ -40,8 +43,11 @@ void UiIntegration::attach(QQuickWindow *window){
     QString error;apply(m_library->setting("shortcuts",ShortcutRules::defaults()).toObject(),&error);if(!error.isEmpty()){m_status=error;emit changed();}
 }
 bool UiIntegration::eventFilter(QObject *object,QEvent *event){
-    if(object==m_window&&(event->type()==QEvent::MouseMove||event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonRelease))
-        m_pointerPosition=static_cast<QMouseEvent *>(event)->globalPosition();
+    if(event->type()==QEvent::MouseMove||event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonRelease){
+        auto *owner=qobject_cast<QWindow *>(object);
+        while(owner&&owner!=m_window)owner=owner->transientParent();
+        if(owner){m_pointerPosition=static_cast<QMouseEvent *>(event)->globalPosition();emit pointerMoved(m_pointerPosition);}
+    }
     if(object==m_window&&event->type()==QEvent::PlatformSurface&&
        static_cast<QPlatformSurfaceEvent *>(event)->surfaceEventType()==QPlatformSurfaceEvent::SurfaceCreated)
         updateWindowShadow();
@@ -71,9 +77,23 @@ void UiIntegration::updateWindowShadow(){
 #ifdef Q_OS_WIN
     if(!m_window||!m_window->handle()||QGuiApplication::platformName()!=QStringLiteral("windows"))return;
     const auto window=reinterpret_cast<HWND>(m_window->winId());
+    // Keep Windows' real caption capability for compositor transitions. The
+    // caption is removed from the client geometry in WM_NCCALCSIZE below.
+    // No separate window, screenshot flight, or global Windows setting is used.
+    const auto style=GetWindowLongPtrW(window,GWL_STYLE);
+    const auto desired=style|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX|WS_MAXIMIZEBOX;
+    if(style!=desired&&!m_applyingNativeFrame){
+        m_applyingNativeFrame=true;SetWindowLongPtrW(window,GWL_STYLE,desired);
+        SetWindowPos(window,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
+        m_applyingNativeFrame=false;
+    }
+    const BOOL disableTransitions=m_library&&m_library->setting("qml.reduceMotion",false).toBool();
+    DwmSetWindowAttribute(window,DWMWA_TRANSITIONS_FORCEDISABLED,&disableTransitions,sizeof(disableTransitions));
     const bool active=m_window->isActive()&&m_window->isVisible()&&m_window->visibility()==QWindow::Windowed;
     const DWMNCRENDERINGPOLICY policy=active?DWMNCRP_ENABLED:DWMNCRP_DISABLED;
     DwmSetWindowAttribute(window,DWMWA_NCRENDERING_POLICY,&policy,sizeof(policy));
+    constexpr COLORREF noBorder=0xfffffffe;
+    DwmSetWindowAttribute(window,34,&noBorder,sizeof(noBorder));
     // Extend only the compositor frame; QML keeps its full client area.
     const int edge=active?1:0;const MARGINS margins{edge,edge,edge,edge};
     DwmExtendFrameIntoClientArea(window,&margins);
@@ -103,7 +123,9 @@ void UiIntegration::setWindowGeometry(qreal x,qreal y,qreal width,qreal height){
                 top=m_resizeEdges&Qt::TopEdge?m_nativeResizeAnchor.y()-h:m_nativeResizeAnchor.y();
             }
             if((current.left==left&&current.top==top&&current.right-current.left==w&&current.bottom-current.top==h)||
-               SetWindowPos(handle,nullptr,left,top,w,h,SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOOWNERZORDER))return;
+               SetWindowPos(handle,nullptr,left,top,w,h,SWP_NOZORDER|SWP_NOACTIVATE|SWP_NOOWNERZORDER|(m_window->property("widthSwitchActive").toBool()?SWP_NOCOPYBITS:0))){
+                m_window->requestUpdate();return;
+            }
         }
         endResizeAnchor();
     }
@@ -116,12 +138,13 @@ void UiIntegration::beginResizeAnchor(int edges){
 #ifdef Q_OS_WIN
     RECT r{};
     m_resizeWindow=m_window&&QGuiApplication::platformName()==QStringLiteral("windows")?m_window->winId():0;
-    if(m_resizeWindow&&GetWindowRect(reinterpret_cast<HWND>(m_resizeWindow),&r))
+    if(m_resizeWindow&&GetWindowRect(reinterpret_cast<HWND>(m_resizeWindow),&r)){
         m_nativeResizeAnchor={int(edges&Qt::LeftEdge?r.right:edges&Qt::RightEdge?r.left:(r.left+r.right)/2),int(edges&Qt::TopEdge?r.bottom:r.top)};
-    else m_resizeWindow=0;
+        m_nativeResizeHeight=r.bottom-r.top;
+    }else m_resizeWindow=0;
 #endif
 }
-void UiIntegration::endResizeAnchor(){m_resizeEdges=0;m_resizeWindow=0;}
+void UiIntegration::endResizeAnchor(){m_resizeEdges=0;m_resizeWindow=0;m_nativeResizeHeight=0;}
 QPoint UiIntegration::clampWindowPosition(int x,int y,int width,int height)const{
     auto *screen=QGuiApplication::screenAt(QPoint(x+width/2,y+height/2));
     if(!screen)screen=m_window?m_window->screen():QGuiApplication::primaryScreen();
@@ -194,7 +217,28 @@ void UiIntegration::setShortcutRecording(bool recording){if(m_recording==recordi
 bool UiIntegration::nativeEventFilter(const QByteArray &,void *message,qintptr *result){
 #ifdef Q_OS_WIN
     const auto *event=static_cast<MSG *>(message);
-    if(event->message==WM_ERASEBKGND&&m_window&&m_window->handle()&&event->hwnd==reinterpret_cast<HWND>(m_window->winId())&&m_window->property("miniSwitching").toBool()){
+    if(event->message==WM_WINDOWPOSCHANGING&&m_resizeWindow==WId(event->hwnd)&&m_resizeEdges==Qt::LeftEdge&&m_window&&m_window->property("widthSwitchActive").toBool()){
+        auto *position=reinterpret_cast<WINDOWPOS *>(event->lParam);RECT current{};
+        if(GetWindowRect(event->hwnd,&current)){
+            const auto width=position->flags&SWP_NOSIZE?current.right-current.left:position->cx;
+            position->x=m_nativeResizeAnchor.x()-width;position->y=m_nativeResizeAnchor.y();
+            if(!(position->flags&SWP_NOSIZE))position->cy=m_nativeResizeHeight;
+            position->flags&=~SWP_NOMOVE;
+        }
+        // Let Qt receive the corrected transaction and update its geometry.
+    }
+    if(event->message==WM_NCCALCSIZE&&m_window&&m_window->handle()&&event->hwnd==reinterpret_cast<HWND>(m_window->winId())){
+        auto *rect=event->wParam?&reinterpret_cast<NCCALCSIZE_PARAMS *>(event->lParam)->rgrc[0]:reinterpret_cast<RECT *>(event->lParam);
+        if(IsZoomed(event->hwnd))client_frame::constrainMaximized(event->hwnd,*rect);
+        if(result)*result=0;return true;
+    }
+    if(m_window&&m_window->handle()&&event->hwnd==reinterpret_cast<HWND>(m_window->winId())){
+        // The whole window is a QML client area. Do not let GDI paint the
+        // retained native caption/border during resize or activation.
+        if(event->message==WM_NCPAINT){if(result)*result=0;return true;}
+        if(event->message==WM_NCACTIVATE){if(result)*result=DefWindowProcW(event->hwnd,event->message,event->wParam,-1);return true;}
+    }
+    if(event->message==WM_ERASEBKGND&&m_window&&m_window->handle()&&event->hwnd==reinterpret_cast<HWND>(m_window->winId())&&(m_window->property("miniSwitching").toBool()||m_window->property("widthSwitchActive").toBool())){
         const auto color=m_window->color();const auto brush=CreateSolidBrush(RGB(color.red(),color.green(),color.blue()));
         RECT client{};GetClientRect(event->hwnd,&client);FillRect(reinterpret_cast<HDC>(event->wParam),&client,brush);DeleteObject(brush);
         if(result)*result=1;return true;

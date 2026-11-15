@@ -34,6 +34,8 @@ class LibraryBridge final : public QObject {
     Q_INVOKABLE void play(const QString &id);
     Q_INVOKABLE void playAll();
     Q_INVOKABLE void shuffleAll();
+    Q_INVOKABLE bool enqueueNext(const QStringList &keys);
+    Q_INVOKABLE bool appendQueue(const QStringList &keys);
     Q_INVOKABLE QStringList visibleTrackKeys() const;
     Q_INVOKABLE QVariantMap trackDetails(const QString &id) const;
     Q_INVOKABLE bool saveProfile(const QString &nickname, const QString &description);

@@ -9,13 +9,13 @@ ColumnLayout {
         Layout.alignment: Qt.AlignHCenter
         width: 64; height: 64; radius: 20
         color: Theme.selected
-        UiText { anchors.centerIn: parent; text: "♪"; font.pixelSize: 32; color: Theme.accent }
+        UiText { anchors.centerIn: parent; text: "♪"; basePixelSize: 32; color: Theme.accent }
     }
     UiText {
         Layout.fillWidth: true
         text: heading
         color: Theme.text
-        font.pixelSize: 20
+        basePixelSize: 20
         font.weight: Font.DemiBold
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
@@ -24,7 +24,7 @@ ColumnLayout {
         Layout.fillWidth: true
         text: description
         color: Theme.secondary
-        font.pixelSize: Theme.fontSize
+        basePixelSize:15
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
         lineHeight: 1.5

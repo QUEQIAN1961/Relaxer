@@ -43,7 +43,7 @@ Item {
       RowLayout {
         objectName: "appearanceToolbar"; Layout.fillWidth: true; spacing: 8
         ShellButton { objectName: "appearanceBack"; text: "返回设置"; font.pixelSize: 14; onClicked: page.requestBack() }
-        UiText { Layout.fillWidth: true; Layout.minimumWidth: 0; text: "自定义外观"; color: Theme.text; font.pixelSize: 23; font.weight: Font.DemiBold; elide: Text.ElideRight }
+        UiText { Layout.fillWidth: true; Layout.minimumWidth: 0; text: "自定义外观"; color: Theme.text; basePixelSize: 23; font.weight: Font.DemiBold; elide: Text.ElideRight }
         ShellButton { objectName: "appearanceNewSave"; text: "新建并保存"; font.pixelSize: 14; visible: settingsBridge.appearanceMode >= 3; onClicked: if (settingsBridge.saveAppearance(false)) page.backRequested() }
         ShellButton { objectName: "appearanceOverwriteSave"; text: "覆盖并保存"; font.pixelSize: 14; visible: settingsBridge.appearanceMode >= 3; enabled: settingsBridge.activeAppearanceId.length > 0; onClicked: if (settingsBridge.saveAppearance(true)) page.backRequested() }
         ShellButton { objectName: "appearanceSavePreset"; text: "保存并退出"; font.pixelSize: 14; visible: settingsBridge.appearanceMode < 3; onClicked: if (settingsBridge.saveAppearance(false)) page.backRequested() }
@@ -134,7 +134,7 @@ Item {
                         }
                     }
                 }
-                UiText { Layout.fillWidth: true; text: "同时用于歌曲进度条和音量条；未勾选时使用推荐颜色。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
+                UiText { Layout.fillWidth: true; text: "同时用于歌曲进度条和音量条；未勾选时使用推荐颜色。"; wrapMode: Text.Wrap; color: Theme.secondary; basePixelSize: 14 }
                 RowLayout {
                     Layout.fillWidth: true; spacing: 8
                     ToggleButton {
@@ -229,7 +229,7 @@ Item {
                 }
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
-            UiText { text: "已保存的外观"; color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold }
+            UiText { text: "已保存的外观"; color: Theme.text; basePixelSize: 20; font.weight: Font.DemiBold }
             Repeater {
                 model: settingsBridge.appearances
                 delegate: Rectangle {

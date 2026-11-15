@@ -1,0 +1,53 @@
+"""Bundle the exact MIDI and modified FFmpeg source materials for this release."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import re
+import zipfile
+
+
+def checked(path, expected):
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != expected:
+        raise ValueError('Source archive differs from pinned identity: ' + str(path))
+    return data
+
+
+def assemble(source, build, assets):
+    version = re.search(r'Version\[\]\s*=\s*"([^"]+)"', (source / 'src/phase-c-version.h').read_text())[1]
+    midi = json.loads((build / 'runtime-midi.json').read_text(encoding='utf-8'))
+    ffmpeg = json.loads((build / 'runtime-ffmpeg.json').read_text(encoding='utf-8'))
+    for label in ('MIDI', 'FFmpeg'):
+        destination = assets / f'Relaxer-V{version}-{label}-Source.zip'
+        with zipfile.ZipFile(destination, 'x', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            prefix = destination.stem + '/'
+            if label == 'MIDI':
+                for key in ('fluidsynth', 'gcem', 'soundfont'):
+                    entry = midi[key]
+                    archive.writestr(prefix + 'archives/' + entry['archive'], checked(source / '.dependencies/downloads' / entry['archive'], entry['sha256']))
+                for name in ('scripts/prepare-midi-runtime.py', 'resources/midi-dependencies.json', 'docs/MIDI-BASS.md'):
+                    archive.write(source / name, prefix + name)
+                archive.write(build / 'runtime-midi.json', prefix + 'runtime-midi.json')
+                archive.writestr(prefix + 'BUILD.md', 'Use the matching application Source.zip. Put archives under .dependencies/downloads, then run python scripts/prepare-midi-runtime.py. Original component licenses are inside their source archives.\n')
+            else:
+                spec = json.loads((source / 'resources/ffmpeg-dash-runtime.json').read_text(encoding='utf-8'))
+                name = 'ffmpeg-' + spec['version'] + '.tar.xz'
+                archive.writestr(prefix + 'archives/' + name, checked(source / '.dependencies/downloads' / name, spec['sha256']))
+                for name in ('scripts/prepare-dash-ffmpeg.py', 'resources/ffmpeg-dash-runtime.json', 'docs/third-party/ffmpeg/dash-cancel.patch', 'docs/third-party/ffmpeg/README.md'):
+                    archive.write(source / name, prefix + name)
+                for name in ('config.h', 'config.mak', 'runtime-ffmpeg.json'):
+                    archive.write(source / '.dependencies/ffmpeg' / name, prefix + name)
+                archive.write(source / 'LICENSE', prefix + 'LICENSE')
+                archive.writestr(prefix + 'README.md', 'FFmpeg ' + spec['version'] + '\n\nUse the matching Relaxer Source.zip and the MSYS2 FFmpeg ABI described by runtime-ffmpeg.json. Put the verified archive under .dependencies/downloads and run python scripts/prepare-dash-ffmpeg.py --msys2 C:/Software/MSYS2. The script applies the included patch and builds only avformat against the matching installed avcodec/avutil. config.h and config.mak record the actual release configuration. See docs/third-party/ffmpeg/README.md and the upstream archive for original copyrights and licenses. Unmodified base dependency sources are available with Relaxer V0.2.2-GA.\n')
+                if checked(build / 'avformat-63.dll', ffmpeg['binarySHA256']) != (source / '.dependencies/ffmpeg/avformat-63.dll').read_bytes():
+                    raise ValueError('Modified FFmpeg build provenance mismatch')
+        print(destination.name)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    for name in ('source', 'build', 'assets'):
+        parser.add_argument('--' + name, type=Path, required=True)
+    args = parser.parse_args()
+    assemble(args.source.resolve(), args.build.resolve(), args.assets.resolve())

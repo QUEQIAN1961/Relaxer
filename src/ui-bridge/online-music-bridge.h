@@ -23,6 +23,8 @@ public:
 class OnlineMusicBridge final:public QObject {
     Q_OBJECT
     Q_PROPERTY(bool loggedIn READ loggedIn NOTIFY changed)
+    Q_PROPERTY(QString membership READ membership NOTIFY changed)
+    Q_PROPERTY(bool vip READ vip NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(bool catalogLoading READ catalogLoading NOTIFY changed)
     Q_PROPERTY(QString nickname READ nickname NOTIFY changed)
@@ -35,12 +37,14 @@ class OnlineMusicBridge final:public QObject {
     Q_PROPERTY(QVariantMap currentPlaylist READ currentPlaylist NOTIFY changed)
     Q_PROPERTY(QString quality READ quality WRITE setQuality NOTIFY changed)
 public:
-    OnlineMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel *lyrics,ai::AiRuntime *ai,OnlineArtworkCache *artwork,QObject *parent=nullptr);
+    OnlineMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel *lyrics,ai::AiRuntime *ai,OnlineArtworkCache *artwork,QObject *parent=nullptr,QNetworkAccessManager *transport=nullptr);
     ~OnlineMusicBridge() override;
     bool loggedIn() const{return m_loggedIn;}
     bool busy() const{return !m_pageCache.quiet()&&(!m_requests.isEmpty()||m_aiTask!=0);}
     bool catalogLoading() const{return m_pageCache.pending();}
     QString nickname() const{return m_nickname;}
+    QString membership()const{return m_membership;}
+    bool vip()const{return m_loggedIn&&!m_membership.isEmpty()&&m_membership!=QStringLiteral("普通账号");}
     QUrl avatarUrl() const{return m_avatarUrl;}
     QString status() const{return m_status;}
     QString qrImage() const{return m_qrImage;}
@@ -65,24 +69,29 @@ public:
     Q_INVOKABLE void recommend();
     Q_INVOKABLE void playSong(const QString &id);
     void playSongs(const QStringList &ids,const QString &start);
+    Q_INVOKABLE bool batchSongs(const QStringList &ids,const QString &action);
     void savePinnedPlaylist(const QString &id){m_pageCache.savePinned("playlist:"+id);}
     Q_INVOKABLE void cancelRecommendation();
     void toggleFavorite(qint64 internalId);
     static constexpr qint64 TrackBase=1000000000000LL;
 signals:
+    void playlistMissing(const QString &id);
+    void loginCompleted();
     void changed();
     void songsChanged();
     void downloadReady(const QVariantMap &song,const QUrl &url,const QString &extension);
     void downloadFailed(const QVariantMap &song,const QString &error);
 private:
+    QVector<Track> tracksFor(const QStringList &ids);
     Library *m_library;PlaybackFacade *m_facade;LyricsModel *m_lyrics;ai::AiRuntime *m_ai;
     OnlineArtworkCache *m_artwork;
     OnlinePageCache m_pageCache;bool m_forcePage=false;QTimer m_pageCommit;
-    QNetworkAccessManager m_network;MusicCookieJar *m_cookies;
+    QNetworkAccessManager m_network;QNetworkAccessManager *m_transport;MusicCookieJar *m_cookies;
     QSet<QNetworkReply *> m_requests;
     QPointer<QNetworkReply> m_loginPoll;
     QTimer m_poll;
     QUrl m_avatarUrl;
+    QString m_membership;
     QString m_nickname,m_status=QStringLiteral("连接网易云账号，发现更多音乐"),m_qrImage,m_qrKey,m_quality="hires";
     QString m_userId,m_deviceId;bool m_loggedIn=false,m_activated=false;
     QVariantList m_songs,m_playlists,m_searchResults;QHash<QString,QVariantMap> m_collections;QHash<qint64,QVariantMap> m_catalog;

@@ -20,6 +20,7 @@ QRectF sceneBounds(QQuickItem *item) {
 }
 bool click(QQuickWindow *window, QQuickItem *item, QPointF local = QPointF(-1, -1)) {
     if (!window || !item || !item->isVisible() || !item->isEnabled() || item->width() <= 0 || item->height() <= 0) return false;
+    c4c5_fixture::reveal(item);
     if (local.x() < 0) local = QPointF(item->width() / 2, item->height() / 2);
     const auto point = item->mapToScene(local).toPoint();
     if (!QRect(QPoint(), window->size()).contains(point)) return false;
@@ -82,7 +83,7 @@ private slots:
         QList<QQuickItem *> all;std::function<void(QQuickItem *)> collect=[&](QQuickItem *item){all.append(item);for(auto *child:item->childItems())collect(child);};collect(sidebar);
         const QRegularExpression navigationButton("^navigation[0-9]+$");
         for (auto *object : all) if (navigationButton.match(object->objectName()).hasMatch()) ++navigationCount;
-        QCOMPARE(navigationCount, 5);
+        QCOMPARE(navigationCount, 6);
         for (int index = 0; index < names.size(); ++index) {
             auto *button = visual(sidebar, "navigation" + QString::number(index)); QVERIFY(button);
             QCOMPARE(button->property("text").toString(), names[index]);
@@ -94,7 +95,7 @@ private slots:
         auto *bar = visual(content, "playerBar"); auto *cover = visual(content, "bottomCover");
         auto *title = visual(content, "currentTitle"); auto *center = visual(content, "playerCenter");
         QVERIFY(bar); QVERIFY(cover); QVERIFY(title); QVERIFY(center);
-        QCOMPARE(bar->height(), 98.*.9); QCOMPARE(cover->size(), QSizeF(66.2, 66.2));
+        QCOMPARE(bar->height(), 98.*.9*.9); QCOMPARE(cover->size(), QSizeF(57.38, 57.38));
         QCOMPARE(sceneBounds(bar).bottom(), qreal(window->height()));
         QVERIFY(sceneBounds(cover).center().x() < window->width() / 3.);
         QVERIFY(sceneBounds(bar).contains(sceneBounds(cover)));
@@ -190,7 +191,7 @@ private slots:
         const auto queue = f.shell->facade()->queue().items;
         const auto compact = sceneBounds(panel);
         QVERIFY(qAbs(compact.right() - (window->width() - 11)) < 2);
-        QVERIFY(qAbs(compact.bottom() - (window->height() - 11)) < 2);
+        QVERIFY(qAbs(compact.bottom() - (window->height() - 7)) < 2);
         const auto expected = f.shell->facade()->upcoming(); QVERIFY(!expected.isEmpty());
         QTRY_COMPARE(forecast->ids(), expected);
         QSignalSpy activated(forecast, &UpcomingModel::aboutToActivate);
@@ -203,7 +204,7 @@ private slots:
         // can reach its endpoint before the incoming panel animation finishes.
         QTRY_VERIFY_WITH_TIMEOUT(!panel->property("relocating").toBool(), 1200);
         QTRY_VERIFY(qAbs(sceneBounds(panel).left() - 8.) < 2);
-        QTRY_VERIFY_WITH_TIMEOUT(qAbs(sceneBounds(panel).bottom() - (window->height() - 8)) < 2, 1200);
+        QTRY_VERIFY_WITH_TIMEOUT(qAbs(sceneBounds(panel).bottom() - (window->height() - 7)) < 2, 1200);
         QVERIFY(panel->property("expandedPlayer").toBool());
         const auto expandedExpected = f.shell->facade()->upcoming(); QVERIFY(!expandedExpected.isEmpty());
         QTRY_COMPARE(forecast->ids(), expandedExpected);

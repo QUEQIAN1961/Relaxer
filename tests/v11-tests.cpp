@@ -134,7 +134,7 @@ class V11Tests : public QObject {
         auto key = PlayerShortcuts::nativeKey(QKeySequence("Ctrl+Alt+Up"));
         QCOMPARE(key.modifiers, 3u);
         QCOMPARE(key.key, 0x26u);
-        QCOMPARE(PlayerShortcuts::nativeKey(QKeySequence("Ctrl+Num+1")).key, 0u);
+        QCOMPARE(PlayerShortcuts::nativeKey(QKeySequence("Ctrl+Num+1")).key, 0x61u);
     }
     void globalRegistrationRollbackAndLifetime() {
         QWidget window;

@@ -187,7 +187,7 @@ bool FluidMidiBackend::open(const QString &path,bool decodeOnly) {
     if(m->api.write(m->synth,64,m->pendingPcm.data(),0,2,m->pendingPcm.data(),1,2)!=0)
         return m->fail("open",QStringLiteral("无法初始化 MIDI 采样时钟"));
     if (!decodeOnly) {
-        const auto device=QMediaDevices::defaultAudioOutput();
+        const auto device=m_outputDevice.isNull()?QMediaDevices::defaultAudioOutput():m_outputDevice;
         QAudioFormat format;format.setSampleRate(Rate);format.setChannelCount(2);format.setSampleFormat(QAudioFormat::Int16);
         if (device.isNull() || !device.isFormatSupported(format)) return m->fail("initialize",QStringLiteral("MIDI 输出设备不支持 48 kHz 立体声"));
         m->source=std::make_unique<PcmSource>();m->source->render=[state=m.get()](int count){return state->render(count);};
@@ -219,6 +219,18 @@ bool FluidMidiBackend::seek(qint64 milliseconds) {
 bool FluidMidiBackend::setVolume(int percent) {
     QMutexLocker lock(&m->mutex);m->volume=std::clamp(percent,0,100);
     if (m->synth)m->api.gain(m->synth,.5f*m->volume/100);return true;
+}
+bool FluidMidiBackend::setOutputDevice(const QAudioDevice &device){
+    if(device==m_outputDevice)return true;
+    if(!m->player||m->decodeOnly){m_outputDevice=device;return true;}
+    QAudioFormat format;format.setSampleRate(Rate);format.setChannelCount(2);format.setSampleFormat(QAudioFormat::Int16);
+    if(device.isNull()||!device.isFormatSupported(format))return m->fail("output",QStringLiteral("所选 MIDI 输出设备不支持 48 kHz 立体声"));
+    const auto at=position();const bool resume=m->playing;
+    if(m->sink)m->sink->stop();
+    m->sink=std::make_unique<QAudioSink>(device,format);m->sink->setBufferSize(Rate*4/10);
+    m->playing=false;m_outputDevice=device;
+    if(!seek(at))return false;
+    if(resume)return play();return true;
 }
 bool FluidMidiBackend::close() {const int volume=m->volume;m=std::make_unique<State>();m->volume=volume;return true;}
 qint64 FluidMidiBackend::position() const {

@@ -9,6 +9,7 @@ PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent, Library 
     : QObject(parent), m_facade(facade), m_library(library) {
     Q_ASSERT(facade && facade->thread() == thread());
     m_muted = facade->volume() == 0;
+    connect(facade,&PlaybackFacade::audioOutputsChanged,this,&PlaybackBridge::audioOutputsChanged);
     if (m_muted && library)
         m_muteRestoreVolume = qBound(0, library->setting("qml.muteRestoreVolume", 0).toInt(), 100);
     connect(facade, &PlaybackFacade::snapshotChanged, this, [this] { refresh(); });
@@ -37,6 +38,12 @@ PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent, Library 
     // QObject destruction, so use that lifetime notification as well.
     connect(facade->backend(), &QObject::destroyed, this, invalidate);
     refresh();
+}
+void PlaybackBridge::playHistory(const QVariantMap &row){
+    if(!m_facade)return;
+    if(!row.value("cloud").toBool()){m_facade->play({row.value("trackId").toString().toLongLong()});return;}
+    Track track;track.id=row.value("trackId").toString().toLongLong();track.hash=row.value("hash").toString();track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.album=row.value("album").toString();track.cover=row.value("cover").toString();track.duration=row.value("duration").toLongLong();track.onlineMetadata=QJsonObject::fromVariantMap(row.value("metadata").toMap());
+    if(track.id>0)m_facade->playOnline({track},track.id);
 }
 void PlaybackBridge::refresh() {
     Q_ASSERT(QThread::currentThread() == thread());
@@ -67,11 +74,18 @@ void PlaybackBridge::refresh() {
     if (previousCover != m_coverUrl || previousRevision != m_artworkRevision) emit artworkChanged();
     if (previous.playing != next.playing) emit playingChanged();
     if (previous.position != next.position || previous.duration != next.duration) emit progressChanged();
+    if (previous.buffered != next.buffered) emit bufferChanged();
     if (previous.volume != next.volume) emit volumeChanged();
     if (previous.mode != next.mode) emit modeChanged();
-    if (previous.seekable != next.seekable || previous.duration != next.duration || wasPlayable != m_canPlay ||
+    if (previous.track.onlineMetadata.value("preview")!=next.track.onlineMetadata.value("preview") || previous.video != next.video || previous.videoFrameReady!=next.videoFrameReady || previous.onlineVideoVisible!=next.onlineVideoVisible || previous.seekable != next.seekable || previous.duration != next.duration || wasPlayable != m_canPlay ||
         previous.track.id != next.track.id || wasAvailable != m_available) emit capabilitiesChanged();
     if (wasAvailable != m_available) emit availableChanged();
+}
+QVariantList PlaybackBridge::bufferedRanges() const {
+    QVariantList ranges;
+    for (const auto &range : m_state.buffered.intervals())
+        ranges.append(QVariantMap{{"start", range.start()}, {"end", range.end()}});
+    return ranges;
 }
 void PlaybackBridge::toggle() {
     Q_ASSERT(QThread::currentThread() == thread());
@@ -99,7 +113,12 @@ void PlaybackBridge::playUpcoming(int index) {
 }
 void PlaybackBridge::toggleFavorite() {
     if (!available() || !m_library || !hasTrack()) return;
-    if(m_facade->onlineActive()){emit onlineFavoriteRequested(m_state.track.id);return;}
+    if(m_facade->onlineActive()){
+        if(m_state.track.hash.startsWith("kugou:")||m_state.track.hash.startsWith("qishui:")||m_state.track.hash.startsWith("bilibili:")){
+            setError("该平台当前接入暂不支持修改账号收藏");return;
+        }
+        emit onlineFavoriteRequested(m_state.track.id);return;
+    }
     const auto track = m_library->track(m_state.track.id);
     if (track.id && !m_library->favorite(track.id, !track.favorite)) emit persistenceFailure(m_library->lastError());
 }

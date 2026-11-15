@@ -5,14 +5,21 @@ import QtQuick.Dialogs
 import "../theme"
 Item {
     id:table
+    Layout.topMargin:-6
     required property var trackModel
     property string selectedKey:"0"
     property string currentKey:"0"
-    readonly property int headerHeight:30
+    readonly property int headerHeight:Math.max(24,Math.round(21*Theme.fontScale))
     property bool statisticsMode:false
     property bool cloudMode:false
+    property bool allowDownload:true
+    property bool playlistMode:false
+    property Item scrollingHeader:null
+    readonly property Item headerHost:list.headerItem?list.headerItem.host:null
+    readonly property bool showCovers:!playlistMode||settingsBridge.values.playlistCovers
     property var downloadState:function(key){return false}
     signal downloadRequested(string key)
+    signal endReached()
     property string emptyHeading:"没有找到歌曲"
     property string emptyDescription:"导入你喜欢的音乐，开始慢慢听。"
     property bool bulkMode:false
@@ -64,10 +71,12 @@ Item {
     }
     function sizeText(bytes){const n=Number(bytes||0);return n>=1073741824?(n/1073741824).toFixed(1)+" GB":n>=1048576?(n/1048576).toFixed(1)+" MB":n>=1024?(n/1024).toFixed(0)+" KB":n+" B"}
     function timeText(ms){const s=Math.floor(Number(ms)/1000);return Math.floor(s/60)+":"+(s%60<10?"0":"")+s%60}
-    ColumnLayout{
-        anchors.fill:parent;spacing:0
+    Item{
+        anchors.fill:parent
+        Rectangle {x:0;y:headings.y;width:parent.width;height:table.headerHeight+1;z:2;visible:!!table.scrollingHeader;color:Theme.background}
         Row{
-            Layout.fillWidth:true;Layout.preferredHeight:table.headerHeight;height:table.headerHeight
+            id:headings;z:3;width:parent.width;height:table.headerHeight
+            y:table.scrollingHeader?Math.max(0,list.headerItem.y+list.headerItem.height-list.contentY-table.headerHeight-1):0
             Repeater{
                 model:table.columnLabels
                 delegate:Item{
@@ -78,7 +87,7 @@ Item {
                     readonly property int sortKey:[0,0,1,2,3,4,table.statisticsMode?5:8,6][index]
                     readonly property bool sortable:index>=2
                     HoverHandler {id:headingHover}
-                    UiText {id:headingText;fontRegion:"songs";anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:parent.sortable?26:8;text:table.bulkMode&&index===0?"选择":modelData;color:Theme.secondary;font.pixelSize:13;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
+                    UiText {id:headingText;fontRegion:"songs";anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:parent.sortable?26:8;text:table.bulkMode&&index===0?"选择":modelData;color:Theme.secondary;basePixelSize:13;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
                     Symbol {
                         objectName:"trackSort-"+index;visible:parent.sortable&&headingHover.hovered
                         x:Math.min(parent.width-width-8,headingText.x+Math.min(headingText.implicitWidth,headingText.width)+5);anchors.verticalCenter:parent.verticalCenter;width:14;height:18
@@ -96,17 +105,30 @@ Item {
                 }
             }
         }
-        Rectangle{Layout.fillWidth:true;height:1;color:Theme.border}
+        Rectangle{y:headings.y+table.headerHeight;width:parent.width;height:1;color:Theme.border;z:3}
         ListView{
-            id:list;objectName:"trackListView";Layout.fillWidth:true;Layout.fillHeight:true
+            id:list;objectName:"trackListView";
+            onAtYEndChanged:if(atYEnd&&contentHeight>height)table.endReached()
+            onMovementEnded:if(atYEnd&&contentHeight>height)table.endReached()
+width:parent.width;y:table.scrollingHeader?0:table.headerHeight+1;height:parent.height-y
+            header:Item {
+                id:listHeader;readonly property alias host:scrollingHeaderHost;width:list.width;height:table.scrollingHeader?table.scrollingHeader.implicitHeight+table.headerHeight+1:0
+                Item {id:scrollingHeaderHost;width:parent.width;height:table.scrollingHeader?table.scrollingHeader.implicitHeight:0}
+            }
             model:table.trackModel;reuseItems:true;cacheBuffer:132;clip:true;spacing:0;boundsBehavior:Flickable.StopAtBounds
-            ScrollBar.vertical:ScrollBar{}
+            ScrollBar.vertical:ListScrollBar {
+                parent:table;hoverTarget:list
+                x:list.width-width;y:headings.y+table.headerHeight+1
+                height:Math.max(0,table.height-y)
+            }
             SmoothWheelHandler { id:listWheel;flickable:list;onWheelRequested:event=>table.wheelRequested(event) }
             delegate:HighlightSurface{
                 id:row;objectName:"trackDelegate"
                 required property int index
                 required property string trackKey
                 required property string title
+                required property bool videoTrack
+                required property bool requiresSubscription
                 required property string artist
                 required property string album
                 required property real duration
@@ -119,7 +141,7 @@ Item {
                 property real rowPlays:Number(plays)
                 property real rowSize:Number(fileSize)
                 property string rowAdded:importedAt
-                width:list.width;height:66;radius:8
+                width:list.width;height:table.showCovers?Math.max(66,Theme.controlHeight+24):Math.max(32,Math.round(36*Theme.fontScale));radius:8
                 positionRevision:list.contentY+row.y;selected:table.checkedKeys.indexOf(trackKey)>=0||table.selectedKey===trackKey;hovered:rowHover.hovered
                 // A passive handler keeps row hover when a child button takes
                 // the pointer; revealing that button must not hide it again.
@@ -140,7 +162,7 @@ Item {
                         width:table.columnWidths[0];height:parent.height
 
                         CheckBox{visible:table.bulkMode;anchors.centerIn:parent;checked:table.checkedKeys.indexOf(row.trackKey)>=0;onClicked:table.toggleKey(row.trackKey)}
-                        UiText { objectName:"trackNumber-"+row.trackKey;fontRegion: "songs";visible:!table.bulkMode&&!rowHover.hovered&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;font.pixelSize: 13}
+                        UiText { objectName:"trackNumber-"+row.trackKey;fontRegion: "songs";visible:!table.bulkMode&&!rowHover.hovered&&table.currentKey!==row.trackKey;anchors.centerIn:parent;text:row.index+1;color:Theme.secondary;basePixelSize: 13}
                         IconButton{objectName:"trackPlayback-"+row.trackKey;visible:!table.bulkMode&&(rowHover.hovered||table.currentKey===row.trackKey);anchors.centerIn:parent;width:30;height:30;padding:3;horizontalPadding:3;verticalPadding:3;symbol:table.currentKey===row.trackKey&&playbackBridge.playing?"pause":"play";tint:table.currentKey===row.trackKey?Theme.accent:Theme.secondary;onClicked:if(table.currentKey===row.trackKey)playbackBridge.toggle();else table.playRequested(row.trackKey)}
                     }
                     Item{width:table.columnWidths[1];height:parent.height;visible:width>0;clip:true;
@@ -148,8 +170,16 @@ IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;widt
                     Item{
                         width:table.columnWidths[2];height:parent.height
 
-                        Artwork{x:6;anchors.verticalCenter:parent.verticalCenter;width:40;height:40;file:row.rowCover;seed:row.title;resolution:128;radius:6}
-                        UiText { fontRegion: "songs";x:56;width:parent.width-62;anchors.verticalCenter:parent.verticalCenter;text:row.title;textFormat:Text.PlainText;color:table.currentKey===row.trackKey?Theme.accent:Theme.text;font.pixelSize: 15;font.weight:Font.DemiBold;elide:Text.ElideRight}
+                        id:titleCell
+                        readonly property real textLeft:table.showCovers?(row.videoTrack?40*4/3+16:56):8
+                        Artwork{objectName:"trackCover-"+row.trackKey;visible:table.showCovers;x:6;anchors.verticalCenter:parent.verticalCenter;width:row.videoTrack?40*4/3:40;height:40;videoCover:row.videoTrack;file:row.rowCover;seed:row.title;resolution:128;radius:6}
+                        UiText {id:songTitle;objectName:"trackTitle-"+row.trackKey;fontRegion:"songs";x:titleCell.textLeft;width:Math.max(0,parent.width-x-8-(vip.visible?vip.width+6:0));anchors.verticalCenter:parent.verticalCenter;text:row.title;textFormat:Text.PlainText;color:table.currentKey===row.trackKey?Theme.accent:Theme.text;basePixelSize:15;font.weight:Font.DemiBold;elide:Text.ElideRight}
+                        Rectangle {
+                            id:vip;objectName:"trackVip-"+row.trackKey;visible:row.requiresSubscription&&settingsBridge.values.showSongVip
+                            x:Math.max(titleCell.textLeft,Math.min(titleCell.width-width-8,songTitle.x+songTitle.implicitWidth+6));anchors.verticalCenter:parent.verticalCenter
+                            width:Math.ceil(27*Theme.fontScale);height:Math.ceil(15*Theme.fontScale);radius:3;color:"transparent";border.color:"#c69545"
+                            UiText {anchors.centerIn:parent;text:"VIP";basePixelSize:10;color:"#c69545"}
+                        }
                     }
                     Repeater{
                         model:table.statisticsMode?4:5
@@ -157,7 +187,7 @@ IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;widt
                             required property int index
                             width:table.columnWidths[index+3];height:row.height;visible:width>0;clip:true
 
-                            UiText { fontRegion: "songs";anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:8;text:index===0?row.artist:index===1?row.album:index===2?table.timeText(row.duration):index===3?table.statisticsMode?row.rowPlays:table.sizeText(row.rowSize):row.rowAdded.length?row.rowAdded.slice(0,10):"—";textFormat:Text.PlainText;color:Theme.secondary;font.pixelSize: 14;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
+                            UiText { fontRegion: "songs";anchors.fill:parent;anchors.leftMargin:8;anchors.rightMargin:8;text:index===0?row.artist:index===1?row.album:index===2?table.timeText(row.duration):index===3?table.statisticsMode?row.rowPlays:table.sizeText(row.rowSize):row.rowAdded.length?row.rowAdded.slice(0,10):"—";textFormat:Text.PlainText;color:Theme.secondary;basePixelSize: 14;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight}
                         }
                     }
                 }
@@ -173,7 +203,9 @@ IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;widt
         RoundMenuItem {objectName:"findLyrics";visible:!table.cloudMode;text:"查找歌词…";onTriggered:table.lyricsRequested(context.keys)}
         MenuSeparator{visible:!table.cloudMode}
         RoundMenuItem {text:"播放";onTriggered:table.playRequested(context.targetKey)}
-        RoundMenuItem {objectName:"cloudTrackDownload";visible:table.cloudMode;text:context.downloaded?"已下载":"下载";enabled:table.cloudMode&&!onlineDownloads.busy&&!context.downloaded;onTriggered:table.downloadRequested(context.targetKey)}
+        RoundMenuItem {objectName:"trackPlayNext";text:"下一首播放";onTriggered:libraryBridge.enqueueNext(context.keys)}
+        RoundMenuItem {text:"追加播放队列";onTriggered:libraryBridge.appendQueue(context.keys)}
+        RoundMenuItem {objectName:"cloudTrackDownload";visible:table.cloudMode&&table.allowDownload;text:context.downloaded?"已下载":"下载";enabled:table.cloudMode&&!onlineDownloads.busy&&!context.downloaded;onTriggered:table.downloadRequested(context.targetKey)}
         RoundMenuItem {text:"收藏所选歌曲";visible:!table.cloudMode;onTriggered:libraryBridge.applyFavorite(context.keys,true)}
         RoundMenuItem {text:"取消收藏";visible:!table.cloudMode;onTriggered:libraryBridge.applyFavorite(context.keys,false)}
         RoundMenu {

@@ -37,12 +37,11 @@ int runQml(QCoreApplication *app, const relaxer::QmlLaunchOptions *options,
     app->setProperty("relaxerNonInteractiveExit",options->quitAfter>0||!options->screenshot.isEmpty());
     app->setProperty("relaxerInteractiveExit",options->quitAfter==0&&options->screenshot.isEmpty());
     QObject::connect(app, &QCoreApplication::aboutToQuit, &shell, &relaxer::QmlShell::shutdown);
-    if (!shell.load()) {
+    if (!shell.load(options->page)) {
         QTextStream(stderr) << "QML window creation failed: " << shell.warnings().join('\n') << '\n';
         return 10;
     }
     diagnostics->mark("uiLoadedMs");
-    shell.appBridge()->navigate(options->page);
     auto *window = shell.window();
     diagnostics->result["windowObject"] = window->objectName();
     diagnostics->result["title"] = window->title();

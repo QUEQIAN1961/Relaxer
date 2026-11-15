@@ -3,6 +3,7 @@
 #include "appearance-image.h"
 #include "shortcut-rules.h"
 #include "ui-font-config.h"
+#include "disk-cache.h"
 #include <QCryptographicHash>
 #include <QColor>
 #include <QColorDialog>
@@ -19,6 +20,7 @@
 #include <QPalette>
 #include <QSaveFile>
 #include <QSettings>
+#include <QSet>
 #include <QPainterPath>
 #include <QPainter>
 #include <QRegion>
@@ -28,6 +30,10 @@
 #include <cmath>
 
 namespace relaxer {
+static QJsonArray normalizedSidebar(QJsonArray rows){
+    bool history=false;for(const auto &row:rows)if(row.toObject().value("id").toInt()==6)history=true;
+    if(!history)rows.append(QJsonObject{{"id",6},{"visible",true}});return rows;
+}
 namespace {
 // Qt paints the color surfaces itself, so stylesheet radii alone cannot clip
 // their square corners. Keep their painting and input behavior unchanged.
@@ -85,7 +91,7 @@ private:
     QColor m_border;
 };
 QStringList preferenceKeys() {
-    return {"theme", "threshold", "closeToTray", "showLyricTranslation", "playerCoverBackground", "lyricColor", "reduceMotion", "mutedBold", "showFavorites", "songColumnWidths"};
+    return {"theme", "threshold", "closeToTray", "showLyricTranslation", "playerCoverBackground", "lyricColor", "reduceMotion", "animationMode", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "fontSize", "playlistCovers", "playlistHeaderAnimation", "mutedBold", "showFavorites", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode"};
 }
 QColor mixed(const QColor &first, const QColor &second, double amount) {
     return QColor(qRound(first.red() * amount + second.red() * (1 - amount)),
@@ -120,11 +126,12 @@ SettingsBridge::SettingsBridge(Library *library, QObject *parent, SystemThemeRea
     connect(this, &SettingsBridge::settingsChanged, this, &SettingsBridge::invalidateCaches);
     connect(library, &Library::settingsUpdated, this, [this](const QStringList &keys) {
         static const QStringList relevant{"theme", "threshold", "closeToTray", "showLyricTranslation",
-            "playerCoverBackground", "lyricColor", "qml.reduceMotion", "mutedBold", "showFavorites", "songColumnWidths",
-            "shortcuts", "uiFont", "windowWidth", "windowHeight", "windowMaximized", "appearanceHistory"};
+            "playerCoverBackground", "lyricColor", "qml.reduceMotion", "mutedBold", "showFavorites", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode",
+            "qml.animationMode", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "discoveryActionLayout", "fontSize", "playlistCovers", "playlistHeaderAnimation", "shortcuts", "uiFont", "windowWidth", "windowHeight", "windowMaximized", "appearanceHistory"};
         for (const auto &key : keys) if (relevant.contains(key)) { invalidateCaches(); break; }
     });
     resetDraft();
+    DiskCache::trim(library);
     updateFont();
     if (auto *app = qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
         connect(app, &QGuiApplication::paletteChanged, this, [this] {
@@ -144,14 +151,35 @@ QVariantList SettingsBridge::changelog() const {QFile file(":/changelog.json");r
 
 QVariantMap SettingsBridge::values() const {
     if (m_valuesCache) return *m_valuesCache;
+    const int vipMode=m_store.get("vipMarkMode",2).toInt();
     m_valuesCache = QVariantMap{{"theme", m_store.get("theme", 0).toInt()}, {"threshold", m_store.get("threshold", 80).toInt()},
             {"closeToTray", m_store.get("closeToTray", false).toBool()},
             {"showLyricTranslation", m_store.get("showLyricTranslation", true).toBool()},
             {"playerCoverBackground", m_store.get("playerCoverBackground", true).toBool()},
             {"lyricColor", m_store.get("lyricColor", QString()).toString()},
             {"showFavorites", m_store.get("showFavorites", true).toBool()},
-            {"reduceMotion", m_store.get("qml.reduceMotion", false).toBool()},
+            {"reduceMotion", m_store.get("qml.animationMode",m_store.get("qml.reduceMotion",false).toBool()?2:0).toInt()==2},
+            {"animationMode",m_store.get("qml.animationMode",m_store.get("qml.reduceMotion",false).toBool()?2:0).toInt()},
+            {"playbackFade",m_store.get("playbackFade",false).toBool()},
+            {"rememberPosition",m_store.get("rememberPosition",true).toBool()},
+            {"settingsEntryMode",m_store.get("settingsEntryMode",0).toInt()},
+            {"historyEntryMode",m_store.get("historyEntryMode",1).toInt()},
+            {"onlineVideoMode",m_store.get("onlineVideoMode",0).toInt()},
+            {"localVideoMode",m_store.get("localVideoMode",0).toInt()},
+            {"showLocalVideoLyrics",m_store.get("showLocalVideoLyrics",false).toBool()},
+            {"autoExpandVideo",m_store.get("autoExpandVideo",false).toBool()},
+            {"videoBlackBars",m_store.get("videoBlackBars",true).toBool()},
+            {"fontSize",m_store.get("fontSize",15).toInt()},
+            {"playlistCovers",m_store.get("playlistCovers",true).toBool()},
+            {"playlistHeaderAnimation",m_store.get("playlistHeaderAnimation",true).toBool()},
+            {"cacheLimitMB",m_store.get("cacheLimitMB",1024).toInt()},
+            {"discoveryActions",m_store.get("discoveryActions",QJsonArray{"download","next","more"}).toArray().toVariantList()},
+            {"discoveryActionLayout",discoveryActionLayout()},
             {"mutedBold", m_store.get("mutedBold", m_appearance.active().value("mutedBold")).toBool()},
+            {"sidebarSections", normalizedSidebar(m_store.get("sidebarSections", QJsonArray{QJsonObject{{"id",0},{"visible",true}},QJsonObject{{"id",5},{"visible",true}},QJsonObject{{"id",1},{"visible",true}},QJsonObject{{"id",2},{"visible",true}},QJsonObject{{"id",3},{"visible",true}},QJsonObject{{"id",4},{"visible",true}}}).toArray()).toVariantList()},
+            {"sidebarWidth",m_store.get("sidebarWidth",205).toInt()},
+            {"wideWindowWidth",m_store.get("wideWindowWidth",qMax(547,m_store.get("windowWidth",1240).toInt())).toInt()},
+            {"vipMarkMode",vipMode},{"showSongVip",vipMode==0||vipMode==2},{"showAccountVip",vipMode==1||vipMode==2},
             {"songColumnWidths", m_store.get("songColumnWidths", QJsonObject()).toObject().toVariantMap()},
             {"shortcuts", ShortcutRules::withMiniPlayerBinding(m_store.get("shortcuts", ShortcutRules::defaults()).toObject()).toVariantMap()},
             {"uiFont", m_store.get("uiFont", QJsonObject()).toObject().toVariantMap()},
@@ -247,14 +275,38 @@ void SettingsBridge::resetDraft() {
 }
 bool SettingsBridge::edit(const QString &key, const QVariant &value) {
     if (!m_draft.contains(key)) { message("未知设置项"); return false; }
-    m_draft[key] = QJsonValue::fromVariant(value); emit draftChanged(); return true;
+    m_draft[key] = QJsonValue::fromVariant(value);
+    if(key=="reduceMotion")m_draft["animationMode"]=value.toBool()?2:0;
+    if(key=="animationMode")m_draft["reduceMotion"]=value.toInt()==2;
+    emit draftChanged(); return true;
 }
 QString SettingsBridge::validatePreference(const QString &key, const QJsonValue &value) const {
     if (!preferenceKeys().contains(key)) return "未知设置项";
-    if (key == "theme" || key == "threshold") {
+    if(key=="discoveryActions"){
+        if(!value.isArray()||value.toArray().size()>3)return "快捷功能配置无效";
+        QSet<QString> seen;for(const auto &entry:value.toArray()){const auto id=entry.toString();if(!QStringList{"download","next","more"}.contains(id)||seen.contains(id))return "快捷功能配置无效";seen.insert(id);}
+    }else if (key == "theme" || key == "threshold" || key=="animationMode" || key=="cacheLimitMB" || key=="fontSize" || key=="sidebarWidth" || key=="wideWindowWidth" || key=="vipMarkMode" || key=="settingsEntryMode" || key=="historyEntryMode" || key=="onlineVideoMode" || key=="localVideoMode") {
         if (!value.isDouble() || value.toDouble() != value.toInt()) return "设置需要整数";
         if (key == "theme" && (value.toInt() < 0 || value.toInt() > 3)) return "主题超出范围";
         if (key == "threshold" && (value.toInt() < 70 || value.toInt() > 100)) return "有效播放比例应为 70%～100%";
+        if(key=="animationMode"&&(value.toInt()<0||value.toInt()>2))return "动画档位无效";
+        if(key=="cacheLimitMB"&&(value.toInt()<256||value.toInt()>40960))return "缓存上限应为 256～40960 MB";
+        if(key=="fontSize"&&(value.toInt()<12||value.toInt()>20))return "界面字号应为 12～20 px";
+        if(key=="sidebarWidth"&&(value.toInt()<160||value.toInt()>400))return "侧栏宽度应为 160～400 px";
+        if(key=="wideWindowWidth"&&(value.toInt()<547||value.toInt()>32768))return "宽窗口宽度超出范围";
+        if((key=="settingsEntryMode"||key=="historyEntryMode"||key=="onlineVideoMode"||key=="localVideoMode")&&(value.toInt()<0||value.toInt()>1))return "入口位置无效";
+        if(key=="vipMarkMode"&&(value.toInt()<0||value.toInt()>3))return "会员标识档位无效";
+    } else if (key == "sidebarSections") {
+        if (!value.isArray() || (value.toArray().size()!=6&&value.toArray().size()!=7)) return "侧栏配置需要包含全部板块";
+        QSet<int> seen;
+        for (const auto &entry:value.toArray()) {
+            const auto row=entry.toObject(); const auto id=row.value("id");
+            if(!id.isDouble() || id.toDouble()!=id.toInt() || id.toInt()<0 || id.toInt()>6 ||
+               seen.contains(id.toInt()) || !row.value("visible").isBool()) return "侧栏配置无效";
+            if(id.toInt()==3 && m_store.get("settingsEntryMode",0).toInt()==0 && !row.value("visible").toBool()) return "设置入口必须显示";
+            seen.insert(id.toInt());
+        }
+        for(int id=0;id<6;++id)if(!seen.contains(id))return "侧栏配置缺少板块";
     } else if (key == "songColumnWidths") {
         if (!value.isObject()) return "列宽设置无效";
         const QStringList columns{"title", "artist", "album", "duration", "fileSize", "plays", "importDate"};
@@ -278,16 +330,42 @@ QString SettingsBridge::validate(const QJsonObject &value) const {
 bool SettingsBridge::save() {
     const auto error = validate(m_draft); if (!error.isEmpty()) { message(error); return false; }
     auto data = m_draft; data["qml.reduceMotion"] = data.take("reduceMotion");
+    data["qml.animationMode"]=data.take("animationMode");data["qml.reduceMotion"]=data["qml.animationMode"].toInt()==2;
     if (!m_store.setMany(data)) { message(m_library->lastError()); return false; }
     emit settingsChanged(); message("设置已保存"); return true;
 }
 bool SettingsBridge::setPreference(const QString &key, const QVariant &value) {
     const auto encoded = QJsonValue::fromVariant(value);
     const auto error = validatePreference(key, encoded); if (!error.isEmpty()) { message(error); return false; }
-    if (!m_store.set(key == "reduceMotion" ? "qml.reduceMotion" : key, encoded)) { message(m_library->lastError()); return false; }
-    m_draft[key] = encoded; emit draftChanged(); emit settingsChanged(); message({}); return true;
+    if(key=="discoveryActions"){
+        const QStringList keys{"download","next","more"};QVariantList rows;QSet<int> seen;
+        for(const auto &entry:encoded.toArray()){const int id=keys.indexOf(entry.toString());rows.append(QVariantMap{{"id",id},{"visible",true}});seen.insert(id);}
+        for(const auto &entry:discoveryActionLayout()){const int id=entry.toMap().value("id").toInt();if(!seen.contains(id))rows.append(QVariantMap{{"id",id},{"visible",false}});}
+        return saveDiscoveryActionLayout(rows);
+    }
+    const bool stored=key=="animationMode"?m_store.setMany({{"qml.animationMode",encoded},{"qml.reduceMotion",encoded.toInt()==2}}):key=="reduceMotion"?m_store.setMany({{"qml.reduceMotion",encoded},{"qml.animationMode",encoded.toBool()?2:0}}):m_store.set(key,encoded);
+    if (!stored) { message(m_library->lastError()); return false; }
+    if(key=="cacheLimitMB")DiskCache::trim(m_library);
+    m_draft[key] = encoded;
+    if(key=="reduceMotion")m_draft["animationMode"]=encoded.toBool()?2:0;
+    if(key=="animationMode")m_draft["reduceMotion"]=encoded.toInt()==2;
+    emit draftChanged(); emit settingsChanged(); message({}); return true;
 }
 bool SettingsBridge::setTheme(int theme) { return setPreference("theme", theme); }
+QVariantList SettingsBridge::discoveryActionLayout()const{
+    const auto saved=m_store.get("discoveryActionLayout").toArray();if(saved.size()==3)return saved.toVariantList();
+    const QStringList keys{"download","next","more"};const auto actions=m_store.get("discoveryActions",QJsonArray{"download","next","more"}).toArray();QVariantList rows;QSet<int> seen;
+    for(const auto &entry:actions){const int id=keys.indexOf(entry.toString());if(id>=0&&!seen.contains(id)){rows.append(QVariantMap{{"id",id},{"visible",true}});seen.insert(id);}}
+    for(int id=0;id<3;++id)if(!seen.contains(id))rows.append(QVariantMap{{"id",id},{"visible",false}});
+    return rows;
+}
+bool SettingsBridge::saveDiscoveryActionLayout(const QVariantList &rows){
+    if(rows.size()!=3){message("快捷功能配置需要包含全部三个功能");return false;}
+    QSet<int> seen;QJsonArray layout,actions;const QStringList keys{"download","next","more"};
+    for(const auto &entry:rows){const auto row=QJsonObject::fromVariantMap(entry.toMap());const auto id=row.value("id");if(!id.isDouble()||id.toDouble()!=id.toInt()||id.toInt()<0||id.toInt()>2||seen.contains(id.toInt())||!row.value("visible").isBool()){message("快捷功能配置无效");return false;}seen.insert(id.toInt());layout.append(row);if(row.value("visible").toBool())actions.append(keys[id.toInt()]);}
+    if(!m_store.setMany({{"discoveryActionLayout",layout},{"discoveryActions",actions}})){message(m_library->lastError());return false;}
+    m_draft["discoveryActions"]=actions;emit draftChanged();emit settingsChanged();message({});return true;
+}
 bool SettingsBridge::saveWindowState(int width, int height, bool maximized) {
     if (width < 414 || width > 32768 || height < 400 || height > 32768) return false;
     return m_store.setMany({{"windowWidth", width}, {"windowHeight", height}, {"windowMaximized", maximized}});
@@ -295,6 +373,10 @@ bool SettingsBridge::saveWindowState(int width, int height, bool maximized) {
 QVariantMap SettingsBridge::miniWindowPosition()const{return m_store.get("qml.miniPosition",QJsonObject()).toObject().toVariantMap();}
 bool SettingsBridge::saveMiniWindowPosition(int x,int y){return m_store.set("qml.miniPosition",QJsonObject{{"x",x},{"y",y}});}
 bool SettingsBridge::openDataRoot() { return QDesktopServices::openUrl(QUrl::fromLocalFile(dataRoot())); }
+QString SettingsBridge::cacheRoot()const{return DiskCache::root(m_library);}
+QString SettingsBridge::legacyCacheRoot()const{return DiskCache::legacyFiles(m_library).isEmpty()?QString():QDir(m_library->root()).filePath("Online");}
+double SettingsBridge::cacheUsageMB()const{return DiskCache::usage(m_library)/1048576.;}
+bool SettingsBridge::openCacheRoot(){QDir().mkpath(cacheRoot());return QDesktopServices::openUrl(QUrl::fromLocalFile(cacheRoot()));}
 
 void SettingsBridge::updateFont() {
     for(const auto id:m_fontIds)QFontDatabase::removeApplicationFont(id);
@@ -346,7 +428,8 @@ bool SettingsBridge::saveFont(const QUrl &source, const QVariantMap &regions) {
     if (!m_store.set("uiFont", font)) { message(m_library->lastError()); return false; }
     updateFont(); emit settingsChanged(); message("字体已保存"); return true;
 }
-bool SettingsBridge::saveFonts(const QVariantMap &files) {
+bool SettingsBridge::saveFonts(const QVariantMap &files,int fontSize) {
+    if(fontSize!=-1){const auto error=validatePreference("fontSize",fontSize);if(!error.isEmpty()){message(error);return false;}}
     const auto previous=uiFontFiles(m_store.get("uiFont").toObject());
     QJsonObject next;
     for(const auto &region:uiFontRegions()) {
@@ -358,11 +441,14 @@ bool SettingsBridge::saveFonts(const QVariantMap &files) {
         next[region]=file;
     }
     auto configuration=m_store.get("uiFont").toObject();configuration["files"]=next;
-    if(!m_store.set("uiFont",configuration)){message(m_library->lastError());return false;}
+    QJsonObject changes{{"uiFont",configuration}};if(fontSize!=-1)changes["fontSize"]=fontSize;
+    if(!m_store.setMany(changes)){message(m_library->lastError());return false;}
+    if(fontSize!=-1)m_draft["fontSize"]=fontSize;
     updateFont();emit settingsChanged();message("字体已保存");return true;
 }
 bool SettingsBridge::resetFont() {
-    if (!m_store.set("uiFont", QJsonObject())) return false;
+    if (!m_store.setMany({{"uiFont",QJsonObject()},{"fontSize",15}})) return false;
+    m_draft["fontSize"]=15;
     updateFont(); emit settingsChanged(); message("已恢复系统字体"); return true;
 }
 QVariantList SettingsBridge::shortcutActions() const {

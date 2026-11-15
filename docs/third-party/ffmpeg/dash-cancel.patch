@@ -1,0 +1,11 @@
+--- a/libavformat/dashdec.c
++++ b/libavformat/dashdec.c
+@@ -2409,7 +2409,7 @@
+             return FFERROR_REDO;
+         }
+     }
+-    return ret;
++    return ret ? ret : AVERROR_EXIT;
+ }
+ 
+ static int dash_close(AVFormatContext *s)

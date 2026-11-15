@@ -12,7 +12,7 @@
 using namespace c4c5_fixture;
 namespace {
 QRectF bounds(QQuickItem *item){return item->mapRectToScene(QRectF(QPointF(),item->size()));}
-bool click(QQuickWindow *w,QQuickItem *item){if(!item||!item->isVisible()||!item->isEnabled())return false;QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,bounds(item).center().toPoint());return true;}
+bool click(QQuickWindow *w,QQuickItem *item){if(!item||!item->isVisible()||!item->isEnabled())return false;c4c5_fixture::reveal(item);QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,bounds(item).center().toPoint());return true;}
 bool prepare(Fixture &f){
     if(!f.ok)return false;auto *w=f.shell->window();w->showNormal();w->setGeometry(45,50,1240,790);w->requestActivate();
     if(!QTest::qWaitForWindowExposed(w))return false;QTest::qWait(160);f.shell->playbackBridge()->pause();return true;
@@ -39,7 +39,7 @@ private slots:
             }
             auto *search=visual(root,"librarySearchButton");QVERIFY(search);QCOMPARE(search->height(),36.);
             auto *import=visual(root,"importMusicButton");QCOMPARE(bounds(import).center().y(),bounds(search).center().y());
-            auto *stack=visual(root,"pageStack");QVERIFY(stack);QCOMPARE(bounds(stack).top(),22.);
+            auto *stack=visual(root,"pageStack");QVERIFY(stack);QVERIFY(qAbs(bounds(stack).top()-(w->property("captionHeight").toReal()-10))<.01);
             shot(w,size.width()==1240?"01-library":"02-compact-library");
             QVERIFY(click(w,import));
             auto *menu=w->findChild<QObject *>("importDialog");QVERIFY(menu);
@@ -143,7 +143,7 @@ private slots:
                 QTest::qWait(7);
             }
             QVERIFY(departed);QVERIFY(switched);QVERIFY(arrived);
-            QCOMPARE(w->property("upcomingAtLeft").toBool(),open);QVERIFY(qAbs(bounds(panel).bottom()-(w->height()-(open?8:11)))<1);
+            QCOMPARE(w->property("upcomingAtLeft").toBool(),open);QVERIFY(qAbs(bounds(panel).bottom()-(w->height()-(open?8:7)))<1);
         }
         const auto folder=qEnvironmentVariable("RELAXER_UI2_SCREENSHOTS");
         if(!folder.isEmpty()){QFile out(QDir(folder).filePath("upcoming-frames.json"));QVERIFY(out.open(QIODevice::WriteOnly));out.write(QJsonDocument(frames).toJson());}

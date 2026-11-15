@@ -10,7 +10,7 @@ ScrollView {
     contentWidth: availableWidth
     ColumnLayout {
         width: page.availableWidth; spacing: 16
-        UiText { Layout.fillWidth: true; text: "歌词与翻译 · " + playbackBridge.title; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 24; elide: Text.ElideRight }
+        UiText { Layout.fillWidth: true; text: "歌词与翻译 · " + playbackBridge.title; textFormat: Text.PlainText; color: Theme.text; basePixelSize: 24; elide: Text.ElideRight }
         UiText { Layout.fillWidth: true; text: "本地原文和已保存译文直接显示。联网检索、浏览器翻译和可能付费的 AI 翻译均需手动启动。"; color: Theme.secondary; wrapMode: Text.Wrap }
         Flow {
             Layout.fillWidth: true; spacing: 8
@@ -31,7 +31,7 @@ ScrollView {
             visible: translationBridge.preview; Layout.fillWidth: true
             ShellButton { objectName: "saveTranslationButton"; text: "保存双语歌词"; primary: true; onClicked: translationBridge.save() }
             ShellButton { objectName: "discardTranslationButton"; text: "放弃预览"; onClicked: discardConsent.open() }
-            UiText { Layout.fillWidth: true; text: "未保存预览保留在当前会话，切回该歌曲可继续处理。"; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 14 }
+            UiText { Layout.fillWidth: true; text: "未保存预览保留在当前会话，切回该歌曲可继续处理。"; color: Theme.secondary; wrapMode: Text.Wrap; basePixelSize: 14 }
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
         RowLayout {

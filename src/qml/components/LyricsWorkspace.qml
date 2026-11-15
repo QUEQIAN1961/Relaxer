@@ -240,7 +240,7 @@ Page {
             }
             Label { text: "本曲查询时长（毫秒；0 = 未知）"; color: Theme.text }
             EntryField { id: searchDuration; objectName: "lyricsSearchDuration"; Layout.fillWidth: true; readOnly: lyricsSearchBridge.busy; onTextEdited: lyricsSearchBridge.parametersEdited(); selectByMouse: true }
-            UiText { Layout.fillWidth: true; text: "批量开始时冻结来源、滚动与重新匹配选项；每首使用自己的元数据。临时标题、歌手、专辑和片段只用于手动搜索。已有歌词覆盖仍需确认。缓存预览会标明原来源。"; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12 }
+            UiText { Layout.fillWidth: true; text: "批量开始时冻结来源、滚动与重新匹配选项；每首使用自己的元数据。临时标题、歌手、专辑和片段只用于手动搜索。已有歌词覆盖仍需确认。缓存预览会标明原来源。"; wrapMode: Text.Wrap; color: Theme.secondary; basePixelSize: 12 }
             ShellButton { objectName: "lyricsRestoreSearchDefaults"; text: "恢复默认参数与全部来源"; enabled: !lyricsSearchBridge.busy; onClicked: workspace.restoreSearchDefaults() }
         }
     }
@@ -344,13 +344,13 @@ Page {
                             Item {
                                 id: stateSlot; x: 30 * filters.selectionReveal; anchors.verticalCenter: parent.verticalCenter; width: 26; height: 26
                                 SearchSpinner { objectName: "lyricsStateSpinner-" + trackKey; anchors.fill: parent; visible: searchState === "searching"; running: visible }
-                                UiText { objectName: "lyricsStateIcon-" + trackKey; anchors.fill: parent; text: searchState === "complete" ? "✓" : searchState === "choice" ? "⚠" : ""; visible: text.length > 0; color: searchState === "complete" ? "#249c58" : "#d78816"; font.pixelSize: 20; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                UiText { objectName: "lyricsStateIcon-" + trackKey; anchors.fill: parent; text: searchState === "complete" ? "✓" : searchState === "choice" ? "⚠" : ""; visible: text.length > 0; color: searchState === "complete" ? "#249c58" : "#d78816"; basePixelSize: 20; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                             }
                             Column {
                                 objectName: "lyricsTargetText-" + trackKey
                                 x: stateSlot.x + stateSlot.width + 9; anchors.verticalCenter: parent.verticalCenter; width: Math.max(0, parent.width - x); spacing: 4
                                 UiText { width: parent.width; text: title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                                UiText { width: parent.width; text: artist; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
+                                UiText { width: parent.width; text: artist; textFormat: Text.PlainText; color: Theme.secondary; basePixelSize: 13; elide: Text.ElideRight }
                             }
                         }
                         onClicked: { workspace.chooseTarget(trackKey); if (multiSelect.checked) workspace.toggleTrack(trackKey) }
@@ -364,7 +364,7 @@ Page {
                     enabled: lyricsSearchBridge.busy || (workspace.hasTarget && !workspace.taskNeedsAction && workspace.searchKeys().length > 0)
                     onClicked: workspace.startTargetSearch()
                 }
-                UiText { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: 4; elide: Text.ElideRight }
+                UiText { Layout.fillWidth: true; text: lyricsSearchBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; basePixelSize: 13; maximumLineCount: 4; elide: Text.ElideRight }
             }
         }
         ColumnLayout {
@@ -398,7 +398,7 @@ Page {
                     onActivated: lyricsSearchBridge.candidateSource = currentIndex === 0 ? "" : currentText
                 }
             }
-            UiText { Layout.fillWidth: true; text: lyricsSearchBridge.searchContext; visible: text.length > 0; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight }
+            UiText { Layout.fillWidth: true; text: lyricsSearchBridge.searchContext; visible: text.length > 0; textFormat: Text.PlainText; color: Theme.secondary; basePixelSize: 11; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight }
             Label { text: "候选版本"; color: Theme.text; font.weight: Font.DemiBold }
             Rectangle {
                 Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 90
@@ -430,16 +430,16 @@ Page {
                                 RowLayout {
                                     width: parent.width; spacing: 6
                                     UiText { Layout.fillWidth: true; text: title; textFormat: Text.PlainText; color: Theme.text; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                                    UiText { objectName: "lyricsRecommended-" + index; text: "★ 最推荐"; visible: candidateKey === lyricsSearchBridge.recommendedKey; color: Theme.accent; font.pixelSize: 12 }
+                                    UiText { objectName: "lyricsRecommended-" + index; text: "★ 最推荐"; visible: candidateKey === lyricsSearchBridge.recommendedKey; color: Theme.accent; basePixelSize: 12 }
                                 }
-                                UiText { width: parent.width; text: artist + (album.length ? " · " + album : ""); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
-                                UiText { width: parent.width; text: source + (timed ? " · 滚动歌词" : " · 普通歌词"); textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 13; elide: Text.ElideRight }
-                                UiText { width: parent.width; text: matchDetails; textFormat: Text.PlainText; color: Theme.secondary; font.pixelSize: 12; elide: Text.ElideRight }
+                                UiText { width: parent.width; text: artist + (album.length ? " · " + album : ""); textFormat: Text.PlainText; color: Theme.secondary; basePixelSize: 13; elide: Text.ElideRight }
+                                UiText { width: parent.width; text: source + (timed ? " · 滚动歌词" : " · 普通歌词"); textFormat: Text.PlainText; color: Theme.secondary; basePixelSize: 13; elide: Text.ElideRight }
+                                UiText { width: parent.width; text: matchDetails; textFormat: Text.PlainText; color: Theme.secondary; basePixelSize: 12; elide: Text.ElideRight }
                             }
                         }
                         onClicked: { lyricsSearchBridge.selectKey(candidateKey); previewTabs.currentIndex = 0 }
                     }
-                    UiText { anchors.centerIn: parent; width: parent.width - 24; visible: candidates.count === 0; text: lyricsSearchBridge.busy ? "正在查找候选版本…" : "暂无候选版本\n可修改歌名或歌手后搜索，也可以导入或粘贴本地歌词。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 14 }
+                    UiText { anchors.centerIn: parent; width: parent.width - 24; visible: candidates.count === 0; text: lyricsSearchBridge.busy ? "正在查找候选版本…" : "暂无候选版本\n可修改歌名或歌手后搜索，也可以导入或粘贴本地歌词。"; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.secondary; basePixelSize: 14 }
                 }
             }
             RowLayout {
@@ -491,21 +491,21 @@ Page {
                 objectName: "lyricsAiConfigurationStatus"; Layout.fillWidth: true
                 text: aiBridge.activeTranslationStatus + (workspace.hasTarget && translationBridge.classification !== 1
                     ? "\n请先选择“需要翻译”，再启动 AI 翻译。" : "")
-                textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.secondary; font.pixelSize: 12
+                textFormat: Text.PlainText; wrapMode: Text.Wrap; color: Theme.secondary; basePixelSize: 12
             }
             RowLayout {
                 Layout.fillWidth: true; spacing: 6
-                UiText { text: "原文语言"; color: Theme.secondary; font.pixelSize: 13 }
+                UiText { text: "原文语言"; color: Theme.secondary; basePixelSize: 13 }
                 ChoiceBox { id: sourceLanguage; objectName: "lyricsSourceLanguage"; Layout.fillWidth: true; implicitHeight: 30; model: ["自动识别", "英语", "日语"]; font.pixelSize: 13 }
                 ShellButton { implicitHeight:30;text: "取消任务"; visible: translationBridge.pending; onClicked: translationBridge.cancel() }
             }
             RowLayout {
                 Layout.fillWidth: true; visible: translationBridge.pending
                 ProgressBar { Layout.fillWidth: true; from: 0; to: Math.max(1, translationBridge.totalLines); value: translationBridge.completedLines; indeterminate: translationBridge.completedLines === 0 }
-                UiText { text: translationBridge.completedLines + " / " + translationBridge.totalLines; color: Theme.secondary; font.pixelSize: 13 }
+                UiText { text: translationBridge.completedLines + " / " + translationBridge.totalLines; color: Theme.secondary; basePixelSize: 13 }
             }
             ShellButton { Layout.fillWidth: true; implicitHeight: 32; text: "继续人工验证"; visible: translationBridge.state === "NeedsAttention"; onClicked: translationBridge.resume() }
-            UiText { Layout.fillWidth: true; text: translationBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; font.pixelSize: 13; maximumLineCount: workspace.compact ? 2 : 3; elide: Text.ElideRight }
+            UiText { Layout.fillWidth: true; text: translationBridge.status; textFormat: Text.PlainText; color: Theme.secondary; wrapMode: Text.Wrap; basePixelSize: 13; maximumLineCount: workspace.compact ? 2 : 3; elide: Text.ElideRight }
             TabBar {
                 id: previewTabs; objectName: "lyricsPreviewTabs"; Layout.fillWidth: true; implicitHeight: 34
                 SettingsTabButton { text: "歌词原文"; implicitHeight: 34 }
@@ -534,7 +534,7 @@ Page {
         implicitHeight: 28
         RowLayout {
             anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 18
-            UiText { Layout.fillWidth: true; text: lyricsSearchBridge.batchRunning ? "纯音乐处理：剩余 " + lyricsSearchBridge.batchResult.pending + " 首，可点击取消停止后续写入。" : workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; font.pixelSize: 13; wrapMode: Text.Wrap }
+            UiText { Layout.fillWidth: true; text: lyricsSearchBridge.batchRunning ? "纯音乐处理：剩余 " + lyricsSearchBridge.batchResult.pending + " 首，可点击取消停止后续写入。" : workspace.localStatus || (translationBridge.preview ? "译文尚未保存。切换歌曲或关闭窗口后，本次会话仍会保留预览。" : "选择歌曲后查找歌词；当前播放不会改变。"); color: Theme.secondary; basePixelSize: 13; wrapMode: Text.Wrap }
 
         }
     }

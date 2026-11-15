@@ -8,6 +8,8 @@
 #include <QBuffer>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QCollator>
+#include <algorithm>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -98,7 +100,8 @@ bool Library::open(QString *error) {
                        "tracks(id) ON DELETE CASCADE,heard INTEGER DEFAULT 0,duration INTEGER DEFAULT "
                        "0,sought INTEGER DEFAULT 0,counted INTEGER DEFAULT 0,finished INTEGER DEFAULT "
                        "0,started TEXT DEFAULT CURRENT_TIMESTAMP,updated TEXT DEFAULT CURRENT_TIMESTAMP)",
-                       "CREATE INDEX IF NOT EXISTS session_track ON sessions(track)"};
+                       "CREATE INDEX IF NOT EXISTS session_track ON sessions(track)",
+                       "CREATE TABLE IF NOT EXISTS playback_history(id INTEGER PRIMARY KEY,payload TEXT NOT NULL,ended TEXT NOT NULL)"};
     for (const auto &s : sql)
         if (!exec(s)) {
             if (error)
@@ -302,7 +305,7 @@ qint64 Library::insertImportedTrack(const Track &t,bool *added) {
         // Re-import can correct automatic artwork while retaining all user edits and statistics.
         if (!t.coverOrigin.isEmpty() && existing.coverOrigin != "manual" &&
             !(t.coverOrigin == "none" &&
-              (existing.coverOrigin == "embedded" || existing.coverOrigin == "sidecar")) &&
+              (existing.coverOrigin == "embedded" || existing.coverOrigin == "sidecar" || existing.coverOrigin == "video-frame")) &&
             (existing.cover != t.cover || existing.coverOrigin != t.coverOrigin)) {
             if (!exec("UPDATE tracks SET cover=?,cover_origin=? WHERE id=?", {t.cover, t.coverOrigin, id}))
                 return 0;
@@ -363,7 +366,7 @@ bool Library::writablePlaylist(qint64 id) const {
     QSqlQuery query(m_db);query.prepare("SELECT provider FROM playlists WHERE id=?");query.addBindValue(id);if(!query.exec()||!query.next()){m_error="歌单不存在";return false;}if(!query.value(0).toString().isEmpty()){m_error="云端歌单保留平台名称、封面及歌曲顺序";return false;}return true;
 }
 qint64 Library::pinCloudPlaylist(const QString &provider,const QString &remoteId,const QString &name,const QString &cover,int count){
-    if((provider!="netease"&&provider!="qq")||remoteId.trimmed().isEmpty()||name.trimmed().isEmpty())return 0;
+    if((provider!="netease"&&provider!="qq"&&provider!="kugou"&&provider!="qishui"&&provider!="bilibili")||remoteId.trimmed().isEmpty()||name.trimmed().isEmpty())return 0;
     QSqlQuery query(m_db);query.prepare("SELECT id FROM playlists WHERE provider=? AND remote_id=?");query.addBindValue(provider);query.addBindValue(remoteId);
     if(!query.exec())return 0;qint64 id=0;if(query.next())id=query.value(0).toLongLong();query.finish();
     if(id){if(!exec("UPDATE playlists SET name=?,cover=?,remote_count=? WHERE id=?",{name,cover,qMax(0,count),id}))return 0;}
@@ -677,8 +680,9 @@ bool Library::artworkSnapshotMatches(const ArtworkResult &r) const {
 bool Library::applyArtworkRepair(const ArtworkResult &result) {
     m_error.clear();
     if(!artworkMetadataMatches(result)) {m_error="封面目标或来源已变化，本次未保存";return false;}
+    const auto previousOrigin=track(result.id).coverOrigin;
     // No source/invalid image is never permission to discard a valid old cover.
-    if(result.outcome!=ArtworkOutcome::Recovered||result.origin!="embedded"||!result.error.isEmpty()||
+    if(result.outcome!=ArtworkOutcome::Recovered||!(result.origin=="embedded"||(isVideoFile(track(result.id).file)&&(result.origin=="video-frame"||result.origin=="sidecar")))||!result.error.isEmpty()||
        decodeRecoveredArtwork(result.png).isNull()||!managedArtworkSource(m_root,track(result.id))) {
         m_error="没有可安全提交的内嵌封面";return false;
     }
@@ -703,8 +707,8 @@ bool Library::applyArtworkRepair(const ArtworkResult &result) {
            !artworkMetadataMatches(result)||!out.commit()) {m_error="无法原子保存封面缓存，原封面已保留";return false;}
     }
     QSqlQuery q(m_db);
-    q.prepare("UPDATE tracks SET cover=?,cover_origin='embedded' WHERE id=? AND hash=? AND file=? AND cover=? AND cover_origin=''");
-    for(const auto &v:QVariantList{relative,result.id,result.hash,result.trackFile,result.previousCover})q.addBindValue(v);
+    q.prepare("UPDATE tracks SET cover=?,cover_origin=? WHERE id=? AND hash=? AND file=? AND COALESCE(cover,'')=COALESCE(?,'') AND cover_origin=?");
+    for(const auto &v:QVariantList{relative,result.origin,result.id,result.hash,result.trackFile,result.previousCover,previousOrigin})q.addBindValue(v);
     if(!artworkMetadataMatches(result)||!q.exec()||q.numRowsAffected()!=1) {
         m_error=q.lastError().text();if(m_error.isEmpty())m_error="封面目标已变化或资料库拒绝保存";
         if(!existed)QFile::remove(path);
@@ -877,6 +881,41 @@ bool Library::saveSession(Session &s, qint64 delta, int threshold, bool finished
     if (delta || change)
         emit statsChanged();
     return true;
+}
+bool Library::recordPlaybackHistory(const Track &track){
+    if(!track.id)return true;
+    QString source=QStringLiteral("本地");
+    const QStringList prefixes{"netease:","qqmusic:","qishui:","kugou:","bilibili:"};
+    const QStringList platforms{QStringLiteral("网易云音乐"),QStringLiteral("QQ 音乐"),QStringLiteral("汽水音乐"),QStringLiteral("酷狗音乐"),QStringLiteral("哔哩哔哩")};
+    for(int i=0;i<prefixes.size();++i)if(track.hash.startsWith(prefixes[i])){source=QStringLiteral("云端 · ")+platforms[i];break;}
+    QJsonObject metadata;
+    for(const auto &key:QStringList{"id","mid","mediaMid","songType","albumId","audioId","bvid","cid","page","videoTitle","provider"})if(track.onlineMetadata.contains(key))metadata[key]=track.onlineMetadata.value(key);
+    const QJsonObject row{{"trackId",QString::number(track.id)},{"hash",track.hash},{"title",track.title},{"artist",track.artist},{"album",track.album},{"cover",track.cover},{"duration",double(track.duration)},{"source",source},{"cloud",source!=QStringLiteral("本地")},{"video",isVideoTrack(track)},{"metadata",metadata}};
+    if(!exec("INSERT INTO playback_history(payload,ended) VALUES(?,?)",{QString::fromUtf8(QJsonDocument(row).toJson(QJsonDocument::Compact)),QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}))return false;
+    emit playbackHistoryChanged();return true;
+}
+QVariantList Library::playbackHistory(const QString &text,int offset,const QString &sortKey,bool descending)const{
+    QVariantList rows;QSqlQuery query(m_db);
+    // Filter decoded display fields, never raw JSON escapes or playback URLs.
+    if(!query.exec("SELECT id,payload,ended FROM playback_history ORDER BY ended DESC,id DESC"))return rows;
+    const auto needle=text.trimmed();
+    while(query.next()){
+        auto row=QJsonDocument::fromJson(query.value(1).toString().toUtf8()).object().toVariantMap();const auto ended=QDateTime::fromString(query.value(2).toString(),Qt::ISODateWithMs).toLocalTime();
+        row["endedAt"]=ended.toString("yyyy-MM-dd HH:mm");row["historyId"]=query.value(0).toString();row["endedUtc"]=query.value(2).toString();
+        row["platform"]=row.value("source").toString().remove(QStringLiteral("云端 · "));
+        const auto cover=row.value("cover").toString();row["coverUrl"]=cover.isEmpty()?QString():QUrl(cover).scheme().startsWith("http")?cover:QUrl::fromLocalFile(absolute(cover)).toString();
+        row["available"]=row.value("cloud").toBool()||track(row.value("trackId").toString().toLongLong()).id>0;
+        if(!needle.isEmpty()&&!(row.value("title").toString()+" "+row.value("artist").toString()+" "+row.value("album").toString()+" "+row.value("source").toString()+" "+row.value("endedAt").toString()).contains(needle,Qt::CaseInsensitive))continue;
+        rows.append(row);
+    }
+    const auto key=QStringList{"title","artist","platform"}.contains(sortKey)?sortKey:QString("endedUtc");
+    QCollator collator;collator.setNumericMode(true);collator.setCaseSensitivity(Qt::CaseInsensitive);
+    std::stable_sort(rows.begin(),rows.end(),[&](const QVariant &a,const QVariant &b){
+        const auto left=a.toMap().value(key).toString(),right=b.toMap().value(key).toString();
+        const int comparison=key=="endedUtc"?QString::compare(left,right):collator.compare(left,right);
+        return descending?comparison>0:comparison<0;
+    });
+    return rows.mid(qMax(0,offset),100);
 }
 qint64 Library::totalHeard() const {
     QSqlQuery q(m_db);

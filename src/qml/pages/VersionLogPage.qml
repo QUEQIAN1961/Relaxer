@@ -6,13 +6,15 @@ import "../theme"
 Item {
     id:page;objectName:"versionLogPage"
     signal backRequested()
+    LegalNoticeDialog {id:legalNotices;parent:page.Overlay.overlay}
     property int shown:3
     onVisibleChanged: if (visible) { shown=3; scroll.contentItem.contentY=0 }
     ColumnLayout {
         anchors.fill:parent;anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:28;spacing:16
         RowLayout {
             Layout.fillWidth:true
-            UiText {text:"版本日志";font.pixelSize:28;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true}
+            UiText {text:"版本日志";basePixelSize:28;font.weight:Font.DemiBold;color:Theme.text;Layout.fillWidth:true;Layout.minimumWidth:0;elide:Text.ElideRight}
+            ShellButton {objectName:"openLegalNotices";text:"开源许可与致谢";flat:true;onClicked:legalNotices.open()}
             ShellButton{objectName:"versionLogBack";text:"返回设置";flat:true;onClicked:{page.shown=3;page.backRequested()}}
         }
         ScrollView {
@@ -25,8 +27,8 @@ Item {
                     delegate:ColumnLayout {
                         required property var modelData
                         Layout.fillWidth:true;spacing:8
-                        UiText {Layout.fillWidth:true;text:modelData[0]+"  "+modelData[1];textFormat:Text.PlainText;font.weight:Font.DemiBold;font.pixelSize:15;color:Theme.text}
-                        UiText {Layout.fillWidth:true;text:modelData[2];textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.secondary;font.pixelSize: 15}
+                        UiText {Layout.fillWidth:true;text:modelData[0]+"  "+modelData[1];textFormat:Text.PlainText;font.weight:Font.DemiBold;basePixelSize:15;color:Theme.text}
+                        UiText {Layout.fillWidth:true;text:modelData[2];textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.secondary;basePixelSize: 15}
                     }
                 }
                 RowLayout {
@@ -35,7 +37,7 @@ Item {
                     ShellButton{visible:page.shown>3;text:"收起";flat:true;onClicked:page.shown=3}
                     ShellButton{objectName:"versionLogExpand";visible:page.shown<settingsBridge.changelog.length;text:"加载更多";flat:true;onClicked:page.shown+=3}
                 }
-                UiText {text:appBridge.version+" | © QUEQIAN. All rights reserved.";color:Theme.secondary;font.pixelSize: 14}
+                UiText {Layout.fillWidth:true;wrapMode:Text.Wrap;text:appBridge.version+" | Developed by QUEQIAN · GNU GPL v3";color:Theme.secondary;basePixelSize: 14}
             }
         }
     }

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtQuick.Window
 import "../components"
 import "../theme"
 Item {
@@ -14,20 +15,22 @@ Item {
     signal editRequested(string key, string name)
     property bool optionsExpanded:false
     readonly property bool isFavorites:libraryBridge.playlistId==="-1"
-    property real optionsReveal:!Theme.compact||optionsExpanded?1:0
-    Behavior on optionsReveal { NumberAnimation { duration:settingsBridge.values.reduceMotion?0:300;easing.type:Easing.OutCubic } }
+    property real optionsReveal:optionsExpanded?1:0
+    Behavior on optionsReveal { enabled:!(page.Window.window&&page.Window.window.widthSwitchActive);NumberAnimation { duration:settingsBridge.values.reduceMotion?0:300;easing.type:Easing.OutCubic } }
     property real playlistOptionsReveal:page.isPlaylist&&optionsExpanded?1:0
-    Behavior on playlistOptionsReveal { NumberAnimation { duration:settingsBridge.values.reduceMotion?0:300;easing.type:Easing.OutCubic } }
-    readonly property real filtersReveal:page.isPlaylist?playlistOptionsReveal:optionsReveal
+    Behavior on playlistOptionsReveal { enabled:!(page.Window.window&&page.Window.window.widthSwitchActive);NumberAnimation { duration:settingsBridge.values.reduceMotion?0:300;easing.type:Easing.OutCubic } }
+    readonly property real filtersReveal:page.isPlaylist?playlistOptionsReveal:!listActions.wrapped?1:optionsReveal
     readonly property bool isPlaylist: Number(libraryBridge.playlistId)>0
     readonly property var details: libraryBridge.playlistDetails
     readonly property bool isCloud:!!details.cloud
-    readonly property var cloudSource:details.provider==="qq"?qqMusic:onlineMusic
-    function cloudSong(key){if(!isCloud)return ({});const id=String(Number(key)-(details.provider==="qq"?2000000000000:1000000000000));for(const value of cloudSource.songs)if(String(value.id)===id)return value;return ({})}
+    readonly property bool scrollPlaylistHeader:page.isPlaylist&&!settingsBridge.values.playlistHeaderAnimation
+    readonly property var cloudSource:({qq:qqMusic,netease:onlineMusic,qishui:sodaMusic,kugou:kugouMusic,bilibili:bilibili})[details.provider]||onlineMusic
+    function cloudSong(key){if(!isCloud)return ({});const id=String(Number(key)-(details.provider==="qq"?2000000000000:1000000000000));for(const value of cloudSource.songs)if(String(value.internalId||"")===String(key)||String(value.id)===id)return value;return ({})}
     readonly property string shownPlaylist: libraryBridge.playlistId
-    onShownPlaylistChanged: { optionsExpanded=false;search.close();if(trackList)trackList.scrollToStart() }
+    onShownPlaylistChanged: { playlistHeader.collapsed=page.scrollPlaylistHeader;optionsExpanded=false;search.close();if(trackList)trackList.scrollToStart() }
+    onScrollPlaylistHeaderChanged:{playlistHeader.collapsed=page.scrollPlaylistHeader;Qt.callLater(trackList.scrollToStart)}
     function handlePlaylistWheel(event) {
-        if(!page.isPlaylist||!page.visible)return
+        if(!page.isPlaylist||!page.visible||page.scrollPlaylistHeader)return
         const delta=event.pixelDelta.y||event.angleDelta.y
         if(delta<0&&!playlistHeader.collapsed){playlistHeader.collapsed=true;event.accepted=true}
         else if(delta>0&&trackList.atScrollStart&&playlistHeader.collapsed){playlistHeader.collapsed=false;event.accepted=true}
@@ -47,8 +50,8 @@ Item {
             Layout.fillWidth:true;Layout.bottomMargin:Theme.pageHeadingGap-libraryLayout.spacing;spacing:16
             Item {
                 Layout.fillWidth:true;Layout.minimumWidth:0;Layout.preferredHeight:heading.implicitHeight
-                UiText {id:heading;objectName:"libraryHeading";width:Math.min(implicitWidth,Math.max(0,parent.width-(page.isCloud?sourceLabel.width+12:0)));text:libraryBridge.playlistName;font.pixelSize:28;font.weight:Font.DemiBold;color:Theme.text;elide:Text.ElideRight}
-                UiText {id:sourceLabel;objectName:"cloudPlaylistSource";visible:page.isCloud;x:heading.width+12;y:(heading.height-height)/2;width:implicitWidth;text:page.details.provider==="qq"?"QQ 音乐":"网易云音乐";textFormat:Text.PlainText;font.pixelSize:12;color:Theme.secondary}
+                UiText {id:heading;objectName:"libraryHeading";width:Math.min(implicitWidth,Math.max(0,parent.width-(page.isCloud?sourceLabel.width+12:0)));text:libraryBridge.playlistName;basePixelSize:28;font.weight:Font.DemiBold;color:Theme.text;elide:Text.ElideRight}
+                UiText {id:sourceLabel;objectName:"cloudPlaylistSource";visible:page.isCloud;x:heading.width+12;y:(heading.height-height)/2;width:implicitWidth;text:({qq:"QQ 音乐",netease:"网易云音乐",qishui:"汽水音乐",kugou:"酷狗音乐",bilibili:"哔哩哔哩"})[page.details.provider]||"云端";textFormat:Text.PlainText;basePixelSize:12;color:Theme.secondary}
             }
             GlassSearch {
                 id:search;objectName:"librarySearchControl";Layout.preferredWidth:36;Layout.preferredHeight:36
@@ -57,59 +60,74 @@ Item {
             }
             ShellButton { objectName:"importMusicButton";visible:libraryBridge.playlistId==="0";text:page.width<390?"导入":"导入音乐";Accessible.name:"导入音乐";symbol:"plus";onClicked:page.importRequested(this) }
         }
-        PlaylistHeader {
-            id:playlistHeader;visible:page.isPlaylist
-            Layout.fillWidth:true;Layout.preferredHeight:implicitHeight
-            details:page.details;playlistName:libraryBridge.playlistName;hasTracks:libraryModel.count>0
-            reorderEnabled:!page.isCloud && trackList.selectedKeys().length>0 && !libraryModel.filterText && !libraryModel.artistFilter && !libraryModel.albumFilter && libraryModel.sortKey===0 && !libraryModel.descending
-            onPlayRequested:libraryBridge.playAll()
-            onShuffleRequested:libraryBridge.shuffleAll()
-            onPlayModeRequested:mode=>{playbackBridge.setMode(mode);if(mode===3)libraryBridge.shuffleAll();else libraryBridge.playAll()}
-            onOptionsRequested:anchor=>playlistOptions.popup(anchor,0,anchor.height+6)
-            onMoveRequested:direction=>libraryBridge.moveTracksInPlaylist(trackList.selectedKeys(),direction)
-        }
         UiText {
             objectName:"librarySummary";visible:!page.isPlaylist;Layout.fillWidth:true
             text:libraryModel.count+" 首歌曲 · "+page.sizeText(libraryModel.totalFileSize)+(page.isPlaylist?" · "+(page.details.plays||0)+" 次播放":" · 本地音乐资料库")
-            color:Theme.secondary;font.pixelSize: 14
+            color:Theme.secondary;basePixelSize: 14
         }
         Item {
-            id:listActions
-            readonly property bool wrapped:Theme.compact||width<650
-            visible:!page.isPlaylist||page.filtersReveal>0;Layout.fillWidth:true
-            Layout.preferredHeight:page.isPlaylist?secondaryOptions.implicitHeight*page.filtersReveal:Theme.controlHeight+(listActions.wrapped?(secondaryOptions.implicitHeight+10)*page.filtersReveal:0)
-            Row {
-                id:primaryActions;visible:!page.isPlaylist;spacing:8
-                ShellButton {id:playAllAction;objectName:"playAllButton";text:"播放全部";symbol:"play";primary:true;enabled:libraryModel.count>0;onClicked:libraryBridge.playAll()}
-                PlayModeButton {
-                    width:Math.min(160,Math.max(128,listActions.width-playAllAction.width-(Theme.compact?moreOptions.width+16:8)))
-                    enabled:libraryModel.count>0
-                    onPlayRequested:mode=>{playbackBridge.setMode(mode);if(mode===3)libraryBridge.shuffleAll();else libraryBridge.playAll()}
+            id:playlistExtrasSlot;Layout.fillWidth:true
+            visible:!page.scrollPlaylistHeader
+            Layout.preferredHeight:playlistExtras.implicitHeight
+            ColumnLayout {
+                id:playlistExtras;objectName:"playlistExtras"
+                parent:page.scrollPlaylistHeader&&trackList.headerHost?trackList.headerHost:playlistExtrasSlot
+                width:parent.width;height:implicitHeight
+                spacing:libraryLayout.spacing
+                PlaylistHeader {
+                    id:playlistHeader;visible:page.isPlaylist
+                    collapsed:page.scrollPlaylistHeader
+                    Layout.fillWidth:true;Layout.preferredHeight:implicitHeight
+                    details:page.details;playlistName:libraryBridge.playlistName;hasTracks:libraryModel.count>0
+                    reorderEnabled:!page.isCloud && trackList.selectedKeys().length>0 && !libraryModel.filterText && !libraryModel.artistFilter && !libraryModel.albumFilter && libraryModel.sortKey===0 && !libraryModel.descending
+                    onPlayRequested:libraryBridge.playAll()
+                    onShuffleRequested:libraryBridge.shuffleAll()
+                    onPlayModeRequested:mode=>{playbackBridge.setMode(mode);if(mode===3)libraryBridge.shuffleAll();else libraryBridge.playAll()}
+                    onOptionsRequested:anchor=>playlistOptions.popup(anchor,0,anchor.height+6)
+                    onMoveRequested:direction=>libraryBridge.moveTracksInPlaylist(trackList.selectedKeys(),direction)
                 }
-                ShellButton {id:moreOptions;objectName:"moreLibraryOptions";visible:Theme.compact;text:page.optionsExpanded?"收起选项":"更多选项";onClicked:page.optionsExpanded=!page.optionsExpanded}
-            }
-            Item {
-                objectName:"libraryFilterRow"
-                x:page.isPlaylist||listActions.wrapped?0:primaryActions.width+8;y:page.isPlaylist?0:listActions.wrapped?Theme.controlHeight+10:0
-                width:Math.max(0,parent.width-x);height:secondaryOptions.implicitHeight*(page.isPlaylist||Theme.compact?page.filtersReveal:1)
-                clip:true;opacity:page.filtersReveal;enabled:page.isPlaylist?page.optionsExpanded:!Theme.compact||page.optionsExpanded
-                Flow {
-                    id:secondaryOptions;width:parent.width
-                    y:page.isPlaylist||Theme.compact?-implicitHeight*(1-page.filtersReveal):0;spacing:8
-                    ChoiceBox {
-                        objectName:"artistFilter";width:Theme.compact?110:100
-                        model:["全部歌手"].concat(libraryModel.artists)
-                        currentIndex:Math.max(0,model.indexOf(libraryModel.artistFilter));displayText:libraryModel.artistFilter||"歌手"
-                        onActivated:{page.clearBulk();libraryModel.artistFilter=currentIndex>0?currentText:""}
+                Item {
+                    id:listActions
+                    readonly property real fullPlayWidth:fullPlayText.advanceWidth+58
+                    readonly property real inlineWidth:fullPlayWidth+8+160+8+artistFilter.width+8+albumFilter.width+(findLyrics.visible?8+findLyrics.implicitWidth:0)
+                    readonly property bool wrapped:Theme.compact||width<inlineWidth
+                    visible:!page.isPlaylist||page.filtersReveal>0;Layout.fillWidth:true
+                    Layout.preferredHeight:page.isPlaylist?secondaryOptions.implicitHeight*page.filtersReveal:Theme.controlHeight+(listActions.wrapped?(secondaryOptions.implicitHeight+10)*page.filtersReveal:0)
+                    TextMetrics {id:fullPlayText;text:"播放全部";font:playAllAction.font}
+                    Row {
+                        id:primaryActions;visible:!page.isPlaylist;spacing:8
+                        ShellButton {id:playAllAction;objectName:"playAllButton";text:listActions.wrapped&&listActions.width<listActions.fullPlayWidth+112+moreOptions.implicitWidth+16?"播放":"播放全部";Accessible.name:"播放全部";symbol:"play";primary:true;enabled:libraryModel.count>0;onClicked:libraryBridge.playAll()}
+                        PlayModeButton {
+                            width:Math.min(160,Math.max(80,listActions.width-playAllAction.width-(listActions.wrapped?moreOptions.width+16:8)))
+                            enabled:libraryModel.count>0
+                            onPlayRequested:mode=>{playbackBridge.setMode(mode);if(mode===3)libraryBridge.shuffleAll();else libraryBridge.playAll()}
+                        }
+                        ShellButton {id:moreOptions;objectName:"moreLibraryOptions";visible:listActions.wrapped;text:page.optionsExpanded?"收起选项":"更多选项";onClicked:page.optionsExpanded=!page.optionsExpanded}
                     }
-                    ChoiceBox {
-                        objectName:"albumFilter";width:Theme.compact?110:100
-                        model:["全部专辑"].concat(libraryModel.albums)
-                        currentIndex:Math.max(0,model.indexOf(libraryModel.albumFilter));displayText:libraryModel.albumFilter||"专辑"
-                        onActivated:{page.clearBulk();libraryModel.albumFilter=currentIndex>0?currentText:""}
+                    Item {
+                        objectName:"libraryFilterRow"
+                        x:page.isPlaylist||listActions.wrapped?0:primaryActions.width+8;y:page.isPlaylist?0:listActions.wrapped?Theme.controlHeight+10:0
+                        width:Math.max(0,parent.width-x);height:secondaryOptions.implicitHeight*(page.isPlaylist||listActions.wrapped?page.filtersReveal:1)
+                        clip:true;opacity:page.filtersReveal;enabled:page.isPlaylist?page.optionsExpanded:!listActions.wrapped||page.optionsExpanded
+                        Flow {
+                            id:secondaryOptions;width:parent.width
+                            y:page.isPlaylist||listActions.wrapped?-implicitHeight*(1-page.filtersReveal):0;spacing:8
+                            ChoiceBox {
+                                id:artistFilter;objectName:"artistFilter";width:Theme.compact?110:100
+                                model:["全部歌手"].concat(libraryModel.artists)
+                                currentIndex:Math.max(0,model.indexOf(libraryModel.artistFilter));displayText:libraryModel.artistFilter||"歌手"
+                                onActivated:{page.clearBulk();libraryModel.artistFilter=currentIndex>0?currentText:""}
+                            }
+                            ChoiceBox {
+                                id:albumFilter;objectName:"albumFilter";width:Theme.compact?110:100
+                                model:["全部专辑"].concat(libraryModel.albums)
+                                currentIndex:Math.max(0,model.indexOf(libraryModel.albumFilter));displayText:libraryModel.albumFilter||"专辑"
+                                onActivated:{page.clearBulk();libraryModel.albumFilter=currentIndex>0?currentText:""}
+                            }
+                            ShellButton {id:findLyrics;objectName:"findMissingLyrics";visible:!page.isFavorites&&!page.isPlaylist;text:"查找缺失歌词";enabled:!Theme.compact&&libraryModel.count>0;onClicked:page.lyricsRequested(libraryBridge.visibleTrackKeys(),true)}
+                            ShellButton {objectName:"collapsePlaylistFilters";visible:page.isPlaylist;text:"收起";onClicked:page.optionsExpanded=false}
+                        }
                     }
-                    ShellButton {objectName:"findMissingLyrics";visible:!page.isFavorites&&!page.isPlaylist;text:"查找缺失歌词";enabled:!Theme.compact&&libraryModel.count>0;onClicked:page.lyricsRequested(libraryBridge.visibleTrackKeys(),true)}
-                    ShellButton {objectName:"collapsePlaylistFilters";visible:page.isPlaylist;text:"收起";onClicked:page.optionsExpanded=false}
                 }
             }
         }
@@ -117,9 +135,11 @@ Item {
             id:trackList;objectName:"libraryListContainer"
             Layout.fillWidth:true;Layout.fillHeight:true
             trackModel:libraryModel;selectedKey:libraryModel.selectedId;currentKey:playbackBridge.trackId
-            cloudMode:page.isCloud
+            cloudMode:page.isCloud;playlistMode:page.isPlaylist;allowDownload:page.details.provider!=="bilibili"
+            scrollingHeader:page.scrollPlaylistHeader?playlistExtras:null
             downloadState:key=>onlineDownloads.isDownloaded(page.details.provider,page.cloudSong(key))
             onDownloadRequested:key=>{const song=page.cloudSong(key);if(song.id)page.cloudSource.downloadSong(String(song.id))}
+            onEndReached:Qt.callLater(function(){if(page.visible&&page.isCloud&&page.details.provider==="bilibili")bilibili.loadMore()})
             statisticsMode:page.isPlaylist
             emptyHeading:page.isCloud?"没有找到歌曲":appBridge.trackCount===0?"音乐，从这里开始":"没有找到歌曲"
             emptyDescription:page.isCloud?"可调整筛选，或稍后重新打开歌单。":"导入你喜欢的音乐，开始慢慢听。"
@@ -128,12 +148,12 @@ Item {
             onFavoriteRequested:key=>libraryBridge.toggleFavorite(key)
             onLyricsRequested:keys=>page.lyricsRequested(keys,false)
             onBulkChanged:(active,keys)=>page.bulkChanged(active,keys)
-            onScrollYChanged:if(page.isPlaylist&&!trackList.atScrollStart)playlistHeader.collapsed=true
+            onScrollYChanged:if(page.isPlaylist&&!page.scrollPlaylistHeader&&!trackList.atScrollStart)playlistHeader.collapsed=true
             onWheelRequested:event=>page.handlePlaylistWheel(event)
         }
     }
     WheelHandler {
-        target:null;blocking:true;enabled:page.isPlaylist && page.visible
+        target:null;blocking:true;enabled:page.isPlaylist && page.visible&&!page.scrollPlaylistHeader
         onWheel:event=>{event.accepted=false;page.handlePlaylistWheel(event)}
     }
     RoundMenu {

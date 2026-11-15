@@ -10,11 +10,16 @@ namespace relaxer {
 // player asks for the original; current/next thumbnails are cached ahead of time.
 class OnlineArtworkCache final:public QObject {
     Q_OBJECT
+    Q_PROPERTY(QUrl thumbnailCover READ thumbnailCover NOTIFY thumbnailChanged)
 public:
     OnlineArtworkCache(Library *library,PlaybackFacade *facade,QObject *parent=nullptr);
     ~OnlineArtworkCache() override;
     void prepare(Track &track,const QUrl &thumbnail,const QUrl &original,const QString &originalPath);
     void setExpanded(bool expanded);
+    void setPresentationActive(bool active);
+    QUrl thumbnailCover() const;
+signals:
+    void thumbnailChanged();
 private:
     struct Entry {
         QUrl thumbnail,original;QString thumbnailPath,originalPath;
@@ -22,7 +27,7 @@ private:
     };
     Library *m_library;PlaybackFacade *m_facade;QNetworkAccessManager m_network;
     QHash<qint64,Entry> m_entries;QSet<QNetworkReply *> m_requests;QTimer m_prefetch;
-    bool m_expanded=false;
+    bool m_expanded=false,m_presentationActive=true;
     QString bestCover(const Entry &entry) const;
     void prefetch();
     void fetch(qint64 id,bool original);

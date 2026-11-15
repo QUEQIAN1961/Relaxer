@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import QtMultimedia
 import "../components"
 import "../theme"
 Item {
@@ -13,58 +14,124 @@ Item {
     readonly property real wideColumnWidth:Math.max(0,(columns.width-32)/2)
     readonly property real wideCoverSize:Math.max(120,Math.min(360,wideColumnWidth-40,page.height-310))
     function blend(wide,narrow){return wide+(narrow-wide)*reflow}
+    property url previewBackdrop
     property bool fullScreen:false
     property bool metadataTravelling:false
-    property alias metadataTitle:largeTitle
-    property alias metadataArtist:largeArtist
+    readonly property bool localVideo:playbackBridge.video&&!playbackBridge.onlineActive
+    readonly property bool audioVideo:playbackBridge.video&&(playbackBridge.onlineActive?settingsBridge.values.onlineVideoMode===1:settingsBridge.values.localVideoMode===1)
+    readonly property bool pictureVideo:playbackBridge.video&&!audioVideo
+    readonly property bool localLyrics:localVideo&&settingsBridge.values.showLocalVideoLyrics
+    readonly property bool allowVideoPicture:pictureVideo
+    readonly property bool startupVideoPreview:playbackBridge.video&&Window.window&&typeof Window.window.initialVideoPreviewId==="string"&&Window.window.initialVideoPreviewId===playbackBridge.trackId
+    property Item metadataTitle:page.pictureVideo?videoTitle:largeTitle
+    property Item metadataArtist:page.pictureVideo?videoArtist:largeArtist
     property bool artworkTravelling:false
     property real detailsOpacity:1
     property int trackDirection:1
-    property alias largeArtwork:art
+    property Item largeArtwork:page.pictureVideo?videoCover:art
     property bool toolsVisible:false
     property bool delayOpen:false
     readonly property bool presentationActive:visible&&(!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
     function updateArtworkQuality(){playbackBridge.setHighResolutionArtwork(presentationActive&&!artworkTravelling)}
     onPresentationActiveChanged:updateArtworkQuality()
     onArtworkTravellingChanged:updateArtworkQuality()
-    Component.onCompleted:updateArtworkQuality()
+    Component.onCompleted:{partsTrackKey=playbackBridge.trackId;updateArtworkQuality()}
     Component.onDestruction:playbackBridge.setHighResolutionArtwork(false)
+    readonly property var videoParts:{const current=playbackBridge.trackId;return bilibili.videoParts}
+    onVisibleChanged:if(!visible)partsPanel.close()
+    property string partsTrackKey:""
+    Connections {target:playbackBridge;function onTrackChanged(){if(page.partsTrackKey!==playbackBridge.trackId)partsPanel.close();page.partsTrackKey=playbackBridge.trackId}}
     signal collapseRequested()
     signal fullscreenRequested()
     signal translationRequested()
     Rectangle { anchors.fill:parent;color:Theme.background }
     Image {
+        objectName:"playerBackdropPreview";anchors.fill:parent
+        source:page.presentationActive?page.previewBackdrop:""
+        sourceSize.width:96;sourceSize.height:96;fillMode:Image.PreserveAspectCrop
+        asynchronous:false;cache:true
+    }
+    Image {
+        id:playerBackdrop
         objectName:"playerBackdrop"
         anchors.fill:parent
         source:!page.presentationActive ? "" : settingsBridge.values.playerCoverBackground ? "image://relaxer/blur?file="+encodeURIComponent(playbackBridge.coverUrl)+"&seed="+encodeURIComponent(playbackBridge.hasTrack?playbackBridge.title:"Relaxer")+"&rev="+playbackBridge.artworkRevision+"&blur="+Number(settingsBridge.palette.blurExpanded||0) : String(settingsBridge.palette.expandedImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.expandedImage))+"&blur="+Number(settingsBridge.palette.blurExpanded||0):""
         asynchronous:true;cache:false;retainWhileLoading:true
         sourceSize.width:720;sourceSize.height:720;fillMode:Image.PreserveAspectCrop
         visible:source.toString().length>0
+        opacity:status===Image.Ready?1:0
+        Behavior on opacity {NumberAnimation {duration:settingsBridge.values.reduceMotion?0:180}}
     }
     Rectangle{anchors.fill:parent;color:Theme.background;opacity:settingsBridge.values.playerCoverBackground?.68:0}
-    RowLayout {
-        x:page.blend(Theme.pageMargin,0);y:page.blend(28,0);width:parent.width-x-Theme.pageMargin;height:page.blend(36,32);opacity:page.detailsOpacity
-        Item {
-            objectName:"playerCollapse"
-            property string text:Theme.compact?"":"收起"
-            Layout.preferredWidth:Theme.compact?42:wideCollapse.implicitWidth
-            Layout.preferredHeight:Theme.compact?32:36
-            Layout.minimumHeight:Layout.preferredHeight;Layout.maximumHeight:Layout.preferredHeight
-            IconButton {objectName:"compactPlayerCollapse";anchors.fill:parent;visible:Theme.compact;padding:9;symbol:"collapse";tip:"收起播放";onClicked:page.collapseRequested()}
-            ShellButton {id:wideCollapse;anchors.fill:parent;visible:!Theme.compact;text:"收起";flat:true;symbol:"collapse";onClicked:page.collapseRequested()}
-        }
-        Item{Layout.fillWidth:true}
+    readonly property bool partsVisible:partsPanel.visible
+    readonly property bool chromeHovered:wideCollapse.hovered||wideParts.hovered||localVideoSearch.hovered
+    readonly property bool chromeShown:!Window.window||typeof Window.window.playerChromeVisible!=="boolean"||Window.window.playerChromeVisible
+    property real chromeOpacity:chromeShown?1:0
+    Behavior on chromeOpacity {NumberAnimation {duration:settingsBridge.values.reduceMotion?0:180}}
+    ShellButton {
+        id:wideCollapse;objectName:"playerCollapse";visible:!Theme.compact
+        x:Theme.pageMargin;y:28;height:36;flat:true;symbol:"collapse";text:"收起"
+        opacity:page.detailsOpacity*page.chromeOpacity;enabled:opacity>0
+        onClicked:page.collapseRequested()
     }
+    ShellButton {
+        id:wideParts;objectName:"videoPartsEntry";visible:!Theme.compact&&playbackBridge.video&&playbackBridge.onlineActive&&page.videoParts.length>0
+        x:page.width-Theme.pageMargin-width;y:28;height:36;flat:true;text:"选集 · P"+bilibili.currentPart+"/"+page.videoParts.length
+        opacity:page.detailsOpacity*page.chromeOpacity;enabled:opacity>0&&page.videoParts.length>1
+        onClicked:page.toggleParts()
+    }
+    ShellButton {
+        id:localVideoSearch;objectName:"videoLyricsSearch";visible:page.localVideo&&page.pictureVideo&&!Theme.compact
+        x:page.width-Theme.pageMargin-width;y:28;height:36;flat:true;text:"查找歌词";symbol:"search"
+        opacity:page.detailsOpacity*page.chromeOpacity;enabled:opacity>0;onClicked:page.translationRequested()
+    }
+    readonly property real captionHeight:Window.window&&typeof Window.window.captionHeight==="number"?Window.window.captionHeight:25.6
+    readonly property real panelInset:!Theme.compact&&partsPanel.visible?(partsPanel.width+12)*partsPanel.reveal:0
+    function toggleParts(){if(partsPanel.visible)partsPanel.close();else if(videoParts.length>1)partsPanel.open()}
+    Item {
+        id:videoMetadata;objectName:"videoMetadata";visible:page.pictureVideo
+        x:Theme.compact?Theme.pageMargin:Theme.pageMargin+wideCollapse.width+12;y:Theme.compact?page.captionHeight+12:28
+        width:Math.max(0,page.width-x-Theme.pageMargin-(Theme.compact?0:wideParts.visible?wideParts.width+12:localVideoSearch.visible?localVideoSearch.width+12:0))
+        height:Theme.compact?66:36;opacity:page.detailsOpacity
+        Artwork {
+            id:videoCover;objectName:"videoMetadataCover";width:height*16/9;height:parent.height;videoCover:true;coverAspect:16/9;radius:6;resolution:192
+            file:playbackBridge.coverUrl;seed:playbackBridge.title;revision:playbackBridge.artworkRevision
+            contentKey:playbackBridge.trackId;animated:page.visible&&!page.artworkTravelling;opacity:page.artworkTravelling?0:1
+        }
+        UiText {
+            id:videoTitle;objectName:"videoMetadataTitle";x:videoCover.width+12
+            y:Theme.compact?6:(parent.height-height)/2
+            width:Math.max(0,Theme.compact?parent.width-x:Math.min(videoTitleMetrics.advanceWidth+2,(parent.width-x)*.65))
+            text:playbackBridge.title;textFormat:Text.PlainText;elide:Text.ElideRight;basePixelSize:Theme.compact?18:17;font.weight:Font.DemiBold
+            opacity:page.metadataTravelling?0:1
+        }
+        UiText {
+            id:videoArtist;objectName:"videoMetadataArtist";x:Theme.compact?videoTitle.x:videoTitle.x+videoTitle.width+16
+            y:Theme.compact?videoTitle.y+videoTitle.height+6:(parent.height-height)/2;width:Math.max(0,parent.width-x)
+            text:playbackBridge.artist;textFormat:Text.PlainText;elide:Text.ElideRight;basePixelSize:14;color:Theme.secondary
+            opacity:page.metadataTravelling?0:1
+        }
+    }
+    TextMetrics {id:videoTitleMetrics;text:videoTitle.text;font:videoTitle.font}
     LyricsList {
         id: lyrics
+        visible:!page.pictureVideo&&(!page.audioVideo||page.localLyrics)
         x:Math.max(0,columns.x+lyricSide.x-previewInset)
         leadingInset:columns.x+lyricSide.x-x
         y: columns.y + lyricSide.y
         width:columns.x+lyricSide.x+lyricSide.width-x; height: lyricSide.height
         opacity: page.detailsOpacity
     }
+    UiText {
+        objectName:"videoAudioMessage";visible:page.audioVideo&&!page.localLyrics
+        x:columns.x+lyricSide.x;y:columns.y+lyricSide.y;width:lyricSide.width;height:lyricSide.height
+        text:playbackBridge.onlineActive?"云端视频音轨，请欣赏":"本地视频音轨，请欣赏"
+        horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter;wrapMode:Text.Wrap
+        basePixelSize:22;color:Theme.secondary;opacity:page.detailsOpacity
+    }
     Item{
         id: columns
+        visible:!page.pictureVideo
         anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;anchors.bottom:parent.bottom
         anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:page.blend(76,48);anchors.bottomMargin:20
         Item {
@@ -78,7 +145,7 @@ Item {
                 Artwork {
                     id:art;objectName:"currentArtwork"
                     x:Math.max(0,(page.wideColumnWidth-page.wideCoverSize)/2)*(1-page.reflow);y:0
-                    width:page.wideCoverSize+(88-page.wideCoverSize)*page.shrink;height:width
+                    width:page.wideCoverSize+(88-page.wideCoverSize)*page.shrink;height:width*(playbackBridge.video?9/16:1);videoCover:playbackBridge.video;coverAspect:playbackBridge.video?16/9:1
                     file:playbackBridge.coverUrl;contentKey:playbackBridge.trackId;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";revision:playbackBridge.artworkRevision;radius:page.blend(24,12)
                     animated:page.visible&&!page.artworkTravelling;direction:page.trackDirection;opacity:page.artworkTravelling?0:1
                 }
@@ -87,22 +154,22 @@ Item {
                     width:Math.max(0,parent.width-x-page.blend(20,0))
                     text:playbackBridge.hasTrack?playbackBridge.title:"还没有音乐正在播放";textFormat:Text.PlainText
                     wrapMode:Theme.compact?Text.NoWrap:Text.Wrap;maximumLineCount:Theme.compact?1:2;elide:Text.ElideRight;horizontalAlignment:Theme.compact?Text.AlignLeft:Text.AlignHCenter
-                    font.pixelSize:page.blend(27,20);font.weight:Font.DemiBold;color:Theme.text;opacity:page.metadataTravelling?0:page.detailsOpacity
+                    basePixelSize:page.blend(27,20);font.weight:Font.DemiBold;color:Theme.text;opacity:page.metadataTravelling?0:page.detailsOpacity
                 }
                 UiText {
-                    id:largeArtist;objectName:"expandedSongArtist";x:largeTitle.x;y:(art.height+22+largeTitle.height+8)*(1-page.arrange)+52*page.arrange;width:largeTitle.width
-                    text:playbackBridge.hasTrack?playbackBridge.artist:"选一首喜欢的歌，慢慢听。";textFormat:Text.PlainText
+                    id:largeArtist;objectName:"expandedSongArtist";x:largeTitle.x;y:Math.max((art.height+22+largeTitle.height+8)*(1-page.arrange)+52*page.arrange,largeTitle.y+largeTitle.height+8);width:largeTitle.width
+                    text:playbackBridge.hasTrack?playbackBridge.artist+(playbackBridge.audioPreview?" · 试听":""):"选一首喜欢的歌，慢慢听。";textFormat:Text.PlainText
                     wrapMode:Theme.compact?Text.NoWrap:Text.Wrap;maximumLineCount:Theme.compact?1:2;elide:Text.ElideRight;horizontalAlignment:Theme.compact?Text.AlignLeft:Text.AlignHCenter
-                    font.pixelSize:16;color:Theme.secondary;opacity:page.metadataTravelling?0:page.detailsOpacity
+                    basePixelSize:16;color:Theme.secondary;opacity:page.metadataTravelling?0:page.detailsOpacity
                 }
             }
         }
         Item{
-            id:lyricSide;x:(page.wideColumnWidth+32)*(1-page.arrange);y:195*page.shrink-85*page.arrange
+            id:lyricSide;x:(page.wideColumnWidth+32)*(1-page.arrange);y:Math.max(195*page.shrink-85*page.arrange,(metadataGroup.y+metadataGroup.height+18)*page.shrink)
             width:Math.max(0,parent.width-x);height:parent.height-y;opacity:page.detailsOpacity
             HoverHandler{onPointChanged:{page.toolsVisible=true;if(!tools.opened)idle.restart()} onHoveredChanged:if(hovered){page.toolsVisible=true;if(!tools.opened)idle.restart()}}
             ToolButton{
-                id:question;objectName:"lyricToolsQuestion";width:20;height:20;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.rightMargin:26;anchors.bottomMargin:6
+                id:question;objectName:"lyricToolsQuestion";visible:!page.audioVideo||page.localVideo;width:20;height:20;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.rightMargin:26;anchors.bottomMargin:6
                 text:"?";font.pixelSize: 14;opacity:page.toolsVisible||tools.opened?1:0;enabled:opacity>0
                 background:Rectangle{radius:10;color:Theme.hover;border.color:Theme.border}
                 onHoveredChanged: { if(hovered) {page.toolsVisible=true;idle.stop()} else if(!tools.hovered) idle.restart() }
@@ -141,4 +208,42 @@ Item {
             }
         }
     }
+    Rectangle {
+        objectName:"videoPlaybackSurface";visible:page.pictureVideo
+        anchors.fill:parent;anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin+page.panelInset
+        anchors.topMargin:videoMetadata.y+videoMetadata.height+16;anchors.bottomMargin:12
+        color:page.allowVideoPicture&&settingsBridge.values.videoBlackBars?"black":"transparent";opacity:page.detailsOpacity
+        Image {
+            objectName:"startupVideoPreview";anchors.centerIn:parent
+            width:Math.min(parent.width,parent.height*16/9);height:width*9/16
+            visible:page.startupVideoPreview&&page.allowVideoPicture&&videoOutput.opacity<1;source:visible?playbackBridge.coverUrl:""
+            fillMode:Image.PreserveAspectCrop;asynchronous:false
+        }
+        Artwork {
+            objectName:"onlineAudioCover";anchors.centerIn:parent
+            width:Math.min(parent.width,parent.height*16/9);height:width*9/16;videoCover:true;coverAspect:16/9;radius:12;resolution:768;animated:false
+            visible:page.pictureVideo&&videoOutput.opacity<1&&!page.startupVideoPreview
+            file:playbackBridge.coverUrl;seed:playbackBridge.title;revision:playbackBridge.artworkRevision
+        }
+        VideoOutput {
+            id:videoOutput;objectName:"activeVideoOutput";anchors.centerIn:parent
+            readonly property real videoAspect:sourceRect.width>0&&sourceRect.height>0?sourceRect.width/sourceRect.height:16/9
+            width:settingsBridge.values.videoBlackBars?parent.width:Math.min(parent.width,parent.height*videoAspect)
+            height:settingsBridge.values.videoBlackBars?parent.height:Math.min(parent.height,parent.width/videoAspect)
+            fillMode:VideoOutput.PreserveAspectFit
+            visible:page.allowVideoPicture
+            opacity:page.allowVideoPicture&&playbackBridge.videoFrameReady?1:0
+            Behavior on opacity {NumberAnimation {duration:settingsBridge.values.reduceMotion?0:180;easing.type:Easing.OutCubic}}
+            onOpacityChanged:if(opacity>=.999&&playbackBridge.videoFrameReady&&page.startupVideoPreview&&page.Window.window)page.Window.window.initialVideoPreviewId=""
+            Component.onCompleted:playbackBridge.setVideoSink(videoSink)
+            Component.onDestruction:playbackBridge.setVideoSink(null)
+        }
+    }
+    VideoLyricCaption {
+        objectName:"videoLyricCaption";parent:videoOutput.parent;videoItem:videoOutput
+        visible:page.pictureVideo&&page.localLyrics&&text.length>0&&playbackBridge.videoFrameReady
+        opacity:videoOutput.opacity*page.detailsOpacity
+    }
+    MouseArea {anchors.fill:parent;visible:partsPanel.visible;onClicked:partsPanel.close()}
+    VideoPartsPanel {id:partsPanel;parent:page;rows:page.videoParts;currentPart:bilibili.currentPart;onPartRequested:part=>bilibili.selectPart(part);panelTop:Theme.compact?videoMetadata.y:76}
 }

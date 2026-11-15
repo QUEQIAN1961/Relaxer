@@ -1,4 +1,6 @@
 #include "qq-music-bridge.h"
+#include "disk-cache.h"
+#include "account-membership.h"
 #include "online-recommendation.h"
 #include "online-artwork-cache.h"
 #include <QDateTime>
@@ -41,8 +43,8 @@ QList<QNetworkCookie> replyCookies(QNetworkReply *reply){
     return cookies;
 }
 }
-QqMusicBridge::QqMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel *lyrics,ai::AiRuntime *ai,OnlineArtworkCache *artwork,QObject *parent)
-    :QObject(parent),m_library(library),m_facade(facade),m_lyrics(lyrics),m_ai(ai),m_artwork(artwork),m_pageCache(library,"qq"),m_network(this),m_cookies(new MusicCookieJar(&m_network)){
+QqMusicBridge::QqMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel *lyrics,ai::AiRuntime *ai,OnlineArtworkCache *artwork,QObject *parent,QNetworkAccessManager *transport)
+    :QObject(parent),m_library(library),m_facade(facade),m_lyrics(lyrics),m_ai(ai),m_artwork(artwork),m_pageCache(library,"qq"),m_network(this),m_transport(transport?transport:&m_network),m_cookies(new MusicCookieJar(&m_network)){
     m_network.setCookieJar(m_cookies);m_poll.setInterval(1800);
     m_pageCommit.setSingleShot(true);connect(this,&QqMusicBridge::changed,this,[this]{if(m_pageCache.pending())m_pageCommit.start(0);});
     connect(&m_pageCommit,&QTimer::timeout,this,[this]{
@@ -65,8 +67,8 @@ QqMusicBridge::QqMusicBridge(Library *library,PlaybackFacade *facade,LyricsModel
             if(ranked.size()>=10)break;
         }
         if(ranked.isEmpty()){setStatus("AI 未返回有效候选，请重试");return;}
-        m_songs=ranked;emit songsChanged();QSaveFile cache(onlinePath("qq-recommendations.json"));
-        if(cache.open(QIODevice::WriteOnly)){cache.write(QJsonDocument(QJsonArray::fromVariantList(m_songs)).toJson(QJsonDocument::Compact));cache.commit();}
+        m_songs=ranked;emit songsChanged();QSaveFile cache(QDir(DiskCache::online(m_library)).filePath("qq-recommendations.json"));
+        if(cache.open(QIODevice::WriteOnly)){cache.write(QJsonDocument(QJsonArray::fromVariantList(m_songs)).toJson(QJsonDocument::Compact));cache.commit();DiskCache::trim(m_library);}
         setStatus(QString("AI 已结合本地收听偏好推荐 %1 首 QQ 音乐歌曲").arg(m_songs.size()));
     });
 }
@@ -92,12 +94,12 @@ void QqMusicBridge::trace(const QString &message) const {
     QFile file(onlinePath("qq-login-trace.txt"));if(file.open(QIODevice::WriteOnly|QIODevice::Append))file.write((QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)+" "+message+"\n").toUtf8());
 }
 QNetworkReply *QqMusicBridge::request(const QUrl &url,const QByteArray &body,const QByteArray &contentType,ReplyDone done,bool login,int timeout){
-    QNetworkRequest req(url);req.setTransferTimeout(timeout);
+    QNetworkRequest req(url);req.setTransferTimeout(timeout);req.setAttribute(QNetworkRequest::Http2AllowedAttribute,false);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
     req.setRawHeader("User-Agent","Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
     req.setRawHeader("Referer",url.host().contains("weixin.qq.com")?"https://open.weixin.qq.com/":url.host().contains("ptlogin")||url.host()=="graph.qq.com"?"https://xui.ptlogin2.qq.com/":"https://y.qq.com/");
     if(!contentType.isEmpty())req.setRawHeader("Content-Type",contentType);
-    auto *reply=contentType.isEmpty()?m_network.get(req):m_network.post(req,body);m_requests.insert(reply);if(login)m_loginRequest=reply;emit changed();
+    auto *reply=contentType.isEmpty()?m_transport->get(req):m_transport->post(req,body);m_requests.insert(reply);if(login)m_loginRequest=reply;emit changed();
     connect(reply,&QNetworkReply::finished,this,[this,reply,done=std::move(done),login]{
         m_requests.remove(reply);if(m_loginRequest==reply)m_loginRequest.clear();const auto bytes=reply->isOpen()?reply->readAll():QByteArray();
         if(login){
@@ -146,7 +148,7 @@ void QqMusicBridge::activate(){
         m_cookies->restore(QByteArray::fromBase64(object.value("cookies").toString().toLatin1()));
         if(!m_credential.value("musickey").toString().isEmpty()&&userId().toLongLong()>0){m_loginChannel=m_credential.value("loginType").toInt()==1?"wx":"qq";installMusicCookies();refreshAccount();}
     }
-    QFile cache(onlinePath("qq-recommendations.json"));if(cache.open(QIODevice::ReadOnly)){m_songs=QJsonDocument::fromJson(cache.readAll()).array().toVariantList();for(const auto &v:m_songs){const auto row=v.toMap();m_catalog.insert(row.value("id").toLongLong(),row);}emit songsChanged();}
+    QFile cache(QDir(DiskCache::online(m_library)).filePath("qq-recommendations.json"));if(!cache.exists())cache.setFileName(onlinePath("qq-recommendations.json"));if(cache.open(QIODevice::ReadOnly)){m_songs=QJsonDocument::fromJson(cache.readAll()).array().toVariantList();for(const auto &v:m_songs){const auto row=v.toMap();m_catalog.insert(row.value("id").toLongLong(),row);}emit songsChanged();}
 }
 void QqMusicBridge::setLoginChannel(const QString &channel){if(channel==m_loginChannel||!QStringList{"qq","wx"}.contains(channel))return;stopLogin();m_loginChannel=channel;m_qrImage.clear();emit changed();}
 void QqMusicBridge::setQuality(const QString &quality){if(!QStringList{"standard","exhigh","lossless","hires"}.contains(quality)||quality==m_quality)return;if(!m_library->setSetting("online.quality",quality))setStatus("音质设置未能保存，请重试");}
@@ -246,9 +248,10 @@ void QqMusicBridge::refreshAccount(){
         m_loggedIn=true;m_nickname=nicknameIn(result.value("data").toObject());if(m_nickname.isEmpty())m_nickname=nicknameIn(m_credential);if(m_nickname.isEmpty())m_nickname="QQ 音乐账号";
         m_avatarUrl=QUrl(result.value("data").toObject().value("info").toObject().value("logo").toString());
         setStatus("已登录 QQ 音乐 · "+m_nickname);
+        if(!m_qrKey.isEmpty()){m_qrKey.clear();emit loginCompleted();}
         cgi("VipLogin.VipLoginInter","vip_login_base",{},[this,credential](const QJsonObject &vip){
-            if(credential!=m_credential||!m_loggedIn||vip.value("code").toInt()!=0)return;const auto data=vip.value("data").toObject(),identity=data.value("identity").toObject();
-            m_membership=identity.value("svip").toInt()||data.value("svip").toInt()?"超级会员":identity.value("vip").toInt()?"绿钻会员":"普通账号";emit changed();
+            if(credential!=m_credential||!m_loggedIn||vip.value("code").toInt()!=0)return;const auto data=vip.value("data").toObject();
+            m_membership=accountMembership("qq",data);emit changed();
         });
     },{},false,true);
 }
@@ -380,6 +383,7 @@ void QqMusicBridge::fetchPlaylistPage(const std::shared_ptr<PlaylistLoad> &load)
     constexpr int pageSize=100;
     cgi("music.srfDissInfo.DissInfo","CgiGetDiss",{{"disstid",load->id=="liked"?0:load->id.toLongLong()},{"dirid",load->id=="liked"?201:0},{"tag",true},{"song_begin",load->offset},{"song_num",pageSize},{"userinfo",true},{"orderlist",true}},[this,load](const QJsonObject &result){
         if(load->revision!=m_listRevision)return;
+        if(playlistReportedMissing(result)){setStatus("QQ 音乐歌单已不存在");emit playlistMissing(load->id);return;}
         if(result.value("code").toInt()!=0){if(m_pageCache.quiet())m_currentPlaylist=m_pageCache.before().value("playlist").toMap();else setSongs(load->songs);setStatus(QString("已读取 %1 首，后续歌曲读取失败，请重新打开歌单重试").arg(m_songs.size()));return;}
         const auto data=result.value("data").toObject();const auto page=data.value("songlist").toArray();load->total=data.value("total_song_num").toInt();const auto before=load->seen.size();
         if(load->offset==0){const auto info=data.value("dirinfo").toObject();if(!info.value("title").toString().isEmpty())m_currentPlaylist["name"]=info.value("title").toString();if(!info.value("picurl").toString().isEmpty())m_currentPlaylist["cover"]=info.value("picurl").toString();m_currentPlaylist["count"]=load->total;}
@@ -393,14 +397,26 @@ void QqMusicBridge::fetchPlaylistPage(const std::shared_ptr<PlaylistLoad> &load)
 void QqMusicBridge::playSong(const QString &id){
     if(!m_catalog.contains(id.toLongLong()))return;QStringList ids;for(const auto &value:m_songs)ids.append(value.toMap().value("id").toString());playSongs(ids,id);
 }
-void QqMusicBridge::playSongs(const QStringList &ids,const QString &start){
+QVector<Track> QqMusicBridge::tracksFor(const QStringList &ids){
     QVector<Track> tracks;
-    for(const auto &id:ids){const auto row=m_catalog.value(id.toLongLong());if(row.isEmpty())continue;Track track;track.id=TrackBase+row.value("id").toLongLong();track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.album=row.value("album").toString();track.duration=row.value("duration").toLongLong();track.hash="qqmusic:"+row.value("mid").toString();
+    for(const auto &id:ids){const auto row=m_catalog.value(id.toLongLong());if(row.isEmpty())continue;Track track;track.onlineMetadata=QJsonObject::fromVariantMap(row);track.id=TrackBase+row.value("id").toLongLong();track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.requiresSubscription=row.value("requiresSubscription").toBool();track.album=row.value("album").toString();track.duration=row.value("duration").toLongLong();track.hash="qqmusic:"+row.value("mid").toString();
         auto original=row.value("cover").toString();original.replace(QRegularExpression("T002R\\d+x\\d+M000"),"T002M000");
         const auto thumbnail=row.value("thumbnail",QString(original).replace("T002M000","T002R300x300M000")).toString();
-        m_artwork->prepare(track,QUrl(thumbnail),QUrl(original),onlinePath(QString("qq-cover-%1.png").arg(row.value("id").toString())));tracks.append(track);}
-    m_facade->playOnline(tracks,TrackBase+start.toLongLong());
+        m_artwork->prepare(track,QUrl(thumbnail),QUrl(original),QDir(DiskCache::online(m_library)).filePath(QString("qq-cover-%1.png").arg(row.value("id").toString())));tracks.append(track);}
+    return tracks;
 }
+void QqMusicBridge::playSongs(const QStringList &ids,const QString &start){
+    const auto tracks=tracksFor(ids);if(tracks.isEmpty())return;
+    qint64 first=tracks.first().id;
+    for(const auto &track:tracks)if(track.hash.endsWith(":"+start)||track.id==TrackBase+start.toLongLong())first=track.id;
+    m_facade->playOnline(tracks,first);
+}
+bool QqMusicBridge::batchSongs(const QStringList &ids,const QString &action){
+    const bool ok=m_facade->batchOnline(tracksFor(ids),action);
+    if(!ok)setStatus("请先播放在线歌曲，再向在线队列添加所选歌曲；当前播放歌曲不会重复加入");
+    return ok;
+}
+
 void QqMusicBridge::downloadSong(const QString &id){
     auto row=m_catalog.value(id.toLongLong());row["provider"]="qq";if(!row.value("id").toString().isEmpty())resolveDownload(row,m_quality);
 }
@@ -416,7 +432,7 @@ void QqMusicBridge::resolveDownload(const QVariantMap &song,const QString &quali
     });
 }
 void QqMusicBridge::requestSource(qint64 id){
-    if(id<TrackBase||id>=TrackBase+OnlineMusicBridge::TrackBase)return;const auto row=m_catalog.value(id-TrackBase);if(row.isEmpty())return;
+    if(id<TrackBase||id>=TrackBase+OnlineMusicBridge::TrackBase)return;auto row=m_catalog.value(id-TrackBase);if(row.isEmpty())row=m_facade->track(id).onlineMetadata.toVariantMap();if(row.isEmpty())return;activate();
     const auto revision=++m_playRevision;const auto mid=row.value("mid").toString(),media=row.value("mediaMid").toString();
     const auto guid=QString::number(QRandomGenerator::global()->generate());
     const auto file=m_quality=="hires"?QString("RS01"):m_quality=="lossless"?QString("F000"):m_quality=="exhigh"?QString("M800"):QString("M500");const auto extension=m_quality=="hires"||m_quality=="lossless"?".flac":".mp3";

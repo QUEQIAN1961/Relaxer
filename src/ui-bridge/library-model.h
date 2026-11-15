@@ -13,7 +13,7 @@ class TrackListModel final : public QAbstractListModel {
     Q_OBJECT
   public:
     enum Role { TrackId = Qt::UserRole + 1, Title, Artist, Album, Duration, Favorite, File, TrackKey,
-                Cover, Plays, Heard, ImportedAt, LyricsAvailable, FileSize };
+                Cover, Plays, Heard, ImportedAt, LyricsAvailable, FileSize, RequiresSubscription, VideoTrack };
     explicit TrackListModel(Library *library, QObject *parent = nullptr);
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -21,6 +21,7 @@ class TrackListModel final : public QAbstractListModel {
     qint64 idAt(int row) const;
     int rowForId(qint64 id) const;
     QVector<qint64> ids() const;
+    Track trackAt(int row)const{return row>=0&&row<m_tracks.size()?m_tracks[row]:Track{};}
     bool matches(int row, const QString &text) const;
     qint64 playlist() const { return m_playlist; }
     void setPlaylist(qint64 playlist);

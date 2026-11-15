@@ -15,6 +15,7 @@ void Queue::set(QVector<qint64> ids, qint64 id) {
     if (index < 0 && !items.isEmpty())
         index = 0;
     bag.clear();
+    m_priority.clear();
     m_plannedBags.clear();m_generated.clear();
     history = {};
     historyIndex = -1;
@@ -24,11 +25,24 @@ void Queue::set(QVector<qint64> ids, qint64 id) {
     }
     refill();
 }
+bool Queue::enqueue(const QVector<qint64> &ids,bool next){
+    const auto playing=current();QVector<qint64> selected;QSet<qint64> seen;
+    for(auto id:ids)if(id>0&&id!=playing&&!seen.contains(id)){seen.insert(id);selected.append(id);}
+    if(selected.isEmpty())return false;
+    if(!playing){set(selected);return true;}
+    for(auto id:selected){items.removeAll(id);bag.removeAll(id);m_priority.removeAll(id);}
+    index=items.indexOf(playing);const int insertion=next?index+1:int(items.size());
+    for(int i=0;i<selected.size();++i)items.insert(insertion+i,selected[i]);
+    if(next){m_priority=selected+m_priority;if(historyIndex+1<history.size())history.resize(historyIndex+1);}
+    else for(auto it=selected.crbegin();it!=selected.crend();++it)bag.prepend(*it);
+    m_plannedBags.clear();m_generated.clear();return true;
+}
 void Queue::refill(bool full) {
     if(full&&!m_plannedBags.isEmpty()){bag=m_plannedBags.takeFirst();return;}
     bag = items;
     if (!full)
         bag.removeAll(current());
+    for(auto id:m_priority)bag.removeAll(id);
     for (int i = bag.size() - 1; i > 0; --i)
         bag.swapItemsAt(i, int(QRandomGenerator::global()->bounded(i + 1)));
     if (full && bag.size() > 1 && bag.last() == current())
@@ -56,6 +70,14 @@ QVector<qint64> Queue::upcoming(int count){
 qint64 Queue::next(bool manual) {
     if (items.isEmpty())
         return 0;
+    if(mode==Mode::Shuffle&&historyIndex+1<history.size()){
+        index=items.indexOf(history[++historyIndex]);return current();
+    }
+    if(!m_priority.isEmpty()){
+        const auto id=m_priority.takeFirst();index=items.indexOf(id);bag.removeAll(id);
+        if(historyIndex+1<history.size())history.resize(historyIndex+1);
+        history.append(id);historyIndex=int(history.size())-1;return id;
+    }
     if (mode == Mode::SingleLoop && !manual)
         return current();
     if (mode == Mode::Shuffle) {

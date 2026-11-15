@@ -213,6 +213,10 @@ bool MidiTransport::setVolume(int percent) {
     if (m_fluid && !m_fluid->setVolume(percent)) return fluidFailure();
     return true;
 }
+bool MidiTransport::setOutputDevice(const QAudioDevice &device){
+    if(m_fluid&&!m_fluid->setOutputDevice(device))return fluidFailure();
+    return true;
+}
 qint64 MidiTransport::position() const {
     if (m_fluid) {
         const auto position = m_fluid->position();
