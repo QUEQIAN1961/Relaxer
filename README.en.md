@@ -12,7 +12,7 @@ Extract the complete Windows x64 portable ZIP to a new writable folder and launc
 
 Local playback works offline. Online lyrics and optional translation use user-selected services; credentials and paid requests require the user's decision.
 
-See the [Chinese guide](README.md), [release notes](docs/releases/v0.2.6-GA/RELEASE-NOTES.md), and [build/source instructions](docs/releases/v0.2.6-GA/BUILD-AND-SOURCE.md). Historical releases and changelogs are preserved.
+See the [Chinese guide](README.md), [release notes](docs/releases/v0.2.6-GA/RELEASE-NOTES.md), and [build/source instructions](docs/releases/v0.2.6-GA/BUILD-AND-SOURCE.md). Historical releases and changelogs remain available. Source archives contain no precompiled bootstrap executables; build matching tools from source. See [repository layout](docs/REPOSITORY-LAYOUT.md) for development entry points and source materials.
 
 Relaxer-authored code is GPL-3.0-only. Third-party code retains its own licenses, copyrights and applicable exceptions; retain all notices and accompanying corresponding source. This grant does not cover external music, artwork, lyrics or service content.
 

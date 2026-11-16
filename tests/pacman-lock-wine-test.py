@@ -2,8 +2,8 @@
 """Maintainer test: run the real Windows lock checker and Win32 tests in Wine.
 
 Requires Linux, Wine 64 and MinGW-w64 C++. No real MSYS2 packages are modified.
-The dependency script uses fake pacman commands; its lock checker is the shipped
-Windows binary. This does not add Python or Wine to the player requirements.
+The dependency script uses fake pacman commands; its lock checker is compiled
+from the matching source in a temporary directory. This does not add Python or Wine to the player requirements.
 """
 import os
 from pathlib import Path
@@ -41,7 +41,10 @@ def main():
         (root / "scripts").mkdir(parents=True)
         shutil.copyfile(source / "scripts/install-windows-dependencies.sh",
                         root / "scripts/install-windows-dependencies.sh")
-        shutil.copyfile(source / "RelaxerLockCheck.exe", root / "NativeLockCheck.exe")
+        subprocess.run([compiler, "-std=c++17", "-O2", "-Wall", "-Wextra", "-Wpedantic",
+                        "-Werror", "-municode", "-static", "-I", str(source / "src"),
+                        str(source / "src/pacman-lock-windows.cpp"),
+                        "-o", str(root / "NativeLockCheck.exe")], check=True, timeout=90)
         project = windows(root)
         cache = base / "cache" / key(project)
         msys = cache / "msys64"

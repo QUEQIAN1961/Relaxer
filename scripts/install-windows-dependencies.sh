@@ -51,7 +51,7 @@ if [[ -e "$lock" ]]; then
       recovered=1
     fi
   else
-    echo '缺少数据库锁检查组件，请完整覆盖解压修复包后重试。' >&2
+    echo '缺少匹配的数据库锁检查组件；源码维护者请构建后按历史部署流程放置，程序用户请使用完整运行包。' >&2
   fi
   if [[ "$recovered" == 1 && ! -e "$lock" ]]; then
     echo 'Database lock check passed.'

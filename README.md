@@ -46,7 +46,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/m
 cmake --build build --parallel
 ```
 
-Declarative 位于单独前缀时设置 `QT_ADDITIONAL_PACKAGES_PREFIX_PATH` 或相应 Qt6 包目录。应用、QML DLL 与根便携入口须从同一源码身份构建，普通包不包含 `RelaxerStart.exe`。构建与材料组装方法见 [BUILD-AND-SOURCE.md](docs/releases/v0.2.6-GA/BUILD-AND-SOURCE.md)。
+Declarative 位于单独前缀时设置 `QT_ADDITIONAL_PACKAGES_PREFIX_PATH` 或相应 Qt6 包目录。应用、QML DLL 与根便携入口须从同一源码身份构建，普通包不包含 `RelaxerStart.exe`，源码也不附带旧预编译启动器。开发运行可设置 `RELAXER_BUILD_DIR` 和 `RELAXER_QT_PREFIX` 后使用 `scripts/prepare-windows-launch.cmd`；锁检查工具按需从源码构建。构建与材料组装方法见 [BUILD-AND-SOURCE.md](docs/releases/v0.2.6-GA/BUILD-AND-SOURCE.md)。
 
 项目自有代码采用 [GPL-3.0-only](LICENSE)。Qt、FFmpeg、OpenCC 和其他组件保留原授权和声明；见 [第三方说明](THIRD_PARTY_NOTICES.md)、运行包许可证目录及配套对应源码。软件许可不授权外部音乐、封面、歌词或服务内容。
 

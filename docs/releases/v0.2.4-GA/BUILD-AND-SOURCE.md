@@ -6,14 +6,14 @@
 
 ```powershell
 $env:PATH = 'C:\Software\MSYS2\ucrt64\bin;' + $env:PATH
-cmake -S D:\Git\Relaxer\Development -B D:\Git\Relaxer\Testing\build-ui -G Ninja `
+cmake -S . -B build-release -G Ninja `
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DRELAXER_ENABLE_QML=ON `
-  -DRELAXER_MIDI_RUNTIME_DIR=D:\Git\Relaxer\Development\.dependencies\midi
-cmake --build D:\Git\Relaxer\Testing\build-ui --target Relaxer relaxer_qml_runtime RelaxerPortable RelaxerStart RelaxerLockCheck --parallel 4
-python D:\Git\Relaxer\Development\scripts\package-rc.py `
-  --source D:\Git\Relaxer\Development --build D:\Git\Relaxer\Testing\build-ui `
-  --baseline 'D:\Git\Relaxer Version\Release\V0.2.2-GA\Assets\Relaxer-V0.2.2-GA-Win64.zip' `
-  --destination D:\Git\Relaxer\Releases\V0.2.4-GA
+  -DRELAXER_MIDI_RUNTIME_DIR=.\.dependencies\midi
+cmake --build build-release --target Relaxer relaxer_qml_runtime RelaxerPortable RelaxerStart RelaxerLockCheck --parallel 4
+python .\scripts\package-rc.py `
+  --source . --build build-release `
+  --baseline '<V0.2.2-GA-Win64.zip>' `
+  --destination <new-release-directory>
 ```
 
 组包脚本沿用名称，同时支持 RC 与 GA；目标必须是新目录，不能覆盖既有归档。`Desktop-Win64/` 为运行目录，`Assets/` 包含运行包、应用源码 ZIP 和说明，`Source/` 是只读源码导出，不是新的开发工作区。基础第三方对应源码沿用原有归档并通过同批说明引用。

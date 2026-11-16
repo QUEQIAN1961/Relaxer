@@ -1,12 +1,13 @@
 param(
     [string]$QtPrefix = 'C:/Software/MSYS2/ucrt64',
-    [string]$QmlPrefix = 'D:/Git/Relaxer/phase-c-work/deps/ucrt64',
+    [string]$QmlPrefix = '',
     [string]$BuildDirectory = '',
     [string]$EvidenceDirectory = '',
     [switch]$Build,
     [switch]$NativeSmoke
 )
 $ErrorActionPreference = 'Stop'
+if (!$QmlPrefix) { $QmlPrefix = $QtPrefix }
 $sourceRoot = Split-Path $PSScriptRoot -Parent
 $taskRoot = Split-Path $sourceRoot -Parent
 if (!$BuildDirectory) { $BuildDirectory = Join-Path $taskRoot 'build' }

@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from build_inputs import binary_identity, qml_inputs
 from source_identity import identity
+from runtime_layout import share_runtime_libraries
 
 BASELINE_SHA256 = '00a6cbac8725d4b1568c4a06329c627cb8dc59a1a94f052f638bb3b1e88b6c9e'
 
@@ -128,7 +129,15 @@ def assemble(source, build, baseline, destination, qt_prefix=None):
     for name in ('LICENSE', 'LICENSE-NOTICE.txt', 'THIRD_PARTY_NOTICES.md'):
         shutil.copy2(source / name, stage / name)
     shutil.copy2(source / 'REFERENCES.md', stage / 'REFERENCES.md')
-    shutil.copytree(source / 'docs/third-party', stage / 'docs/third-party')
+    # Runtime notices stay with the application. Reproduction-only scripts and
+    # historical dependency evidence remain available in the matching Source.zip.
+    for component in ('ffmpeg', 'morphicons', 'music-platforms', 'OpenCC', 'wiliwili'):
+        original = source / 'docs/third-party' / component
+        def source_only(directory, names):
+            if Path(directory) == source / 'docs/third-party/OpenCC':
+                return set(names).intersection({'CMakeLists.txt', 'generate-frozen-table.py', 'data'})
+            return set()
+        shutil.copytree(original, stage / 'docs/third-party' / component, ignore=source_only)
     (stage / 'licenses/ncmdump').mkdir(parents=True, exist_ok=True)
     shutil.copy2(source / 'licenses/ncmdump-MIT.txt', stage / 'licenses/ncmdump/LICENSE.txt')
     markers = stage / 'licenses/playlist-marks'
@@ -145,6 +154,9 @@ def assemble(source, build, baseline, destination, qt_prefix=None):
         + ('正式版更新与验证范围见 RELEASE-NOTES.md。\n' if channel == 'GA' else '这是候选预发行版。更新与验证范围见 RELEASE-NOTES.md。\n') +
         'MIDI 使用开源 FluidSynth 与 GeneralUser GS；运行库、音色许可及对应源码资料见 MIDI-BASS.md。\n'
         '应用源码附件：Relaxer-' + display + '-Source.zip；基础第三方源码沿用 V0.2.2-GA 附件；MIDI 与修改版 FFmpeg 源码见同版 MIDI-Source.zip、FFmpeg-Source.zip。\n', encoding='utf-8')
+
+    layout = share_runtime_libraries(stage, qt_prefix)
+    write_json(stage / 'runtime/runtime-layout.json', layout)
 
     metadata = dict(sourceCommit=frozen['commit'], sourceTree=frozen['tree'], sourceFingerprint=fingerprint,
                     displayVersion=display, fileVersion=version.split('-')[0] + '.0', entry='Relaxer.exe',
@@ -184,6 +196,10 @@ def assemble(source, build, baseline, destination, qt_prefix=None):
                                           licenses=[license_name], upstream=[midi_runtime[key]['url']]))
     for name, component in [('libfluidsynth-3.dll', 'FluidSynth')]:
         components['binaries'].append(dict(path='runtime/' + name, component=component))
+    # The published dependency baseline recorded DLLs that are now shared.
+    components['binaries'] = [binary for binary in components['binaries']
+                              if (stage / binary['path']).is_file()]
+    components['runtimeLayout'] = layout
     known = {binary['path'] for binary in components['binaries']}
     for binary in sorted((stage / 'runtime').rglob('*.dll')):
         relative = binary.relative_to(stage).as_posix()

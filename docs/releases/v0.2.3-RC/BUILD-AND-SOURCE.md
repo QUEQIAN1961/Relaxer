@@ -4,9 +4,9 @@
 
 ```powershell
 $env:PATH='C:\Software\MSYS2\ucrt64\bin;'+$env:PATH
-cmake -S D:\Git\Relaxer\Development -B D:\Git\Relaxer\Testing\build-ui -G Ninja -DCMAKE_BUILD_TYPE=Release -DRELAXER_ENABLE_QML=ON
-cmake --build D:\Git\Relaxer\Testing\build-ui --target Relaxer RelaxerPortable RelaxerStart RelaxerLockCheck --parallel 6
-python D:\Git\Relaxer\Development\scripts\package-rc.py --source D:\Git\Relaxer\Development --build D:\Git\Relaxer\Testing\build-ui --baseline "D:\Git\Relaxer Version\Release\V0.2.2-GA\Assets\Relaxer-V0.2.2-GA-Win64.zip" --destination "D:\Git\Relaxer Version\Release\V0.2.3-RC"
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DRELAXER_ENABLE_QML=ON
+cmake --build build-release --target Relaxer RelaxerPortable RelaxerStart RelaxerLockCheck --parallel 6
+python .\scripts\package-rc.py --source . --build build-release --baseline "<V0.2.2-GA-Win64.zip>" --destination "<new-release-directory>"
 ```
 
 打包前提交源码，并在最终修改之后重新运行 CMake 配置和构建。应用、QML DLL、便携入口必须来自同一源码指纹。目标目录必须不存在，避免覆盖已有归档。

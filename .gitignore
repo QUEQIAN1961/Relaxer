@@ -39,7 +39,7 @@
 *.lrc
 !tests/fixtures/d2-01/*.lrc
 
-# The two root bootstrap executables are intentional source-package inputs.
+# Build executables stay in ignored build directories, never in source archives.
 *.exe
 *.dll
 *.obj
@@ -47,8 +47,6 @@
 *.a
 *.lib
 *.pdb
-!/RelaxerStart.exe
-!/RelaxerLockCheck.exe
 /msys2-path.txt
 /build-cache-path.txt
 *.log
