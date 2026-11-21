@@ -152,6 +152,9 @@ def assemble(source, build, baseline, destination, qt_prefix=None, release_revis
     notes = source / 'docs/releases' / ('v' + release_version)
     shutil.copy2(notes / 'RELEASE-NOTES.md', stage / 'RELEASE-NOTES.md')
     shutil.copy2(notes / 'BUILD-AND-SOURCE.md', stage / 'BUILD-AND-SOURCE.md')
+    validation = notes / 'VALIDATION.md'
+    if validation.is_file():
+        shutil.copy2(validation, stage / 'VALIDATION.md')
     (stage / 'READ-ME-FIRST.md').write_text(
         '# Relaxer ' + display + '\n\n完整解压后双击根目录 Relaxer.exe。兼容界面使用 Relaxer.exe --widgets。\n'
         '本包自带运行依赖，不需要 Qt、编译环境或源码准备工具；保留完整 runtime 和配套清单。\n'
@@ -226,6 +229,8 @@ def assemble(source, build, baseline, destination, qt_prefix=None, release_revis
     assets = destination / 'Assets'
     assets.mkdir()
     shutil.copy2(notes / 'RELEASE-NOTES.md', assets / 'RELEASE-NOTES.md')
+    if validation.is_file():
+        shutil.copy2(validation, assets / 'VALIDATION.md')
     portable_zip = assets / ('Relaxer-' + display + '-Win64.zip')
     with zipfile.ZipFile(portable_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for path in sorted(stage.rglob('*')):
