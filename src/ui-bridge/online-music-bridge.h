@@ -82,6 +82,7 @@ signals:
     void downloadReady(const QVariantMap &song,const QUrl &url,const QString &extension);
     void downloadFailed(const QVariantMap &song,const QString &error);
 private:
+    void trimCatalog();
     QVector<Track> tracksFor(const QStringList &ids);
     Library *m_library;PlaybackFacade *m_facade;LyricsModel *m_lyrics;ai::AiRuntime *m_ai;
     OnlineArtworkCache *m_artwork;

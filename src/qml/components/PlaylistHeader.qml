@@ -48,7 +48,7 @@ Item {
     }
     Artwork {
         objectName: "playlistCover"
-        width: header.coverSize+header.coverExtra; height: header.coverSize;videoCover:header.videoCollection; radius: width * .1
+        width: header.coverSize+header.coverExtra; height: header.coverSize;videoCover:header.videoCollection;
         resolution: 384; animated: false
         file: header.details.cover || ""; seed: header.playlistName
         Accessible.name: "歌单封面"

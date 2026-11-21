@@ -5,6 +5,9 @@
 #include <QSortFilterProxyModel>
 #include <QTimer>
 #include <QUrl>
+#include <QThreadPool>
+#include <atomic>
+#include <memory>
 
 namespace relaxer {
 // One read-only snapshot, refreshed once per coalesced Library::changed burst.
@@ -15,6 +18,7 @@ class TrackListModel final : public QAbstractListModel {
     enum Role { TrackId = Qt::UserRole + 1, Title, Artist, Album, Duration, Favorite, File, TrackKey,
                 Cover, Plays, Heard, ImportedAt, LyricsAvailable, FileSize, RequiresSubscription, VideoTrack };
     explicit TrackListModel(Library *library, QObject *parent = nullptr);
+    ~TrackListModel()override;
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
@@ -36,7 +40,11 @@ class TrackListModel final : public QAbstractListModel {
     bool m_cloud=false;
     QHash<qint64, int> m_rows;
     QTimer m_refresh;
-    mutable QHash<QString, qint64> m_fileSizes;
+    QHash<QString,qint64> m_fileSizes;
+    QThreadPool m_sizePool;QTimer m_sizeTimer;
+    quint64 m_sizeRevision=0;
+    std::shared_ptr<std::atomic_bool> m_sizeCancel;
+    void readFileSizes();
     qint64 m_playlist = 0;
 };
 
@@ -52,8 +60,8 @@ class TrackFilterModel final : public QSortFilterProxyModel {
     Q_PROPERTY(QString albumFilter READ albumFilter WRITE setAlbumFilter NOTIFY filtersChanged)
     Q_PROPERTY(QStringList artists READ artists NOTIFY optionsChanged)
     Q_PROPERTY(QStringList albums READ albums NOTIFY optionsChanged)
-    Q_PROPERTY(qint64 totalDuration READ totalDuration NOTIFY countChanged)
-    Q_PROPERTY(qint64 totalFileSize READ totalFileSize NOTIFY countChanged)
+    Q_PROPERTY(qint64 totalDuration READ totalDuration NOTIFY totalsChanged)
+    Q_PROPERTY(qint64 totalFileSize READ totalFileSize NOTIFY totalsChanged)
   public:
     explicit TrackFilterModel(TrackListModel *source, QObject *parent = nullptr);
     QString filterText() const { return m_filter; }
@@ -84,6 +92,7 @@ class TrackFilterModel final : public QSortFilterProxyModel {
     void sortChanged();
     void selectionChanged();
     void countChanged();
+    void totalsChanged();
     void filtersChanged();
     void optionsChanged();
   protected:
@@ -97,6 +106,9 @@ class TrackFilterModel final : public QSortFilterProxyModel {
     int m_sortKey = 0;
     bool m_descending = false;
     QTimer m_notifications;
+    mutable bool m_totalsDirty=true;
+    mutable qint64 m_totalDuration=0,m_totalFileSize=0;
+    void updateTotals()const;
     void changed();
 };
 

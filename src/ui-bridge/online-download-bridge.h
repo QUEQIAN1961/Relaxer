@@ -8,6 +8,10 @@
 #include <QJsonObject>
 #include <QAbstractListModel>
 #include <memory>
+#include <QCache>
+#include <QTimer>
+#include <QThreadPool>
+#include "online-track-matcher.h"
 namespace relaxer {
 class OnlineDownloadBridge final:public QAbstractListModel {
     Q_OBJECT
@@ -31,6 +35,7 @@ public:
     int rowCount(const QModelIndex &parent={}) const override{return parent.isValid()?0:m_tasks.size();}
     QVariant data(const QModelIndex &index,int role) const override;
     QHash<int,QByteArray> roleNames() const override;
+    Q_INVOKABLE QString taskKey(const QString &provider,const QVariantMap &song)const{return songKey(provider,song);}
     Q_INVOKABLE QVariantMap task(const QString &provider,const QVariantMap &song) const;
     Q_INVOKABLE void enqueue(const QString &provider,const QVariantMap &song,const QString &quality);
     bool enqueueTo(const QVariantMap &song,const QString &path,const QString &quality={},const QUrl &url={},const QString &extension={});
@@ -45,19 +50,26 @@ signals:
     void downloadsChanged();
     void tasksChanged();
     void taskAdded();
+    void taskUpdated(const QString &key,const QVariantMap &task);
     void resolveRequested(const QVariantMap &song,const QString &quality);
     void downloaded(const QString &path);
 private:
     Library *m_library;QNetworkAccessManager m_network;QPointer<QNetworkReply> m_reply;QPointer<QThread> m_worker;
     std::unique_ptr<QSaveFile> m_file;QString m_partial,m_requested,m_status,m_key;QByteArray m_prefix;
-    bool m_busy=false;double m_progress=0;int m_revision=0;QJsonObject m_downloads;QVariantMap m_song;QHash<QString,QString> m_known;QVector<Track> m_local;bool m_localReady=false;
+    bool m_busy=false;double m_progress=0;int m_revision=0;QJsonObject m_downloads;QVariantMap m_song;struct Known {QString path;qint64 checked=0;};QCache<QString,Known> m_known{2048};
     struct Task {int id=0;QVariantMap song;QString key,path,quality,extension,state="queued",error;QUrl url;qint64 received=0,total=0;double progress=0;};
     QVector<Task> m_tasks;int m_nextId=0,m_activeId=0,m_taskRevision=0;bool m_cancelled=false;
     QString songKey(const QString &provider,const QVariantMap &song) const;
     QString destinationPath(const QVariantMap &song,const QString &extension);
     Task *activeTask();
     QVariantMap taskData(const Task &task) const;
-    void updateTask();
+    QHash<QString,int> m_taskRows;QHash<int,int> m_taskIds;
+    QTimer m_progressTimer,m_detectTimer;QThreadPool m_detectPool;bool m_detecting=false;quint64 m_detectRevision=0;
+    QHash<QString,QVariantMap> m_detectQueue;std::shared_ptr<const OnlineTrackIndex> m_downloadIndex;
+    void detectPending();void rebuildTaskIndex();void pruneTasks();void publishTask(bool structural);
+    bool downloadedNow(const QString &provider,const QVariantMap &song);
+    std::shared_ptr<const OnlineTrackIndex> downloadIndex();
+    void updateTask(bool immediate=true);
     void startNext();
     bool startTransfer(const QVariantMap &song,const QUrl &url,const QString &extension,const QString &path);
     void complete(const QString &path,const QString &error={});

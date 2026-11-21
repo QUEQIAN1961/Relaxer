@@ -2,6 +2,7 @@
 #include "playback.h"
 #include "media-preload.h"
 #include "dash-stream.h"
+#include "online-track-matcher.h"
 #include <QVideoSink>
 #include <QSet>
 #include <QElapsedTimer>
@@ -15,6 +16,7 @@
 namespace relaxer {
 // A value read from the authoritative engine. Reading never forecasts shuffle bags.
 struct PlaybackSnapshot {
+    quint64 revision = 0;
     Track track;
     qint64 position = 0, duration = 0;
     QMediaTimeRange buffered;
@@ -31,6 +33,7 @@ class PlaybackFacade final : public QObject {
     explicit PlaybackFacade(Library *library, QObject *parent = nullptr, bool decodeOnly = false);
     ~PlaybackFacade() override;
     PlaybackSnapshot snapshot() const;
+    quint64 snapshotRevision() const { return m_snapshotSerial; }
     // Compatibility seam for existing consumers; production UI uses the facade.
     Playback *backend() const { return m_playback; }
     Track current() const { return m_sharedQueueActive ? track(m_onlineQueue.current()) : m_playback->current(); }
@@ -140,7 +143,11 @@ class PlaybackFacade final : public QObject {
     std::unique_ptr<QMediaDevices> m_audioDevices;
     AudioFader m_onlineFader;
     qint64 m_onlineResumePosition=-1;
-    QJsonObject m_savedOnline;
+    QJsonObject m_savedOnline,m_savedOnlineProgress;
+    QVector<qint64> m_savedOnlineIds;
+    quint64 m_onlineMetadataRevision=1,m_savedOnlineRevision=0;
+    bool m_savedOnlineEnabled=false;
+    void pruneOnlineTracks();
     QString m_onlineSaveError;
     QMediaTimeRange bufferedTimeRanges() const;
     QMediaTimeRange m_onlineDecoded;
@@ -169,9 +176,10 @@ class PlaybackFacade final : public QObject {
     int m_onlineThreshold=80;
     QElapsedTimer m_onlineClock;
     qint64 m_onlineLastWall=0,m_onlineLastPosition=0;
-    QVector<Track> m_matchCandidates;
+    std::shared_ptr<const OnlineTrackIndex> m_matchIndex;
     bool m_matchCandidatesReady=false;
     QHash<QString,qint64> m_onlineMatches;
+    quint64 m_snapshotSerial=0;
     quint64 m_operation = 0;
     qint64 m_requestedTrack = 0, m_failedTrack = 0;
     QSet<QString> m_reportedFailures;

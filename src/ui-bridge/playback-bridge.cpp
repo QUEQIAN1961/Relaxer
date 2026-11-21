@@ -12,7 +12,7 @@ PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent, Library 
     connect(facade,&PlaybackFacade::audioOutputsChanged,this,&PlaybackBridge::audioOutputsChanged);
     if (m_muted && library)
         m_muteRestoreVolume = qBound(0, library->setting("qml.muteRestoreVolume", 0).toInt(), 100);
-    connect(facade, &PlaybackFacade::snapshotChanged, this, [this] { refresh(); });
+    connect(facade, &PlaybackFacade::snapshotChanged, this, [this](const PlaybackSnapshot &value) { applySnapshot(value); });
     connect(facade, &PlaybackFacade::saved, this, [this] { refresh(); });
     connect(facade, &PlaybackFacade::playbackFailure, this,
         [this](quint64 operation, qint64 target, const QString &title, const QString &message, int code) {
@@ -47,7 +47,13 @@ void PlaybackBridge::playHistory(const QVariantMap &row){
 }
 void PlaybackBridge::refresh() {
     Q_ASSERT(QThread::currentThread() == thread());
-    const auto next = m_facade ? m_facade->snapshot() : PlaybackSnapshot{};
+    applySnapshot(m_facade ? m_facade->snapshot() : PlaybackSnapshot{});
+}
+void PlaybackBridge::applySnapshot(const PlaybackSnapshot &next) {
+    Q_ASSERT(QThread::currentThread() == thread());
+    // A queued payload can outlive a newer synchronous UI action. Keep the
+    // cheap value delivery, but accept only the authoritative engine revision.
+    if (m_facade && next.revision != m_facade->snapshotRevision()) return;
     const auto previous = m_state;
     const auto previousTitle = title(), previousArtist = artist();
     const bool previousFavorite = currentFavorite();

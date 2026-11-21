@@ -25,10 +25,23 @@ ApplicationWindow {
         }
     }
     component DeferredPage: Loader {
-        property bool requested: false
-        active: false
-        onRequestedChanged: if (requested) active = true
-        Component.onCompleted: if (requested) active = true
+        id:deferred
+        property bool requested:false
+        property bool recyclable:false
+        property var retainedState:null
+        active:false
+        onRequestedChanged:{if(requested){idleRelease.stop();active=true}else if(recyclable)idleRelease.restart()}
+        onLoaded:if(retainedState&&item&&typeof item.restorePageState==="function")item.restorePageState(retainedState)
+        Component.onCompleted:if(requested)active=true
+        Timer {
+            id:idleRelease;interval:45000
+            onTriggered:{
+                if(deferred.requested||!deferred.recyclable||!deferred.active)return
+                if(deferred.item&&typeof deferred.item.canUnloadPage==="function"&&!deferred.item.canUnloadPage()){restart();return}
+                deferred.retainedState=deferred.item&&typeof deferred.item.savePageState==="function"?deferred.item.savePageState():null
+                deferred.active=false
+            }
+        }
     }
     objectName: "qmlMainWindow"
     visible: false
@@ -175,14 +188,16 @@ ApplicationWindow {
     property bool upcomingAtLeft: false
     property bool upcomingRelocating:false
     property real upcomingTravel: 0
-    property var coverFrom: ({x:0,y:0,width:62,height:62,radius:10})
-    property var coverTo: ({x:0,y:0,width:62,height:62,radius:10})
+    property var coverFrom: ({x:0,y:0,width:62,height:62})
+    property var coverTo: ({x:0,y:0,width:62,height:62})
     property bool coverTravelling: false
     property real coverProgress: 0
     property url flightFile: ""
     property string flightSeed: ""
     property int navigationRevision: 0
     property var pageGrab: null
+    property bool snapshotAwaitingFrame:false
+    property size snapshotSize:Qt.size(0,0)
     property string settingsSection: "settings"
     property var pendingPageAction: null
     property bool pendingAppearanceClose: false
@@ -207,7 +222,6 @@ ApplicationWindow {
     function imageRect(item) { const p = item.mapToItem(root.contentItem,0,0); return {x:p.x,y:p.y,width:item.width,height:item.height} }
     function artworkRect(item) {
         const bounds = imageRect(item)
-        bounds.radius = item.radius
         return bounds
     }
     function textRect(item) {
@@ -277,20 +291,26 @@ ApplicationWindow {
     }
     function toggleNarrowWindow() {
         if(miniMode||miniSwitching||widthSwitchActive)return
+        // showNormal() restores an unrelated saved rectangle. Retain both the
+        // logical bounds and the physical anchor of the window the user sees.
+        const original=[root.x+root.width,root.y,root.height,root.width,narrowProgress]
+        uiIntegration.beginResizeAnchor(Qt.LeftEdge)
         function applySize(){
-            const right=root.x+root.width,top=root.y,keepHeight=root.height,initialWidth=root.width
-            const nextWidth=root.narrowLayout?Math.max(547,Number(settingsBridge.values.wideWindowWidth||1240)):root.minimumWidth
-            if(!root.narrowLayout)settingsBridge.setPreference("wideWindowWidth",Math.round(root.width))
+            const right=original[0],top=original[1],keepHeight=original[2],initialWidth=original[3]
+            const nextWidth=initialWidth<547?Math.max(547,Number(settingsBridge.values.wideWindowWidth||1240)):root.minimumWidth
+            if(initialWidth>=547)settingsBridge.setPreference("wideWindowWidth",Math.round(initialWidth))
             narrowMotion.stop();playerBar.closeTransientPopups();upcoming.panelExpanded=false
-            // Capture the physical right edge before the first geometry change.
-            uiIntegration.beginResizeAnchor(Qt.LeftEdge)
-            widthSwitchGeometry=[right,top,keepHeight,initialWidth,nextWidth,narrowProgress,nextWidth<547?1:0]
+            widthSwitchGeometry=[right,top,keepHeight,initialWidth,nextWidth,original[4],nextWidth<547?1:0]
             widthSwitchActive=true
             widthSwitchProgress=0
             if(settingsBridge.values.reduceMotion){widthSwitchProgress=1;widthSwitchActive=false;uiIntegration.endResizeAnchor()}
             else widthSwitchMotion.restart()
         }
-        if(visibility===Window.Maximized||visibility===Window.FullScreen){showNormal();Qt.callLater(applySize)}
+        if(visibility===Window.Maximized||visibility===Window.FullScreen){
+            showNormal()
+            uiIntegration.setWindowGeometry(original[0]-original[3],original[1],original[3],original[2])
+            Qt.callLater(applySize)
+        }
         else applySize()
     }
     function relocateUpcoming(left) {
@@ -326,21 +346,29 @@ ApplicationWindow {
         // Capture the painted background as well as the controls. Capturing
         // only the transparent pageSurface produces a black backdrop when
         // its snapshot is composited by the software renderer.
+        const capturedSize=Qt.size(paper.width,paper.height)
         const captured=paper.grabToImage(function(grab) {
-            if (revision!==navigationRevision) return
-            if(root.backgrounded){root.clearBulk();action();return}
-            pageGrab=grab; snapshotRevision=revision; navigationAction=action
+            if(revision!==navigationRevision)return
+            if(root.backgrounded||paper.width!==capturedSize.width||paper.height!==capturedSize.height){root.clearBulk();action();return}
+            pageGrab=grab;snapshotSize=capturedSize;snapshotRevision=revision;navigationAction=action
             oldPage.opacity=.001; oldPage.scale=1; oldPage.source=grab.url
             if(oldPage.status===Image.Ready) warmSnapshot()
         })
         if(!captured){root.clearBulk();action()}
     }
-    function clearPageSnapshot(){oldPage.visible=false;oldPage.source="";pageGrab=null}
-    function warmSnapshot() {
-        if(snapshotRevision!==navigationRevision || !navigationAction)return
-        oldPage.visible=true
-        snapshotWarmup.restart()
+    function clearPageSnapshot(){snapshotAwaitingFrame=false;snapshotWarmup.stop();oldPage.visible=false;oldPage.source="";pageGrab=null}
+    function warmSnapshot(){
+        if(snapshotRevision!==navigationRevision||!navigationAction)return
+        oldPage.visible=true;snapshotAwaitingFrame=true;snapshotWarmup.restart()
     }
+    function presentPageSnapshot(revision,animate){
+        if(!snapshotAwaitingFrame||revision!==snapshotRevision||revision!==navigationRevision||!navigationAction)return
+        snapshotAwaitingFrame=false;snapshotWarmup.stop()
+        const action=navigationAction;navigationAction=null;root.clearBulk()
+        if(!animate||backgrounded||settingsBridge.values.reduceMotion||paper.width!==snapshotSize.width||paper.height!==snapshotSize.height){action();pageSurface.opacity=1;pageSurface.y=0;clearPageSnapshot();return}
+        oldPage.opacity=1;action();pageSurface.opacity=.001;pageSurface.y=-7;pageOut.restart();pageIn.restart()
+    }
+    Connections {target:root;function onFrameSwapped(){if(root.snapshotAwaitingFrame){const revision=root.snapshotRevision;Qt.callLater(function(){root.presentPageSnapshot(revision,true)})}}}
     function requestQuit() { exitRequested=true; root.close() }
     function setMiniGeometry(b){uiIntegration.setWindowGeometry(b[0],b[1],b[2],b[3])}
     function settleMiniLayout(){
@@ -440,7 +468,6 @@ ApplicationWindow {
             part.toFamily=part.kind==="text"?item.font.family:""
             part.toWeight=part.kind==="text"?item.font.weight:0
             part.toPadding=part.kind==="icon"?(part.key==="queue"&&!narrowLayout?0:item.padding):0
-            part.toRadius=part.kind==="art"?item.radius:0
             flight.push(part)
         }
         miniFlightParts=flight
@@ -551,14 +578,14 @@ ApplicationWindow {
         ensureLyricsWorkspace().open()
     }
     readonly property url playerPreviewBackdropUrl: {
-        if(root.backgrounded || root.miniMode || !settingsBridge.values.playerCoverBackground)return ""
+        if(root.miniMode || !settingsBridge.values.playerCoverBackground)return ""
         const thumbnail=String(onlineArtwork.thumbnailCover)
         const file=thumbnail.length?thumbnail:String(playbackBridge.coverUrl)
         if(!file.length || file.startsWith("http"))return ""
         return "image://relaxer/blur?file="+encodeURIComponent(file)+"&resolution=96&seed="+encodeURIComponent(playbackBridge.title)+"&blur="+Number(settingsBridge.palette.blurExpanded||0)
     }
     Image {id:playerBackdropWarmup;objectName:"playerBackdropWarmup";visible:false;source:root.playerPreviewBackdropUrl;sourceSize.width:96;sourceSize.height:96;asynchronous:true}
-    function backgroundUrl(file,blur){return root.backgrounded||(root.miniMode&&!root.miniSwitching) ? "" : String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
+    function backgroundUrl(file,blur){return root.miniMode&&!root.miniSwitching ? "" : String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
     function applySettings() { Theme.fontScale=Number(settingsBridge.values.fontSize||15)/15;Theme.fontFamily=root.restFontFamily; if(settingsBridge.values.reduceMotion)relocateUpcoming(lyricsOpen); Theme.dark=settingsBridge.palette.dark; Theme.custom=settingsBridge.palette.custom ? settingsBridge.palette : ({}); Theme.customHighlights=!!settingsBridge.palette.custom }
     Component.onCompleted: { initialVideoPreviewId=playbackBridge.video&&!playbackBridge.playing?playbackBridge.trackId:"";width=settingsBridge.windowBounds.width;height=settingsBridge.windowBounds.height;applySettings() }
     Connections {
@@ -695,7 +722,7 @@ ApplicationWindow {
                             text:root.sidebarCondensed?"展开侧栏":"收起侧栏";Accessible.name:text
                             HintBubble { visible:sidebarLogo.hovered; text:sidebarLogo.text }
                             background:null
-                            contentItem:Image {source:"qrc:/icon.svg";fillMode:Image.PreserveAspectFit}
+                            contentItem:Image {source:"qrc:/icon.svg";fillMode:Image.PreserveAspectFit;smooth:true;mipmap:true;sourceSize:Qt.size(Math.ceil(sidebarLogo.width*Math.max(2,root.devicePixelRatio)),Math.ceil(sidebarLogo.height*Math.max(2,root.devicePixelRatio)))}
                             onClicked:root.sidebarCondensed=!root.sidebarCondensed
                         }
                         UiText {id:brandCaption;objectName:"sidebarBrandCaption";opacity:1-root.sidebarCondenseProgress;visible:opacity>0;x:41;width:implicitWidth;anchors.verticalCenter:parent.verticalCenter; text:"Relaxer"; basePixelSize:23; font.weight:Font.DemiBold; color:Theme.text }
@@ -816,15 +843,22 @@ ApplicationWindow {
                             anchors.fill:parent
                             currentIndex:root.settingsSection==="ai"?1:root.settingsSection==="appearance"?2:root.settingsSection==="log"?3:root.settingsSection==="platforms"?4:0
                             DeferredPage {
-                                id: settingsLoader
+                                id: settingsLoader;recyclable:true
                                 requested: appBridge.page === 3 && root.settingsSection === "settings"
-                                sourceComponent: Item { SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:28;anchors.bottomMargin:0;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onPlatformsRequested:root.changePage(function(){root.settingsSection="platforms"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
+                                sourceComponent: Item {
+                                    function savePageState(){return settingsPage.savePageState()}
+                                    function restorePageState(state){settingsPage.restorePageState(state)}
+                                    function canUnloadPage(){return settingsPage.canUnloadPage()}
+                                    SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:28;anchors.bottomMargin:0;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onPlatformsRequested:root.changePage(function(){root.settingsSection="platforms"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
                             }
                             DeferredPage {
-                                id: aiLoader
+                                id: aiLoader;recyclable:true
                                 requested: appBridge.page === 3 && root.settingsSection === "ai"
                                 sourceComponent: ScrollView {
                                     id:aiScroll;objectName:"aiSettingsScroll";contentWidth:availableWidth;clip:true
+                                    function canUnloadPage(){return aiPage.canUnloadPage()}
+                                    function savePageState(){return {subpage:aiPage.subpage,y:contentItem?contentItem.contentY:0}}
+                                    function restorePageState(state){aiPage.subpage=state.subpage||"home";Qt.callLater(function(){if(aiScroll.contentItem)aiScroll.contentItem.contentY=Math.max(0,Math.min(Number(state.y||0),aiScroll.contentItem.contentHeight-aiScroll.contentItem.height))})}
                                     SmoothWheelHandler { flickable: aiScroll.contentItem as Flickable }
                                     leftPadding:34;rightPadding:34;topPadding:28;bottomPadding:16
                                     AiPage {
@@ -856,7 +890,7 @@ ApplicationWindow {
                                 }
                             }
                             DeferredPage {
-                                id: logLoader
+                                id: logLoader;recyclable:true
                                 requested: appBridge.page === 3 && root.settingsSection === "log"
                                 sourceComponent: VersionLogPage{onBackRequested:root.changePage(function(){root.settingsSection="settings"})}
                             }
@@ -875,7 +909,7 @@ ApplicationWindow {
                         requested:appBridge.page===4
                         sourceComponent:DiscoverPage {backdropSource:paper}
                     }
-                    DeferredPage {requested:appBridge.page===5;sourceComponent:HistoryPage {backdropSource:paper}}
+                    DeferredPage {requested:appBridge.page===5;recyclable:true;sourceComponent:HistoryPage {backdropSource:paper}}
 
                 }
             }
@@ -917,7 +951,7 @@ ApplicationWindow {
     PlayerBar {
         id:playerBar;anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:implicitHeight
         popupBackdrop:contentHost
-        visible:!root.bulkActive&&!root.workspaceOpened;expanded:root.lyricsOpen;artworkTravelling:root.coverTravelling||root.miniFlightActive;miniControlsTravelling:root.miniFlightActive
+        visible:!root.bulkActive&&!root.workspaceOpened;expanded:root.lyricsOpen;expansion:root.playerProgress;artworkTravelling:root.coverTravelling||root.miniFlightActive;miniControlsTravelling:root.miniFlightActive
         wideLayoutWidth:root.widthSwitchActive?Math.max(root.widthSwitchGeometry[3],root.widthSwitchGeometry[4]):width
         compactLayoutWidth:root.widthSwitchActive?Math.min(root.widthSwitchGeometry[3],root.widthSwitchGeometry[4]):width
         backgroundCanvasHeight: normalShell.height; backgroundOffsetY: playerBar.y
@@ -1046,7 +1080,6 @@ ApplicationWindow {
         y:root.coverFrom.y+(root.coverTo.y-root.coverFrom.y)*root.coverProgress
         width:root.coverFrom.width+(root.coverTo.width-root.coverFrom.width)*root.coverProgress
         height:root.coverFrom.height+(root.coverTo.height-root.coverFrom.height)*root.coverProgress
-        radius:root.coverFrom.radius+(root.coverTo.radius-root.coverFrom.radius)*root.coverProgress
         MouseArea {anchors.fill:parent;acceptedButtons:Qt.AllButtons;onWheel:wheel=>{wheel.accepted=true}}
     }
 
@@ -1098,9 +1131,9 @@ ApplicationWindow {
     IconButton {
         id:videoPartsEntry;objectName:"compactVideoPartsEntry";x:titleBar.x-width-4;y:0;z:8;width:root.captionButtonWidth;height:root.captionHeight;padding:6
         readonly property var parts:{const key=playbackBridge.trackId;return bilibili.videoParts}
-        visible:Theme.compact&&root.playerPresented&&!root.miniMode&&!root.miniSwitching&&playbackBridge.video&&playbackBridge.onlineActive&&parts.length>0
+        visible:Theme.compact&&root.playerPresented&&!root.miniMode&&!root.miniSwitching&&bilibili.currentVideo
         opacity:root.playerChromeVisible?1:0;enabled:opacity>0&&!playerMotion.running&&parts.length>1
-        symbol:"parts";tip:"选集 · P"+bilibili.currentPart+"/"+parts.length;showTooltip:true
+        symbol:"parts";tip:parts.length?"选集 · P"+bilibili.currentPart+"/"+parts.length:bilibili.partsLoading?"正在读取分P":"暂无可用分P信息";showTooltip:true
         onClicked:root.ensureNowPlaying().toggleParts()
         Behavior on opacity {NumberAnimation {duration:settingsBridge.values.reduceMotion?0:180}}
     }
@@ -1293,14 +1326,10 @@ ApplicationWindow {
         onFinished:root.clearPageSnapshot()
     }
     Timer {
-        id:snapshotWarmup;interval:32
-        onTriggered:{
-            if(root.snapshotRevision!==root.navigationRevision||!root.navigationAction)return
-            const action=root.navigationAction;root.navigationAction=null
-            oldPage.opacity=1;root.clearBulk();action()
-            pageSurface.opacity=.001;pageSurface.y=-7
-            pageOut.restart();pageIn.restart()
-        }
+        id:snapshotWarmup;interval:250
+        // Unexposed/occluded windows may not swap a frame. Do not leave a
+        // navigation action waiting or start a stale geometry animation.
+        onTriggered:root.presentPageSnapshot(root.snapshotRevision,false)
     }
     Loader {
         id:importDialogLoader;active:false
@@ -1344,7 +1373,7 @@ ApplicationWindow {
             width:blend(modelData.from.width,modelData.to.width);height:blend(modelData.from.height,modelData.to.height)
             Loader {
                 anchors.fill:parent;active:modelData.kind==="art"
-                sourceComponent:Artwork {videoCover:playbackBridge.video;coverAspect:playbackBridge.video?(root.lyricsOpen?16/9:4/3):1;file:playbackBridge.coverUrl;revision:playbackBridge.artworkRevision;seed:playbackBridge.title;radius:flightPart.blend(8,modelData.toRadius);resolution:320;animated:false}
+                sourceComponent:Artwork {videoCover:playbackBridge.video;coverAspect:playbackBridge.video?(root.lyricsOpen?16/9:4/3):1;file:playbackBridge.coverUrl;revision:playbackBridge.artworkRevision;seed:playbackBridge.title;resolution:320;animated:false}
             }
             UiText {
                 id:flightText

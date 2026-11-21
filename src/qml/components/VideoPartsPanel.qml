@@ -11,6 +11,7 @@ Popup {
     property int currentPart:1
     property real reveal:0
     property real panelTop:76
+    property Item backdropSource:parent
     signal partRequested(int page)
     readonly property real exitBottom:parent.Window.window?parent.Window.window.height-parent.mapToItem(parent.Window.window.contentItem,0,0).y:parent.height
     readonly property var filteredRows:rows.filter(row=>!search.text.trim().length||String(row.part||"").toLowerCase().indexOf(search.text.trim().toLowerCase())>=0||String(row.page).indexOf(search.text.trim())>=0)
@@ -26,7 +27,16 @@ Popup {
     onAboutToShow:{search.text="";Qt.callLater(function(){parts.forceLayout();const index=panel.filteredRows.findIndex(row=>Number(row.page)===panel.currentPart);if(index>=0)parts.positionViewAtIndex(index,ListView.Contain)})}
     enter:Transition {NumberAnimation {target:panel;property:"reveal";from:0;to:1;duration:settingsBridge.values.reduceMotion?0:320;easing.type:Easing.OutCubic}}
     exit:Transition {NumberAnimation {target:panel;property:"reveal";to:0;duration:settingsBridge.values.reduceMotion?0:240;easing.type:Easing.InOutCubic}}
-    background:Rectangle {radius:12;color:Theme.card;border.color:Theme.border}
+    // Popup.Item is rendered in the window overlay, outside backdropSource;
+    // sampling the player therefore cannot feed this panel back into itself.
+    background:GlassSurface {
+        objectName:"videoPartsGlassSurface";radius:12;liquid:true;active:panel.visible
+        backdrop:panel.backdropSource;effectName:"videoPartsBackdropBlur"
+        sampleRect:{
+            const origin=panel.backdropSource&&panel.parent?panel.parent.mapToItem(panel.backdropSource,panel.x,panel.y):Qt.point(0,0)
+            return Qt.rect(origin.x,origin.y,panel.width,panel.height)
+        }
+    }
     contentItem:ColumnLayout {
         spacing:12
         RowLayout {

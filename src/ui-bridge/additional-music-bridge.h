@@ -68,6 +68,7 @@ signals:
     void downloadReady(const QVariantMap &song,const QUrl &url,const QString &extension);
     void downloadFailed(const QVariantMap &song,const QString &error);
 private:
+    void trimCatalog();
     QVector<Track> tracksFor(const QStringList &ids);
     using Done=std::function<void(const QJsonObject &,bool)>;
     Platform m_platform;
@@ -84,6 +85,7 @@ private:
     QUrl m_avatar;QJsonObject m_credential;
     QVariantList m_songs,m_playlists;QVariantMap m_currentPlaylist;
     QHash<QString,QVariantMap> m_catalog;QHash<qint64,QString> m_internal;
+    QHash<QString,qint64> m_identifiers;qint64 m_nextInternal=1;
     QHash<QString,QVariantMap> m_playlistCatalog;
     quint64 m_loginRevision=0,m_listRevision=0,m_playRevision=0;
     QString provider()const{return m_platform==Kugou?"kugou":"qishui";}

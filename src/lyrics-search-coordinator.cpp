@@ -6,6 +6,7 @@
 #include "lyric-text.h"
 #include "lyrics-document-reader.h"
 #include "lyrics.h"
+#include "disk-cache.h"
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -133,6 +134,8 @@ LyricsSearchCoordinator::LyricsSearchCoordinator(Library *library, QObject *pare
                                                  QVector<Source> sources)
     : QObject(parent), m_library(library), m_network(transport ? transport : new QNetworkAccessManager(this)),
       m_sources(sources.isEmpty() ? defaultSources(endpoint, backup) : sources) {
+    const auto candidateRoot=DiskCache::root(library);QDir().mkpath(candidateRoot);
+    m_candidateSession=std::make_shared<QTemporaryDir>(QDir(candidateRoot).filePath("lyrics-candidates-XXXXXX"));
     qRegisterMetaType<LyricsSearchEvent>();
     qRegisterMetaType<LyricsSearchSummary>();
     qRegisterMetaType<LyricsCandidateSnapshot>();
@@ -175,7 +178,7 @@ LyricsSearchCoordinator::LyricsSearchCoordinator(Library *library, QObject *pare
     connect(m_network, &QObject::destroyed, this, [this] { shutdown(); });
 }
 LyricsSearchCoordinator::~LyricsSearchCoordinator() {
-    shutdown();
+    shutdown();m_candidateStore.drain();
 }
 QString LyricsSearchCoordinator::candidateIdentity(const QJsonObject &record) {
     // Full immutable source record includes provider id, artist, version and both lyric representations.
@@ -232,8 +235,45 @@ QString LyricsSearchCoordinator::parameterIdentity(const LyricsSearchRequest &in
     return QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(fields).toJson(QJsonDocument::Compact),
         QCryptographicHash::Sha256).toHex());
 }
+LyricsCandidateSnapshot LyricsSearchCoordinator::candidates(qint64 id) const {
+    auto *self=const_cast<LyricsSearchCoordinator *>(this);
+    if(!ownerThread())return {};
+    if(!m_candidates.contains(id)&&m_candidateBacked.contains(id)){
+        QFile file(QDir(m_candidateSession->path()).filePath(QString::number(id)+".json"));
+        if(file.open(QIODevice::ReadOnly)){
+            const auto row=QJsonDocument::fromJson(file.readAll()).object();
+            const auto revision=row.value("revision").toString().toULongLong();
+            if(revision==m_candidateVersions.value(id)&&row.value("hash").toString()==m_library->track(id).hash)
+                self->m_candidates[id]={id,row.value("hash").toString(),revision,row.value("records").toArray(),row.value("parameters").toString()};
+        }
+    }
+    self->m_selectedCandidate=id;self->m_candidateUsed[id]=++self->m_candidateClock;
+    const auto value=m_candidates.value(id);self->trimCandidates();return value;
+}
+void LyricsSearchCoordinator::dropCandidates(qint64 id){
+    m_candidates.remove(id);m_candidateVersions.remove(id);m_candidateBacked.remove(id);m_candidateUsed.remove(id);m_candidateCosts.remove(id);
+}
+void LyricsSearchCoordinator::cacheCandidates(qint64 id){
+    const auto value=m_candidates.value(id);m_candidateVersions[id]=value.revision;m_candidateBacked.remove(id);m_candidateUsed[id]=++m_candidateClock;
+    const QJsonObject payload{{"id",QString::number(id)},{"hash",value.trackHash},{"revision",QString::number(value.revision)},{"parameters",value.parameterIdentity},{"records",value.records}};
+    m_candidateCosts[id]=variantMemoryCost(payload.toVariantMap());
+    if(m_candidateSession->isValid())m_candidateStore.saveJson(QDir(m_candidateSession->path()).filePath(QString::number(id)+".json"),payload,m_candidateSession,[this,id,revision=value.revision](bool ok,qint64 size,QByteArray){
+        if(ok&&m_candidateVersions.value(id)==revision){m_candidateBacked.insert(id);m_candidateCosts[id]=qMax(m_candidateCosts.value(id),size*3);trimCandidates();}
+    });
+    trimCandidates();
+}
+void LyricsSearchCoordinator::trimCandidates(){
+    for(;;){
+        qint64 bytes=0;for(auto it=m_candidates.cbegin();it!=m_candidates.cend();++it)bytes+=m_candidateCosts.value(it.key());
+        if(m_candidates.size()<=32&&bytes<=16*1024*1024)return;
+        qint64 oldest=0;quint64 used=~quint64(0);
+        for(auto it=m_candidates.cbegin();it!=m_candidates.cend();++it)
+            if(it.key()!=m_selectedCandidate&&!m_jobs.contains(it.key())&&m_candidateBacked.contains(it.key())&&m_candidateUsed.value(it.key())<used){oldest=it.key();used=m_candidateUsed.value(it.key());}
+        if(!oldest)return;m_candidates.remove(oldest);
+    }
+}
 void LyricsSearchCoordinator::invalidateCandidates(qint64 id) {
-    if (ownerThread()) m_candidates.remove(id); // Keep the on-disk cache for compatible local review.
+    if (ownerThread()) dropCandidates(id); // Keep the on-disk cache for compatible local review.
 }
 void LyricsSearchCoordinator::loadCached(const QVector<qint64> &ids, const std::optional<QStringList> &sources, bool requireTimed) {
     if (!ownerThread() || m_stopping) return;
@@ -245,7 +285,7 @@ void LyricsSearchCoordinator::loadCached(const QVector<qint64> &ids, const std::
         const auto context=parameterIdentity(defaults,m_sources);
         const auto previous=m_candidates.value(id);
         const auto cache = m_library->lookupCache(id);
-        if (!cache.fresh || cache.noResult || cache.records.isEmpty()) { m_candidates.remove(id); continue; }
+        if (!cache.fresh || cache.noResult || cache.records.isEmpty()) { dropCandidates(id); continue; }
         bool allSources=true;
         for(const auto &source:m_sources) if(sources&&!sources->contains(sourceId(source)))allSources=false;
         QJsonArray records;
@@ -259,14 +299,14 @@ void LyricsSearchCoordinator::loadCached(const QVector<qint64> &ids, const std::
             if (!allowed) continue;
             r["cacheOrigin"]=true; r["legacyCache"]=stored.isEmpty(); records.append(r);
         }
-        if (records.isEmpty()) m_candidates.remove(id);
+        if (records.isEmpty()) dropCandidates(id);
         else if(previous.trackHash!=t.hash || previous.parameterIdentity!=context || previous.records!=records)
-            m_candidates[id]={id,t.hash,++m_candidateRevision,records,context};
+            {m_candidates[id]={id,t.hash,++m_candidateRevision,records,context};cacheCandidates(id);}
     }
 }
 void LyricsSearchCoordinator::clearCandidates(qint64 id) {
     if (ownerThread()) {
-        m_candidates.remove(id);
+        dropCandidates(id);
         m_library->clearLookupCache(id);
     }
 }
@@ -334,7 +374,7 @@ void LyricsSearchCoordinator::setCandidates(const JobPtr &j, const QJsonArray &r
     if (snapshot.trackHash == j->original.hash && snapshot.records == records)
         return;
     snapshot = {j->original.id, j->original.hash, ++m_candidateRevision, records, parameterIdentity(j->input,m_sources)};
-    const auto value = snapshot;
+    const auto value = snapshot;cacheCandidates(j->original.id);
     const quint64 generation = j->generation;
     QTimer::singleShot(0, this, [this, value, generation] { emit candidatesChanged(value, generation); });
 }
@@ -357,7 +397,7 @@ quint64 LyricsSearchCoordinator::start(const QVector<LyricsSearchRequest> &reque
         if (!input.saveSnapshot.id)
             input.saveSnapshot = m_library->lyricsSaveSnapshot(input.original.id);
         const auto context=parameterIdentity(input,m_sources);
-        const auto previous=m_candidates.value(input.original.id);
+        const auto previous=candidates(input.original.id);
         // A failed explicit refresh may still offer compatible old candidates
         // for manual review. Changed parameters/sources must never revive them.
         auto retained=previous.trackHash==input.original.hash&&previous.parameterIdentity==context
@@ -373,7 +413,7 @@ quint64 LyricsSearchCoordinator::start(const QVector<LyricsSearchRequest> &reque
                 record["cacheOrigin"]=true;record["legacyCache"]=false;retained.append(record);
             }
         }
-        m_candidates[input.original.id] = {input.original.id,input.original.hash,++m_candidateRevision,retained,context};
+        m_candidates[input.original.id] = {input.original.id,input.original.hash,++m_candidateRevision,retained,context};cacheCandidates(input.original.id);
         if(!retained.isEmpty()){
             const auto snapshot=m_candidates.value(input.original.id);const auto generation=m_generation;
             QTimer::singleShot(0,this,[this,snapshot,generation]{emit candidatesChanged(snapshot,generation);});
@@ -482,6 +522,7 @@ void LyricsSearchCoordinator::finishJob(const JobPtr &j, const QString &status, 
         return;
     j->terminal = true;
     m_jobs.remove(j->original.id);
+    QTimer::singleShot(0,this,[this]{trimCandidates();});
     detachRequests(j);
     const bool recovering = state == LyricsSearchState::Queued;
     if (!recovering) {

@@ -19,6 +19,14 @@ QString literal(const QString &s){auto bytes=QJsonDocument(QJsonArray{s}).toJson
 QString cacheKey(const QString &provider,const QString &language,const QString &text){return provider+'\n'+language+'\n'+text;}
 }
 BrowserTranslation::BrowserTranslation(const QString &root,QObject *parent):QObject(parent),m_root(QDir(root).absoluteFilePath("browser-translation")){
+    m_idleTimer.setSingleShot(true);m_idleTimer.setInterval(120000);
+    connect(&m_idleTimer,&QTimer::timeout,this,&BrowserTranslation::reclaimIdleBrowser);
+    m_reapTimer.setInterval(100);
+    connect(&m_reapTimer,&QTimer::timeout,this,[this]{
+        if(m_process.state()!=QProcess::NotRunning||m_socket.state()!=QAbstractSocket::UnconnectedState)return;
+        m_reapTimer.stop();m_closing=false;m_ready=false;m_handshake=false;m_commands.clear();m_bytes.clear();m_fragments.clear();m_lock.reset();
+        if(m_busy)launch();
+    });
     m_socket.setProxy(QNetworkProxy::NoProxy);m_timer.setInterval(800);
     connect(&m_timer,&QTimer::timeout,this,&BrowserTranslation::tick);
     connect(&m_socket,&QTcpSocket::connected,this,[this]{
@@ -77,11 +85,12 @@ QString BrowserTranslation::readScript(const QString &provider,const QString &te
     })())JS").arg(literal(text),provider=="baidu"?"true":"false");
 }
 void BrowserTranslation::translate(quint64 token,const QString &provider,const QString &text,const QString &language){
-    cancel();m_token=token;m_provider=provider=="baidu"?"baidu":"bing";m_text=text;m_language=language;m_busy=true;m_clock.restart();
+    cancel();m_idleTimer.stop();m_token=token;m_provider=provider=="baidu"?"baidu":"bing";m_text=text;m_language=language;m_busy=true;m_clock.restart();
     const auto epoch=m_epoch;
     const auto key=cacheKey(m_provider,m_language,m_text);
-    if(m_cache.contains(key)){const auto result=m_cache.value(key);QTimer::singleShot(0,this,[this,epoch,result]{if(m_busy&&m_epoch==epoch)finish(result);});return;}
+    if(const auto *cached=m_cache.object(key)){const auto result=*cached;QTimer::singleShot(0,this,[this,epoch,result]{if(m_busy&&m_epoch==epoch)finish(result);});return;}
     if(m_text.size()>4000){QTimer::singleShot(0,this,[this,epoch]{if(m_busy&&m_epoch==epoch)finish({},"单行歌词超过 4000 字，请先拆分该行");});return;}
+    if(m_closing)return;
     if(m_ready){submit();m_timer.start();}else launch();
 }
 void BrowserTranslation::launch(){
@@ -100,18 +109,39 @@ void BrowserTranslation::launch(){
     m_process.setProgram(exe);m_process.setArguments(args);if(property("traceTest").toBool())m_process.setProcessChannelMode(QProcess::ForwardedErrorChannel);else m_process.setStandardErrorFile(QProcess::nullDevice());m_process.setStandardOutputFile(QProcess::nullDevice());m_process.start();m_timer.start();
 }
 void BrowserTranslation::disconnectBrowser(){
-    m_closing=true;m_ready=false;m_commands.clear();
+    m_idleTimer.stop();m_reapTimer.stop();m_closing=true;m_ready=false;m_commands.clear();
     if(m_handshake&&m_socket.state()==QAbstractSocket::ConnectedState){command("Browser.close",{}, {},false);m_socket.flush();m_socket.waitForBytesWritten(100);}
     m_socket.abort();m_handshake=false;m_bytes.clear();m_fragments.clear();m_session.clear();m_target.clear();
     if(m_process.state()!=QProcess::NotRunning&&!m_process.waitForFinished(1500)){m_process.kill();m_process.waitForFinished(1500);}
     m_lock.reset();m_closing=false;
 }
-void BrowserTranslation::cancel(){++m_epoch;m_busy=false;m_waiting=false;m_polling=false;m_submitted=false;m_candidate.clear();m_stable.invalidate();m_timer.stop();}
+void BrowserTranslation::cancel(){++m_epoch;m_busy=false;m_waiting=false;m_polling=false;m_submitted=false;m_candidate.clear();m_stable.invalidate();m_timer.stop();m_idleTimer.start();}
 void BrowserTranslation::resume(){if(!m_busy||!m_waiting)return;m_waiting=false;m_clock.restart();m_candidate.clear();m_stable.invalidate();emit resumed();m_timer.start();}
 void BrowserTranslation::showBrowser(){if(m_ready&&!m_target.isEmpty())command("Target.activateTarget",{{"targetId",m_target}}, {},false);}
 void BrowserTranslation::finish(const QString &text,const QString &error){
-    if(!m_busy)return;const auto token=m_token;if(error.isEmpty()&&!text.isEmpty()){if(m_cache.size()>4096)m_cache.clear();m_cache.insert(cacheKey(m_provider,m_language,m_text),text);}
+    if(!m_busy)return;const auto token=m_token;if(error.isEmpty()&&!text.isEmpty()){const auto key=cacheKey(m_provider,m_language,m_text);const int cost=qMax(1,int((key.size()+text.size())*2/1024)+1);m_cache.insert(key,new QString(text),cost);}
     cancel();emit completed(token,text,error);
+}
+void BrowserTranslation::reclaimIdleBrowser(){
+    if(m_busy||m_waiting||m_closing||!m_ready||!m_handshake)return;
+    const auto epoch=m_epoch;
+    command("Target.getTargets",{},[this,epoch](const QJsonObject &reply){
+        if(m_busy||m_waiting||m_closing||epoch!=m_epoch)return;
+        int pages=0;bool owned=false;
+        for(const auto &entry:reply["result"].toObject()["targetInfos"].toArray()){
+            const auto target=entry.toObject();if(target["type"].toString()=="page"){++pages;owned|=target["targetId"].toString()==m_target;}
+        }
+        // Additional tabs and a focused/editable page belong to the user.
+        if(pages!=1||!owned){m_idleTimer.start();return;}
+        const auto selector=m_provider=="baidu"?"[data-slate-editor=true]":"#tta_input_ta";
+        const auto idleCheck=QString("(()=>{const input=document.querySelector(%1);return document.hasFocus() || !input || (input.value ?? input.innerText ?? '').trim()!==%2.trim();})()").arg(literal(QString::fromLatin1(selector)),literal(m_text));
+        command("Runtime.evaluate",{{"expression",idleCheck},{"returnByValue",true}},[this,epoch](const QJsonObject &state){
+            if(m_busy||m_waiting||m_closing||epoch!=m_epoch)return;
+            const auto result=state["result"].toObject()["result"].toObject();
+            if(result["type"].toString()!="boolean"||result["value"].toBool()){m_idleTimer.start();return;}
+            m_closing=true;m_ready=false;command("Browser.close",{},{},false);m_socket.flush();m_reapTimer.start();
+        });
+    },false);
 }
 void BrowserTranslation::attention(const QString &reason){if(!m_busy||m_waiting)return;m_waiting=true;m_timer.stop();showBrowser();emit needsAttention(reason);}
 void BrowserTranslation::tick(){

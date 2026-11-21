@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <algorithm>
 #include <climits>
+#include <QRunnable>
 
 namespace relaxer {
 namespace {
@@ -20,6 +21,8 @@ QUrl artworkUrl(const QString &path) {
 
 TrackListModel::TrackListModel(Library *library, QObject *parent) : QAbstractListModel(parent), m_library(library) {
     Q_ASSERT(library && library->thread() == thread());
+    m_sizePool.setMaxThreadCount(1);m_sizePool.setExpiryTimeout(5000);m_sizeTimer.setSingleShot(true);
+    connect(&m_sizeTimer,&QTimer::timeout,this,&TrackListModel::readFileSizes);
     m_refresh.setSingleShot(true);
     connect(&m_refresh, &QTimer::timeout, this, &TrackListModel::refresh);
     connect(library, &Library::changed, this, [this] { if (!m_refresh.isActive()) m_refresh.start(0); });
@@ -55,11 +58,7 @@ QVariant TrackListModel::data(const QModelIndex &index, int role) const {
     case FileSize: {
         if (!m_library||m_cloud) return qint64(-1);
         const auto path = m_library->absolute(t.file);
-        if (!m_fileSizes.contains(path)) {
-            const QFileInfo file(path);
-            m_fileSizes.insert(path, file.isFile() ? file.size() : qint64(-1));
-        }
-        return m_fileSizes.value(path);
+        return m_fileSizes.value(path,-1);
     }
     default: return {};
     }
@@ -100,9 +99,28 @@ void TrackListModel::refresh() {
     if (m_playlist == -3)
         std::stable_sort(next.begin(), next.end(), [](const Track &a, const Track &b) { return a.heard > b.heard; });
     beginResetModel();
-    m_tracks = next; m_rows.clear(); m_rows.reserve(m_tracks.size()); m_fileSizes.clear();
+    m_tracks = next; m_rows.clear(); m_rows.reserve(m_tracks.size());
     for (int row = 0; row < m_tracks.size(); ++row) m_rows.insert(m_tracks[row].id, row);
     endResetModel();
+    if(m_sizeCancel)m_sizeCancel->store(true);++m_sizeRevision;m_sizeTimer.start(0);
+}
+TrackListModel::~TrackListModel(){m_sizeTimer.stop();if(m_sizeCancel)m_sizeCancel->store(true);m_sizePool.clear();m_sizePool.waitForDone();}
+void TrackListModel::readFileSizes(){
+    if(m_sizeCancel)m_sizeCancel->store(true);m_sizePool.clear();const auto revision=++m_sizeRevision;
+    if(!m_library||m_cloud){m_fileSizes.clear();return;}
+    QStringList paths;paths.reserve(m_tracks.size());QSet<QString> current;
+    for(const auto &track:m_tracks){const auto path=m_library->absolute(track.file);if(!current.contains(path)){paths.append(path);current.insert(path);}}
+    for(auto it=m_fileSizes.begin();it!=m_fileSizes.end();)if(!current.contains(it.key()))it=m_fileSizes.erase(it);else ++it;
+    const auto cancelled=std::make_shared<std::atomic_bool>(false);m_sizeCancel=cancelled;
+    m_sizePool.start(QRunnable::create([this,paths,revision,cancelled]{
+        QHash<QString,qint64> sizes;sizes.reserve(paths.size());
+        for(const auto &path:paths){if(cancelled->load())return;const QFileInfo file(path);sizes.insert(path,file.isFile()?file.size():-1);}
+        if(cancelled->load())return;
+        QMetaObject::invokeMethod(this,[this,sizes,revision]{
+            if(revision!=m_sizeRevision)return;m_fileSizes=sizes;
+            if(!m_tracks.isEmpty())emit dataChanged(index(0),index(m_tracks.size()-1),{FileSize});
+        },Qt::QueuedConnection);
+    }));
 }
 void TrackListModel::refreshStatistics(qint64 trackId) {
     if (!m_library || trackId <= 0) return;
@@ -141,6 +159,9 @@ TrackFilterModel::TrackFilterModel(TrackListModel *source, QObject *parent)
     connect(&m_notifications,&QTimer::timeout,this,&TrackFilterModel::changed);
     connect(this, &QAbstractItemModel::modelReset, this, &TrackFilterModel::changed);
     connect(source, &QAbstractItemModel::modelReset, this, [this] { emit optionsChanged(); });
+    connect(source,&QAbstractItemModel::dataChanged,this,[this](const QModelIndex &,const QModelIndex &,const QList<int> &roles){
+        if(roles.isEmpty()||roles.contains(TrackListModel::Duration)||roles.contains(TrackListModel::FileSize)){m_totalsDirty=true;emit totalsChanged();}
+    });
     connect(this, &QAbstractItemModel::layoutChanged, this, &TrackFilterModel::changed);
     const auto notify = [this] { if (!m_notifications.isActive()) m_notifications.start(0); };
     connect(this, &QAbstractItemModel::rowsInserted, this, notify);
@@ -148,6 +169,7 @@ TrackFilterModel::TrackFilterModel(TrackListModel *source, QObject *parent)
 }
 void TrackFilterModel::changed() {
     m_notifications.stop();
+    m_totalsDirty=true;emit totalsChanged();
     if (m_selected && (!m_source || m_source->rowForId(m_selected) < 0)) m_selected = 0;
     emit countChanged(); emit selectionChanged();
 }
@@ -216,17 +238,13 @@ QStringList TrackFilterModel::albums() const {
     }
     normalizeOptions(options); return options;
 }
-qint64 TrackFilterModel::totalDuration() const {
-    qint64 total = 0;
-    for (int row = 0; row < rowCount(); ++row) total += data(index(row, 0), TrackListModel::Duration).toLongLong();
-    return total;
+void TrackFilterModel::updateTotals()const{
+    if(!m_totalsDirty)return;m_totalDuration=0;m_totalFileSize=0;
+    for(int row=0;row<rowCount();++row){const auto item=index(row,0);m_totalDuration+=data(item,TrackListModel::Duration).toLongLong();m_totalFileSize+=qMax<qint64>(0,data(item,TrackListModel::FileSize).toLongLong());}
+    m_totalsDirty=false;
 }
-qint64 TrackFilterModel::totalFileSize() const {
-    qint64 total = 0;
-    for (int row = 0; row < rowCount(); ++row)
-        total += qMax<qint64>(0, data(index(row, 0), TrackListModel::FileSize).toLongLong());
-    return total;
-}
+qint64 TrackFilterModel::totalDuration()const{updateTotals();return m_totalDuration;}
+qint64 TrackFilterModel::totalFileSize()const{updateTotals();return m_totalFileSize;}
 void TrackFilterModel::clearFilters() {
     const bool textChanged = !m_filter.isEmpty(), selectorsChanged = !m_artist.isEmpty() || !m_album.isEmpty();
     m_filter.clear(); m_artist.clear(); m_album.clear(); invalidateFilter();

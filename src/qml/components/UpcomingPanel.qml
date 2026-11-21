@@ -95,8 +95,8 @@ Item {
         }
         Artwork {
             id: compactArt; objectName:"nextCompactCover"; visible: !panel.expandedPlayer && !panel.panelExpanded && upcomingModel.count > 0
-            x:38; y:5; width:upcomingModel.firstVideo?32:24; height:24;videoCover:upcomingModel.firstVideo; radius:5; resolution:80; animated:false
-            file: upcomingModel.firstCoverUrl; seed: upcomingModel.firstTitle; revision: upcomingModel.firstCoverRevision
+            x:38; y:5; width:upcomingModel.firstVideo?32:24; height:24;videoCover:upcomingModel.firstVideo;  resolution:80; animated:false
+            file: upcomingModel.firstCoverUrl; contentKey:upcomingModel.firstTrackKey; seed: upcomingModel.firstTitle; revision: upcomingModel.firstCoverRevision
         }
         UiText { fontRegion: "next";
             id: compactTitle; objectName: "nextCompactTitle"
@@ -154,8 +154,8 @@ Item {
             }
             UiText { fontRegion: "next"; x: 8; width: 20; height: parent.height; text: row.index + 1; color: Theme.text; basePixelSize: 15; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
             Artwork {
-                id: rowArt; x: 32; anchors.verticalCenter: parent.verticalCenter; width: panel.coverSize*(row.videoTrack?4/3:1); height: panel.coverSize;videoCover:row.videoTrack; radius: 5
-                file: row.coverUrl; seed: row.title; revision: row.coverRevision; resolution: 100; animated: false
+                id: rowArt; x: 32; anchors.verticalCenter: parent.verticalCenter; width: panel.coverSize*(row.videoTrack?4/3:1); height: panel.coverSize;videoCover:row.videoTrack;
+                file: row.coverUrl; contentKey:row.trackKey; seed: row.title; revision: row.coverRevision; resolution: 100; animated: false
             }
             UiText { fontRegion: "next";
                 id: rowTitle;objectName:"upcomingTitle-"+row.index; x: rowArt.x + rowArt.width + 8; width: panel.popupPresentation?Math.max(40,(rows.width-x-30)*.58):Math.min(titleMetrics.advanceWidth,Math.max(40,(rows.width-x-30)*.58)); height: parent.height

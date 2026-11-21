@@ -322,11 +322,15 @@ private slots:
         QVERIFY(bridge->editAppearance("shareLR",true));QVERIFY(bridge->editAppearance("blurLeft",0));QVERIFY(bridge->saveAppearance());
         auto *paper=visual(window->contentItem(),"paperSurface");QVERIFY(paper);
         auto correct=[&]{
-            const auto shot=window->grabWindow();if(shot.isNull())return false;const auto dpr=shot.devicePixelRatio();
+            const auto shot=window->grabWindow();if(shot.isNull())return false;const auto dpr=qreal(shot.width())/window->width();
             const auto area=paper->mapRectToScene(QRectF(QPointF(),paper->size()));
-            const auto left=shot.pixelColor(qRound((area.x()+area.width()*.2)*dpr),qRound((area.y()+area.height()*.9)*dpr));
-            const auto right=shot.pixelColor(qRound((area.x()+area.width()*.8)*dpr),qRound((area.y()+area.height()*.9)*dpr));
-            return left.red()>170&&left.red()>left.blue()+70&&right.blue()>170&&right.blue()>right.red()+70;
+            // Sample the page margins. The destination discovery grid can
+            // legitimately cover the old 20%/80% probes with playlist cards.
+            const auto left=shot.pixelColor(qRound((area.left()+12)*dpr),qRound((area.y()+area.height()*.9)*dpr));
+            const auto right=shot.pixelColor(qRound((area.right()-12)*dpr),qRound((area.y()+area.height()*.9)*dpr));
+            const bool valid=left.red()>170&&left.red()>left.blue()+70&&right.blue()>170&&right.blue()>right.red()+70;
+            if(!valid){shot.save(evidence+"/managed-background-failure.png");qWarning()<<"background samples"<<left<<right;}
+            return valid;
         };
         QTRY_VERIFY(correct());
         auto *button=visual(window->contentItem(),"navigation1");QVERIFY(button);const auto point=button->mapToScene(QPointF(button->width()/2,button->height()/2));

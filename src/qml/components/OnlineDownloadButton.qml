@@ -7,7 +7,12 @@ Button {
     property string provider:""
     property var song:({})
     property string quality:"hires"
-    readonly property var task:{onlineDownloads.taskRevision;return onlineDownloads.task(provider,song)}
+    readonly property string downloadKey:onlineDownloads.taskKey(provider,song)
+    property var task:({})
+    function refreshTask(){task=onlineDownloads.task(provider,song)}
+    onDownloadKeyChanged:refreshTask()
+    Component.onCompleted:refreshTask()
+    Connections {target:onlineDownloads;function onTasksChanged(){control.refreshTask()}function onTaskUpdated(key,value){if(key===control.downloadKey)control.task=value}}
     readonly property bool downloaded:{onlineDownloads.revision;return onlineDownloads.isDownloaded(provider,song)}
     readonly property bool pending:["queued","resolving","downloading","converting"].indexOf(task.state)>=0
     readonly property bool canDownload:!downloaded&&!pending

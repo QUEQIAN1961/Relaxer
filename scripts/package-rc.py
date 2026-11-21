@@ -64,7 +64,7 @@ def collect_qml_runtime(source, stage, prefix):
     return imports
 
 
-def assemble(source, build, baseline, destination, qt_prefix=None):
+def assemble(source, build, baseline, destination, qt_prefix=None, release_revision=None, acceptance_status=None):
     if destination.exists():
         raise ValueError('Use a new destination; existing archives are preserved')
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=source).strip():
@@ -72,8 +72,12 @@ def assemble(source, build, baseline, destination, qt_prefix=None):
     version = re.search(r'Version\[\]\s*=\s*"([^"]+)"', (source / 'src/phase-c-version.h').read_text())[1]
     if not re.fullmatch(r'\d+\.\d+\.\d+-(?:RC\d*|GA)', version):
         raise ValueError('Expected an RC or GA version')
+    if release_revision is not None and not re.fullmatch(r'r[1-9]\d*', release_revision):
+        raise ValueError('Expected a release revision such as r2')
     channel = 'GA' if version.endswith('-GA') else 'RC'
     acceptance = 'user-confirmed-manual-acceptance' if channel == 'GA' else 'rc-targeted-checks-complete'
+    if acceptance_status is not None:
+        acceptance = acceptance_status
     frozen = identity(source)
     fingerprint = (build / 'relaxer-source-fingerprint.txt').read_text().strip()
     if fingerprint != frozen['sourceFingerprint']:
@@ -82,7 +86,8 @@ def assemble(source, build, baseline, destination, qt_prefix=None):
     if digest(baseline) != BASELINE_SHA256:
         raise ValueError('Baseline is not the published V0.2.2-GA Windows archive')
 
-    display = 'V' + version
+    release_version = version + ('-' + release_revision if release_revision else '')
+    display = 'V' + release_version
     stage = destination / 'Desktop-Win64'
     stage.mkdir(parents=True)
     with zipfile.ZipFile(baseline) as archive:
@@ -144,7 +149,7 @@ def assemble(source, build, baseline, destination, qt_prefix=None):
     markers.mkdir(parents=True, exist_ok=True)
     for name in ('LICENSE.txt', 'README.md'):
         shutil.copy2(source / 'resources/playlist-marks' / name, markers / name)
-    notes = source / 'docs/releases' / ('v' + version)
+    notes = source / 'docs/releases' / ('v' + release_version)
     shutil.copy2(notes / 'RELEASE-NOTES.md', stage / 'RELEASE-NOTES.md')
     shutil.copy2(notes / 'BUILD-AND-SOURCE.md', stage / 'BUILD-AND-SOURCE.md')
     (stage / 'READ-ME-FIRST.md').write_text(
@@ -164,6 +169,8 @@ def assemble(source, build, baseline, destination, qt_prefix=None):
                     channel=channel, dependencyBaseline=baseline.name,
                     dependencyBaselineSHA256=BASELINE_SHA256)
     metadata['midiDependencies'] = midi_runtime
+    if release_revision:
+        metadata.update(applicationVersion='V' + version, releaseRevision=release_revision)
     metadata['ffmpegDependencies'] = ffmpeg
     metadata['qmlModules'] = sorted({entry['name'] for entry in imports if entry.get('type') == 'module'})
     metadata['coreBinarySHA256'] = {'Relaxer.exe': core['RelaxerPortable.exe'],
@@ -236,5 +243,7 @@ if __name__ == '__main__':
     for name in ('source', 'build', 'baseline', 'destination'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--qt-prefix', type=Path, required=True)
+    parser.add_argument('--release-revision', help='Packaging revision; keeps the accepted application version and source fingerprint')
+    parser.add_argument('--acceptance-status', choices=['user-confirmed-manual-acceptance', 'independent-harness-pass-with-environment-note', 'rc-targeted-checks-complete'])
     args = parser.parse_args()
-    print(json.dumps(assemble(*(getattr(args, name).resolve() for name in ('source', 'build', 'baseline', 'destination')), qt_prefix=args.qt_prefix.resolve()), ensure_ascii=False))
+    print(json.dumps(assemble(*(getattr(args, name).resolve() for name in ('source', 'build', 'baseline', 'destination')), qt_prefix=args.qt_prefix.resolve(), release_revision=args.release_revision, acceptance_status=args.acceptance_status), ensure_ascii=False))

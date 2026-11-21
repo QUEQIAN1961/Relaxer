@@ -1,3 +1,4 @@
+#include "continuous-corner.h"
 #include "motion.h"
 #include <QPainter>
 #include <QPainterPath>
@@ -96,8 +97,8 @@ void PageMotion::paintEvent(QPaintEvent *) {
     if(details>0){p.save();p.setClipRect(m_area);p.setOpacity(details);
         p.drawPixmap(m_area,m_expanding?m_next:m_old);p.restore();}
     const QRectF cover=between(m_art.coverFrom,m_art.coverTo,travel);
-    p.save();QPainterPath clip;const qreal radius=m_expanding?10+14*travel:24-14*travel;
-    clip.addRoundedRect(cover,radius,radius);p.setClipPath(clip);p.drawPixmap(cover,m_art.cover,QRectF(0,0,m_art.cover.width(),m_art.cover.height()));p.restore();
+    p.save();QPainterPath clip;
+    clip=continuousCornerPath(cover,artworkCornerRadius(cover));p.setClipPath(clip);p.drawPixmap(cover,m_art.cover,QRectF(0,0,m_art.cover.width(),m_art.cover.height()));p.restore();
     auto text=[&](const QRectF &from,const QRectF &to,const QPixmap &small,const QPixmap &large){
         const QRectF r=between(from,to,travel);const qreal sourceOpacity=1-ease(t/.32),targetOpacity=ease((t-.38)/.62);
         p.save();p.setOpacity(sourceOpacity);const auto &source=m_expanding?small:large;

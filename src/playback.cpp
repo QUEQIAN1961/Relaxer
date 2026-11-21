@@ -25,6 +25,8 @@
 namespace relaxer {
 Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     : QObject(p), m_library(l), m_fader([this](qreal gain){if(m_output)m_output->setVolume(m_volume*gain/100.);if(m_midi&&m_midiBackend)m_midiBackend->setVolume(qRound(m_volume*gain));}), m_player(this), m_decodeOnly(decodeOnly) {
+    connect(l,&Library::changed,this,[this]{m_currentTrackValid=false;});
+    connect(l,&Library::statsChanged,this,[this]{m_currentTrackValid=false;});
     m_midiBackend = std::make_unique<MidiTransport>(l->root(), MidiTransport::Sender{}, MidiTransport::PathResolver{}, decodeOnly);
     connect(l,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("playbackFade")&&!m_library->setting("playbackFade",false).toBool())m_fader.finish();});
     connect(l,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("localVideoMode"))applyLocalVideoMode();});
@@ -62,7 +64,9 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
             }
             return;
         }
-        emit positionChanged(position(), duration());
+        const auto pos=position(),length=duration();
+        if(pos!=m_emittedPosition||length!=m_emittedDuration){m_emittedPosition=pos;m_emittedDuration=length;emit positionChanged(pos,length);}
+        m_timer.setInterval(playing()?250:1000);
     });
     m_timer.start();
     connect(&m_player, &QMediaPlayer::playbackStateChanged, this, [this](auto state) {
@@ -70,6 +74,7 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
         if (m_wasPlaying && state != QMediaPlayer::PlayingState)
             sample(false, true);
         m_wasPlaying = state == QMediaPlayer::PlayingState;
+        m_timer.setInterval(m_wasPlaying?250:1000);
         m_lastPosition = m_player.position();
         m_lastWall = m_elapsed.elapsed();
         emit stateChanged();
@@ -381,17 +386,29 @@ void Playback::setVolume(int v) {
     if (!m_midiBackend->setVolume(qRound(m_volume*m_fader.gain())) && m_midi) emit error(m_midiBackend->error());
     m_library->setSetting("volume", qBound(0, v, 100));
 }
+Track Playback::current() const {
+    if(!m_currentTrackValid||m_currentTrack.id!=m_queue.current()){
+        m_currentTrack=m_library->track(m_queue.current());m_currentTrackValid=true;
+    }
+    return m_currentTrack;
+}
 bool Playback::saveQueue() {
     if (m_shutdown) return m_shutdownSaved;
     m_lastSaveWrote=false;
-    QJsonArray ids;
-    for (auto t : m_queue.items) ids.append(double(t));
+    if(!m_haveSavedQueue||m_savedQueueIds!=m_queue.items){
+        m_savedQueueIds=m_queue.items;m_savedQueueArray={};
+        for(auto t:m_savedQueueIds)m_savedQueueArray.append(double(t));
+    }
+    const auto &ids=m_savedQueueArray;
     // Same keys and representation; one existing storage transaction prevents
     // a failed periodic/final snapshot from leaving a partially updated queue.
     const QJsonObject snapshot{{"queue", ids}, {"current", double(m_queue.current())},
         {"position", m_library->setting("rememberPosition",true).toBool()?double(position()):0}, {"activeSession", double(m_session.id)}};
     if(m_haveSavedQueue&&snapshot==m_lastSavedQueue)return true;
-    const bool ok = m_library->setSettings(snapshot);
+    QJsonObject changed;
+    for(auto it=snapshot.begin();it!=snapshot.end();++it)
+        if(!m_haveSavedQueue||m_lastSavedQueue.value(it.key())!=it.value())changed.insert(it.key(),it.value());
+    const bool ok = m_library->setSettings(changed);
     if(ok){m_lastSavedQueue=snapshot;m_haveSavedQueue=true;m_lastSaveWrote=true;}
     else {m_saveError=m_library->lastError();emit saveFailed(m_saveError);}
     return ok;
@@ -514,7 +531,7 @@ void Playback::haltTransport() {
         process->deleteLater();
     }
     m_player.stop();
-    DiskCache::activeFiles.remove(m_player.source().toLocalFile());
+    DiskCache::releaseActive(m_player.source().toLocalFile());
 }
 void Playback::stopMidi() {
     if(!m_midiBackend->close())qWarning().noquote()<<"Playback::stopMidi:"<<m_midiBackend->error();
@@ -586,7 +603,7 @@ bool Playback::ensurePlayable(const Track &track, bool autoplay) {
     const auto key = QCryptographicHash::hash((path + QString::number(stamp)).toUtf8(), QCryptographicHash::Sha1).toHex();
     const QString flac = cache.filePath(QString::fromLatin1(key) + ".flac");
     if (QFileInfo::exists(flac) && QFileInfo(flac).size() > 0) {
-        DiskCache::activeFiles.insert(flac);
+        DiskCache::markActive(flac);
         m_player.setSource(QUrl::fromLocalFile(flac));
         DiskCache::trim(m_library,{flac});
         if (autoplay)
@@ -618,7 +635,7 @@ bool Playback::ensurePlayable(const Track &track, bool autoplay) {
         m_player.setSource(QUrl::fromLocalFile(flac));
         if (autoplay)
             m_player.play();
-        DiskCache::activeFiles.insert(flac);DiskCache::trim(m_library,{flac});
+        DiskCache::markActive(flac);DiskCache::trim(m_library,{flac});
     });
     process->start();
     return true;

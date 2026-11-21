@@ -6,6 +6,7 @@ import "../theme"
 Item {
     id:page;objectName:"versionLogPage"
     signal backRequested()
+    function canUnloadPage(){return !legalNotices.visible}
     LegalNoticeDialog {id:legalNotices;parent:page.Overlay.overlay}
     property int shown:3
     onVisibleChanged: if (visible) { shown=3; scroll.contentItem.contentY=0 }

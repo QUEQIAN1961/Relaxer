@@ -10,6 +10,7 @@
 // No cpr/borealis/mpv, upstream UI, artwork, fonts or bundled binaries copied.
 // See REFERENCES.md and docs/third-party/wiliwili/LICENSE.
 #include "bilibili-bridge.h"
+#include "online-catalog-memory.h"
 #include <QScopeGuard>
 #include "disk-cache.h"
 #include "../../third_party/qrcodegen/qrcodegen.hpp"
@@ -102,7 +103,7 @@ BilibiliBridge::BilibiliBridge(Library *library,PlaybackFacade *facade,OnlineArt
     m_network.setCookieJar(m_cookies);m_poll.setInterval(1800);connect(&m_poll,&QTimer::timeout,this,&BilibiliBridge::pollLogin);
     connect(facade,&PlaybackFacade::onlineSourceRequested,this,&BilibiliBridge::requestSource);
     connect(facade,&PlaybackFacade::onlineTrackUpdated,this,[this](qint64 id){if(m_facade->current().id==id)emit changed();});
-    connect(facade,&PlaybackFacade::trackChanged,this,&BilibiliBridge::changed);
+    connect(facade,&PlaybackFacade::trackChanged,this,[this]{++m_partsRevision;m_partsKey.clear();m_partsLoading=false;emit changed();ensureVideoParts();});
 }
 BilibiliBridge::~BilibiliBridge(){m_poll.stop();for(auto *reply:m_requests.keys()){reply->disconnect(this);reply->abort();}}
 QString BilibiliBridge::sessionPath()const{const auto folder=QDir(m_library->root()).filePath("Online");QDir().mkpath(folder);return QDir(folder).filePath("bilibili-session.bin");}
@@ -180,7 +181,7 @@ void BilibiliBridge::showPage(const QString &kind,const QString &argument,bool r
     if(!cached.isEmpty()){
         m_currentPlaylist=cached.value("playlist").toMap();m_playlists=cached.value("playlists").toList();m_searchResults=cached.value("searchResults").toList();
         registerVideos(cached.value("songs").toList());m_page=cached.value("page",1).toInt();m_hasMore=cached.value("hasMore").toBool();m_needsVerification=cached.value("needsVerification").toBool();
-        if(action==OnlinePageCache::Cached){m_catalogLoading=false;emit songsChanged();status(cached.value("status").toString());return;}
+        if(action==OnlinePageCache::Cached){m_catalogLoading=false;trimCatalog();emit songsChanged();status(cached.value("status").toString());return;}
         m_page=1;
     }
     if(kind=="playlist"){
@@ -196,6 +197,7 @@ void BilibiliBridge::openPlaylist(const QString &id){showPage("playlist",id);}
 void BilibiliBridge::loadMore(){if(!m_hasMore||m_catalogLoading)return;++m_page;readPage(true);}
 void BilibiliBridge::cachePage(){
     if(m_catalogLoading||(m_kind=="mine"&&!m_loggedIn))return;
+    trimCatalog();
     m_pageCache.finish({{"songs",m_songs},{"playlists",m_playlists},{"searchResults",m_searchResults},{"playlist",m_currentPlaylist},
         {"page",m_page},{"hasMore",m_hasMore},{"needsVerification",m_needsVerification},{"status",m_status}});
 }
@@ -260,6 +262,44 @@ QVector<Track> BilibiliBridge::tracksFor(const QStringList &ids){
 void BilibiliBridge::playSong(const QString &id){QStringList ids;for(const auto &row:m_songs)ids.append(row.toMap().value("id").toString());playSongs(ids,id);}
 void BilibiliBridge::playSongs(const QStringList &ids,const QString &start){const auto tracks=tracksFor(ids);if(!tracks.isEmpty())m_facade->playOnline(tracks,internalId(start));}
 bool BilibiliBridge::batchSongs(const QStringList &ids,const QString &action){return m_facade->batchOnline(tracksFor(ids),action);}
+void BilibiliBridge::readVideoInfo(const QString &bvid,Done done){
+    const bool pending=m_videoInfoPending.contains(bvid);
+    m_videoInfoPending[bvid].append(std::move(done));if(pending)return;
+    const auto token=++m_videoInfoSerial;m_videoInfoTokens.insert(bvid,token);
+    get(api("/x/web-interface/view",{{"bvid",bvid}}),"video-info:"+bvid,[this,bvid,token](const QJsonObject &object,bool ok){
+        // A cancelled A request must not consume a newer A request after A/B/A.
+        if(m_videoInfoTokens.value(bvid)!=token)return;
+        m_videoInfoTokens.remove(bvid);const auto callbacks=m_videoInfoPending.take(bvid);
+        for(const auto &callback:callbacks)callback(object,ok);
+    });
+}
+void BilibiliBridge::ensureVideoParts(){
+    const auto track=m_facade->current();const auto bvid=currentVideo()?track.hash.mid(9):QString();
+    // Retire only obsolete detail requests. This never cancels audio/media URLs.
+    for(const auto &key:m_videoInfoPending.keys())if(key!=bvid){
+        m_videoInfoTokens.remove(key);const auto callbacks=m_videoInfoPending.take(key);abort("video-info:"+key);
+        for(const auto &callback:callbacks)callback({},false);
+    }
+    if(bvid.isEmpty()||m_facade->isShutdown()||!track.onlineMetadata.value("pages").toArray().isEmpty()||m_partsKey==bvid)return;
+    m_partsKey=bvid;m_partsLoading=true;const auto revision=m_partsRevision;activate();
+    readVideoInfo(bvid,[this,id=track.id,bvid,revision](const QJsonObject &object,bool ok){
+        if(revision!=m_partsRevision||m_facade->current().id!=id||m_facade->current().hash!="bilibili:"+bvid)return;
+        m_partsKey.clear();m_partsLoading=false;
+        const auto data=object.value("data").toObject();const auto pages=data.value("pages").toArray();
+        if(!ok||object.value("code").toInt(-1)!=0||pages.isEmpty()){emit changed();return;}
+        auto current=m_facade->current();const auto requested=current.onlineMetadata.value("cid").toString();QJsonObject selected;
+        for(const auto &value:pages){const auto part=value.toObject();if(requested.isEmpty()?part.value("page").toInt()==currentPart():identifier(part.value("cid"))==requested){selected=part;break;}}
+        if(selected.isEmpty()&&requested.isEmpty())selected=pages.first().toObject();
+        const auto title=data.value("title").toString(current.onlineMetadata.value("videoTitle").toString(current.title));
+        current.onlineMetadata["pages"]=pages;current.onlineMetadata["videoTitle"]=title;current.onlineMetadata["bvid"]=bvid;
+        if(!selected.isEmpty()){
+            current.onlineMetadata["cid"]=identifier(selected.value("cid"));current.onlineMetadata["page"]=selected.value("page").toInt(1);
+            current.title=pages.size()>1?selected.value("part").toString(title):title;
+            const auto length=qint64(selected.value("duration").toDouble()*1000);if(length>0)current.duration=length;
+        }
+        m_facade->updateOnlineTrack(current);emit changed();
+    });
+}
 int BilibiliBridge::currentPart()const{return m_facade->current().onlineMetadata.value("page").toInt(1);}
 bool BilibiliBridge::selectPart(int page){return m_facade->selectOnlinePart(page);}
 QVariantList BilibiliBridge::videoParts()const{
@@ -268,7 +308,7 @@ QVariantList BilibiliBridge::videoParts()const{
 }
 void BilibiliBridge::requestSource(qint64 id){
     const auto track=m_facade->track(id);if(!track.hash.startsWith("bilibili:"))return;activate();const auto revision=++m_playRevision;const auto bvid=track.hash.mid(9);
-    get(api("/x/web-interface/view",{{"bvid",bvid}}),"playback",[this,id,bvid,revision](const QJsonObject &object,bool ok){
+    readVideoInfo(bvid,[this,id,bvid,revision](const QJsonObject &object,bool ok){
         if(revision!=m_playRevision||!m_facade->onlineActive()||m_facade->current().id!=id)return;
         const auto data=object.value("data").toObject();const auto pages=data.value("pages").toArray();
         const auto requested=m_facade->current().onlineMetadata.value("cid").toString();QJsonObject selected;
@@ -300,4 +340,12 @@ void BilibiliBridge::requestSource(qint64 id){
         });
     });
 }
+void BilibiliBridge::trimCatalog(){
+    QSet<QString> songs;for(const auto &v:m_songs)songs.insert(v.toMap().value("id").toString());trimCatalogMap(m_catalog,songs);
+    QSet<QString> folders;for(const auto &v:m_playlists){const auto row=v.toMap();const auto id=row.value("id").toString();folders.insert(id);m_folders.insert(id,row);}
+    if(m_kind=="playlist")folders.insert(m_argument);trimCatalogMap(m_folders,folders,64);
+    QSet<QString> users;for(const auto &v:m_searchResults){const auto row=v.toMap();const auto id=row.value("id").toString();users.insert(id);m_users.insert(id,row);}
+    if(m_kind=="user")users.insert(m_argument);trimCatalogMap(m_users,users,64);
+}
+
 }

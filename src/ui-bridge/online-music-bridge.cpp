@@ -1,4 +1,5 @@
 #include "online-music-bridge.h"
+#include "online-catalog-memory.h"
 #include "disk-cache.h"
 #include "account-membership.h"
 #include "online-recommendation.h"
@@ -108,7 +109,7 @@ OnlineMusicBridge::OnlineMusicBridge(Library *library,PlaybackFacade *facade,Lyr
     connect(&m_pageCommit,&QTimer::timeout,this,[this]{
         if(!m_pageCache.pending()||!m_requests.isEmpty()||m_aiTask)return;
         const auto before=m_pageCache.before();const bool metadataChanged=m_pageCache.quiet()&&before.value("songs").toList()==m_songs&&before.value("playlist").toMap()!=m_currentPlaylist;
-        m_pageCache.finish({{"songs",m_songs},{"playlists",m_playlists},{"searchResults",m_searchResults},{"playlist",m_currentPlaylist},{"status",m_status}});if(metadataChanged)emit songsChanged();emit changed();
+        m_pageCache.finish({{"songs",m_songs},{"playlists",m_playlists},{"searchResults",m_searchResults},{"playlist",m_currentPlaylist},{"status",m_status}});trimCatalog();if(metadataChanged)emit songsChanged();emit changed();
     });
     const auto restoreQuality=[this]{auto saved=m_library->setting("online.quality","hires").toString();if(!QStringList{"standard","exhigh","lossless","hires"}.contains(saved))saved="hires";if(m_quality!=saved){m_quality=saved;emit changed();}};
     restoreQuality();connect(library,&Library::settingsUpdated,this,[restoreQuality](const QStringList &keys){if(keys.contains("online.quality"))restoreQuality();});
@@ -143,7 +144,7 @@ bool OnlineMusicBridge::beginPage(const QString &key){
         m_songs=snapshot.value("songs").toList();m_playlists=snapshot.value("playlists").toList();m_searchResults=snapshot.value("searchResults").toList();m_currentPlaylist=snapshot.value("playlist").toMap();m_status=snapshot.value("status").toString();
         for(const auto &v:m_songs){const auto row=v.toMap();m_catalog.insert(row.value("id").toLongLong(),row);}if(changedSongs||key.startsWith("playlist:"))emit songsChanged();emit this->changed();
     }
-    if(action==OnlinePageCache::Cached){++m_listRevision;return true;}return action==OnlinePageCache::Pending;
+    if(action==OnlinePageCache::Cached){trimCatalog();++m_listRevision;return true;}return action==OnlinePageCache::Pending;
 }
 void OnlineMusicBridge::showPage(const QString &kind,const QString &argument,bool refresh){
     m_forcePage=refresh;
@@ -464,4 +465,13 @@ void OnlineMusicBridge::rankWithAi(){
     if(request.messages.isEmpty()){setStatus("所选 AI 模型的上下文空间不足以生成推荐，请更换模型");return;}
     m_aiRevision=m_listRevision;m_aiTask=m_ai->requests()->complete(config.providerId,request);setStatus("AI 正在结合本地收听记录挑选歌曲…");
 }
+void OnlineMusicBridge::trimCatalog(){
+    QSet<qint64> songs;for(const auto &v:m_songs)songs.insert(v.toMap().value("id").toLongLong());
+    trimCatalogMap(m_catalog,songs);
+    QSet<QString> collections;
+    for(const auto &v:m_searchResults){const auto row=v.toMap();const auto key=row.value("kind").toString()+":"+row.value("id").toString();m_collections.insert(key,row);collections.insert(key);}
+    if(!m_currentPlaylist.isEmpty())collections.insert(m_currentPlaylist.value("kind").toString()+":"+m_currentPlaylist.value("id").toString());
+    trimCatalogMap(m_collections,collections,64);
+}
+
 }

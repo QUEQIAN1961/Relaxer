@@ -1,5 +1,7 @@
 #pragma once
 #include "library.h"
+#include "async-json-store.h"
+#include <QTemporaryDir>
 #include "lyric-remote.h"
 #include <QElapsedTimer>
 #include <QNetworkAccessManager>
@@ -100,7 +102,7 @@ class LyricsSearchCoordinator final : public QObject {
     void clearCandidates(qint64 id);
     void remember(qint64 id);
     void noteManualSave(int count = 1);
-    LyricsCandidateSnapshot candidates(qint64 id) const { return m_candidates.value(id); }
+    LyricsCandidateSnapshot candidates(qint64 id) const;
     LyricsSearchSummary summary() const { return m_summary; }
     QVector<LyricsSearchSource> sources() const { return m_sources; }
     static QString sourceId(const LyricsSearchSource &source);
@@ -189,6 +191,15 @@ class LyricsSearchCoordinator final : public QObject {
     QVector<JobPtr> m_recoveryQueue;
     QVector<LyricsSearchRequest> m_queue;
     QHash<qint64, LyricsCandidateSnapshot> m_candidates;
+    std::shared_ptr<QTemporaryDir> m_candidateSession;
+    AsyncJsonStore m_candidateStore;
+    QHash<qint64,quint64> m_candidateVersions,m_candidateUsed;
+    QHash<qint64,qint64> m_candidateCosts;
+    QSet<qint64> m_candidateBacked;
+    quint64 m_candidateClock=0;qint64 m_selectedCandidate=0;
+    void cacheCandidates(qint64 id);
+    void trimCandidates();
+    void dropCandidates(qint64 id);
     QHash<QString, QVector<qint64>> m_reuse;
     QHash<QString, qint64> m_cooldowns;
     QHash<QString, int> m_hostRequests;

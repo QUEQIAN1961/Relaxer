@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QElapsedTimer>
 #include <QHash>
+#include <QCache>
 #include <QJsonObject>
 #include <QProcess>
 #include <QTcpSocket>
@@ -38,7 +39,9 @@ private:
     bool m_ready=false,m_busy=false,m_waiting=false,m_polling=false,m_submitted=false;
     bool m_handshake=false,m_closing=false;int m_fragmentOpcode=0;
     QHash<int,std::function<void(const QJsonObject &)>> m_commands;
-    QHash<QString,QString> m_cache;
+    QCache<QString,QString> m_cache{8192};
+    QTimer m_idleTimer,m_reapTimer;
+    void reclaimIdleBrowser();
     void launch();void tick();void consume();void poll();void submit();
     void frame(int opcode,const QByteArray &payload);
     void command(const QString &method,const QJsonObject &params,std::function<void(const QJsonObject &)> callback={},bool session=true);

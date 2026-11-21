@@ -33,9 +33,9 @@ Item {
     property bool delayOpen:false
     readonly property bool presentationActive:visible&&(!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
     function updateArtworkQuality(){playbackBridge.setHighResolutionArtwork(presentationActive&&!artworkTravelling)}
-    onPresentationActiveChanged:updateArtworkQuality()
+    onPresentationActiveChanged:{updateArtworkQuality();if(presentationActive)bilibili.ensureVideoParts()}
     onArtworkTravellingChanged:updateArtworkQuality()
-    Component.onCompleted:{partsTrackKey=playbackBridge.trackId;updateArtworkQuality()}
+    Component.onCompleted:{partsTrackKey=playbackBridge.trackId;updateArtworkQuality();bilibili.ensureVideoParts()}
     Component.onDestruction:playbackBridge.setHighResolutionArtwork(false)
     readonly property var videoParts:{const current=playbackBridge.trackId;return bilibili.videoParts}
     onVisibleChanged:if(!visible)partsPanel.close()
@@ -47,7 +47,7 @@ Item {
     Rectangle { anchors.fill:parent;color:Theme.background }
     Image {
         objectName:"playerBackdropPreview";anchors.fill:parent
-        source:page.presentationActive?page.previewBackdrop:""
+        source:page.visible?page.previewBackdrop:""
         sourceSize.width:96;sourceSize.height:96;fillMode:Image.PreserveAspectCrop
         asynchronous:false;cache:true
     }
@@ -55,7 +55,7 @@ Item {
         id:playerBackdrop
         objectName:"playerBackdrop"
         anchors.fill:parent
-        source:!page.presentationActive ? "" : settingsBridge.values.playerCoverBackground ? "image://relaxer/blur?file="+encodeURIComponent(playbackBridge.coverUrl)+"&seed="+encodeURIComponent(playbackBridge.hasTrack?playbackBridge.title:"Relaxer")+"&rev="+playbackBridge.artworkRevision+"&blur="+Number(settingsBridge.palette.blurExpanded||0) : String(settingsBridge.palette.expandedImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.expandedImage))+"&blur="+Number(settingsBridge.palette.blurExpanded||0):""
+        source:!page.visible ? "" : settingsBridge.values.playerCoverBackground ? "image://relaxer/blur?file="+encodeURIComponent(playbackBridge.coverUrl)+"&seed="+encodeURIComponent(playbackBridge.hasTrack?playbackBridge.title:"Relaxer")+"&rev="+playbackBridge.artworkRevision+"&blur="+Number(settingsBridge.palette.blurExpanded||0) : String(settingsBridge.palette.expandedImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.expandedImage))+"&blur="+Number(settingsBridge.palette.blurExpanded||0):""
         asynchronous:true;cache:false;retainWhileLoading:true
         sourceSize.width:720;sourceSize.height:720;fillMode:Image.PreserveAspectCrop
         visible:source.toString().length>0
@@ -75,8 +75,8 @@ Item {
         onClicked:page.collapseRequested()
     }
     ShellButton {
-        id:wideParts;objectName:"videoPartsEntry";visible:!Theme.compact&&playbackBridge.video&&playbackBridge.onlineActive&&page.videoParts.length>0
-        x:page.width-Theme.pageMargin-width;y:28;height:36;flat:true;text:"选集 · P"+bilibili.currentPart+"/"+page.videoParts.length
+        id:wideParts;objectName:"videoPartsEntry";visible:!Theme.compact&&bilibili.currentVideo
+        x:page.width-Theme.pageMargin-width;y:28;height:36;flat:true;text:page.videoParts.length?"选集 · P"+bilibili.currentPart+"/"+page.videoParts.length:"选集"
         opacity:page.detailsOpacity*page.chromeOpacity;enabled:opacity>0&&page.videoParts.length>1
         onClicked:page.toggleParts()
     }
@@ -94,7 +94,7 @@ Item {
         width:Math.max(0,page.width-x-Theme.pageMargin-(Theme.compact?0:wideParts.visible?wideParts.width+12:localVideoSearch.visible?localVideoSearch.width+12:0))
         height:Theme.compact?66:36;opacity:page.detailsOpacity
         Artwork {
-            id:videoCover;objectName:"videoMetadataCover";width:height*16/9;height:parent.height;videoCover:true;coverAspect:16/9;radius:6;resolution:192
+            id:videoCover;objectName:"videoMetadataCover";width:height*16/9;height:parent.height;videoCover:true;coverAspect:16/9;resolution:192
             file:playbackBridge.coverUrl;seed:playbackBridge.title;revision:playbackBridge.artworkRevision
             contentKey:playbackBridge.trackId;animated:page.visible&&!page.artworkTravelling;opacity:page.artworkTravelling?0:1
         }
@@ -146,7 +146,7 @@ Item {
                     id:art;objectName:"currentArtwork"
                     x:Math.max(0,(page.wideColumnWidth-page.wideCoverSize)/2)*(1-page.reflow);y:0
                     width:page.wideCoverSize+(88-page.wideCoverSize)*page.shrink;height:width*(playbackBridge.video?9/16:1);videoCover:playbackBridge.video;coverAspect:playbackBridge.video?16/9:1
-                    file:playbackBridge.coverUrl;contentKey:playbackBridge.trackId;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";revision:playbackBridge.artworkRevision;radius:page.blend(24,12)
+                    file:playbackBridge.coverUrl;contentKey:playbackBridge.trackId;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer";revision:playbackBridge.artworkRevision;
                     animated:page.visible&&!page.artworkTravelling;direction:page.trackDirection;opacity:page.artworkTravelling?0:1
                 }
                 UiText {
@@ -213,17 +213,18 @@ Item {
         anchors.fill:parent;anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin+page.panelInset
         anchors.topMargin:videoMetadata.y+videoMetadata.height+16;anchors.bottomMargin:12
         color:page.allowVideoPicture&&settingsBridge.values.videoBlackBars?"black":"transparent";opacity:page.detailsOpacity
-        Image {
-            objectName:"startupVideoPreview";anchors.centerIn:parent
+        Artwork {
+            objectName:"startupVideoPreview";anchors.centerIn:parent;radius:0
             width:Math.min(parent.width,parent.height*16/9);height:width*9/16
-            visible:page.startupVideoPreview&&page.allowVideoPicture&&videoOutput.opacity<1;source:visible?playbackBridge.coverUrl:""
-            fillMode:Image.PreserveAspectCrop;asynchronous:false
+            visible:page.startupVideoPreview&&page.allowVideoPicture&&videoOutput.opacity<1;file:playbackBridge.coverUrl
+            videoCover:true;coverAspect:16/9;resolution:768;animated:false;seed:playbackBridge.title;contentKey:playbackBridge.trackId;revision:playbackBridge.artworkRevision
         }
         Artwork {
-            objectName:"onlineAudioCover";anchors.centerIn:parent
-            width:Math.min(parent.width,parent.height*16/9);height:width*9/16;videoCover:true;coverAspect:16/9;radius:12;resolution:768;animated:false
+            objectName:"onlineAudioCover";anchors.centerIn:parent;radius:0
+            retainWhenHidden:page.pictureVideo&&page.visible
+            width:Math.min(parent.width,parent.height*16/9);height:width*9/16;videoCover:true;coverAspect:16/9;resolution:768;animated:false
             visible:page.pictureVideo&&videoOutput.opacity<1&&!page.startupVideoPreview
-            file:playbackBridge.coverUrl;seed:playbackBridge.title;revision:playbackBridge.artworkRevision
+            file:playbackBridge.coverUrl;contentKey:playbackBridge.trackId;seed:playbackBridge.title;revision:playbackBridge.artworkRevision
         }
         VideoOutput {
             id:videoOutput;objectName:"activeVideoOutput";anchors.centerIn:parent

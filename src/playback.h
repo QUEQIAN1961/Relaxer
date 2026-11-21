@@ -13,6 +13,7 @@
 #include <QSet>
 #include <QTimer>
 #include <QJsonObject>
+#include <QJsonArray>
 namespace relaxer {
 class Playback : public QObject {
     Q_OBJECT
@@ -39,7 +40,7 @@ class Playback : public QObject {
     QString lastSaveError() const { return m_saveError; }
     bool isShutdown() const { return m_shutdown; }
     void forget(const QVector<qint64> &ids);
-    Track current() const { return m_library->track(m_queue.current()); }
+    Track current() const;
     qint64 position() const;
     qint64 duration() const;
     bool playing() const;
@@ -86,6 +87,11 @@ class Playback : public QObject {
     void applyLocalVideoMode();
     void load(qint64 id, bool autoplay, bool resume = false);
     bool m_shutdown = false, m_shutdownInProgress = false, m_shutdownSaved = true;
+    mutable Track m_currentTrack;
+    mutable bool m_currentTrackValid=false;
+    QVector<qint64> m_savedQueueIds;
+    QJsonArray m_savedQueueArray;
+    qint64 m_emittedPosition=-1,m_emittedDuration=-1;
     QJsonObject m_lastSavedQueue;
     bool m_haveSavedQueue=false,m_lastSaveWrote=false;
     QString m_saveError;

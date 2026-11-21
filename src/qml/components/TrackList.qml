@@ -172,7 +172,7 @@ IconButton{objectName:"trackFavorite-"+row.trackKey;anchors.centerIn:parent;widt
 
                         id:titleCell
                         readonly property real textLeft:table.showCovers?(row.videoTrack?40*4/3+16:56):8
-                        Artwork{objectName:"trackCover-"+row.trackKey;visible:table.showCovers;x:6;anchors.verticalCenter:parent.verticalCenter;width:row.videoTrack?40*4/3:40;height:40;videoCover:row.videoTrack;file:row.rowCover;seed:row.title;resolution:128;radius:6}
+                        Artwork{objectName:"trackCover-"+row.trackKey;contentKey:row.trackKey;animated:false;visible:table.showCovers;x:6;anchors.verticalCenter:parent.verticalCenter;width:row.videoTrack?40*4/3:40;height:40;videoCover:row.videoTrack;file:row.rowCover;seed:row.title;resolution:128;}
                         UiText {id:songTitle;objectName:"trackTitle-"+row.trackKey;fontRegion:"songs";x:titleCell.textLeft;width:Math.max(0,parent.width-x-8-(vip.visible?vip.width+6:0));anchors.verticalCenter:parent.verticalCenter;text:row.title;textFormat:Text.PlainText;color:table.currentKey===row.trackKey?Theme.accent:Theme.text;basePixelSize:15;font.weight:Font.DemiBold;elide:Text.ElideRight}
                         Rectangle {
                             id:vip;objectName:"trackVip-"+row.trackKey;visible:row.requiresSubscription&&settingsBridge.values.showSongVip

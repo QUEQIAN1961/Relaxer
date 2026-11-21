@@ -44,6 +44,7 @@ void Library::deferChanges(bool on) {
     }
 }
 void Library::notifyChanged() {
+    m_sessionCache.clear();m_onlineSessionCache.clear();m_totalsValid=false;
     if (m_deferChanges > 0) {
         m_changePending = true;
         return;
@@ -208,6 +209,12 @@ QVector<Track> Library::tracks(qint64 list, const QString &f) const {
     }
     else { m_error = q.lastError().text(); emit queryFailed("tracks",m_error); }
     return r;
+}
+QVector<Track> Library::matchingTracks()const{
+    QVector<Track> rows;QSqlQuery query(m_db);
+    if(!query.exec("SELECT id,title,artist,duration,file,hash FROM tracks ORDER BY added DESC,id DESC"))return rows;
+    while(query.next()){Track track;track.id=query.value(0).toLongLong();track.title=query.value(1).toString();track.artist=query.value(2).toString();track.duration=query.value(3).toLongLong();track.file=query.value(4).toString();track.hash=query.value(5).toString();rows.append(std::move(track));}
+    return rows;
 }
 Track Library::track(qint64 id) const {
     QSqlQuery q(m_db);
@@ -821,12 +828,14 @@ Session Library::startSession(qint64 id, qint64 duration) {
     return s;
 }
 Session Library::session(qint64 id) const {
+    if(const auto *cached=m_sessionCache.object(id))return *cached;
     QSqlQuery q(m_db);
     q.prepare("SELECT id,track,heard,duration,sought,counted FROM sessions WHERE id=?");
     q.addBindValue(id);
-    if (q.exec() && q.next())
-        return {q.value(0).toLongLong(), q.value(1).toLongLong(), q.value(2).toLongLong(),
-                q.value(3).toLongLong(), q.value(4).toBool(),     q.value(5).toBool()};
+    if (q.exec() && q.next()) {
+        Session value{q.value(0).toLongLong(),q.value(1).toLongLong(),q.value(2).toLongLong(),q.value(3).toLongLong(),q.value(4).toBool(),q.value(5).toBool()};
+        m_sessionCache.insert(id,new Session(value));return value;
+    }
     return {};
 }
 QVector<Track> Library::onlineTracks() const {
@@ -843,12 +852,16 @@ Session Library::startOnlineSession(const Track &track){
 }
 bool Library::saveOnlineSession(Session &session,qint64 delta,int threshold,bool finished){
     if(!session.id)return false;threshold=qBound(70,threshold,100);delta=qMax<qint64>(0,delta);
-    QSqlQuery query(m_db);query.prepare("SELECT heard,sought,counted FROM online_sessions WHERE id=?");query.addBindValue(session.id);if(!query.exec()||!query.next())return false;
-    const auto heard=query.value(0).toLongLong()+delta;const bool sought=session.sought||query.value(1).toBool(),previous=query.value(2).toBool();query.finish();
+    Session stored;
+    if(const auto *cached=m_onlineSessionCache.object(session.id))stored=*cached;
+    else{QSqlQuery query(m_db);query.prepare("SELECT heard,sought,counted,duration FROM online_sessions WHERE id=?");query.addBindValue(session.id);if(!query.exec()||!query.next())return false;
+        stored=session;stored.heard=query.value(0).toLongLong();stored.sought=query.value(1).toBool();stored.counted=query.value(2).toBool();stored.duration=query.value(3).toLongLong();}
+    const auto heard=stored.heard+delta;const bool sought=session.sought||stored.sought,previous=stored.counted;
     const bool counted=!sought&&session.duration>0&&(heard>=(session.duration*threshold+99)/100||(finished&&threshold==100&&heard>=session.duration-250));
+    if(!finished&&!delta&&session.duration==stored.duration&&sought==stored.sought&&counted==previous){session.heard=heard;session.sought=sought;session.counted=counted;m_onlineSessionCache.insert(session.id,new Session(session));return true;}
     if(!m_db.transaction())return false;
     if(!exec("UPDATE online_sessions SET heard=?,duration=?,sought=?,counted=?,finished=?,updated=CURRENT_TIMESTAMP WHERE id=?",{heard,session.duration,sought,counted,finished,session.id})||!exec("UPDATE online_tracks SET heard=heard+?,plays=MAX(0,plays+?) WHERE id=?",{delta,int(counted)-int(previous),session.track})||!m_db.commit()){m_db.rollback();return false;}
-    session.heard=heard;session.sought=sought;session.counted=counted;if(delta||counted!=previous)emit statsChanged();return true;
+    session.heard=heard;session.sought=sought;session.counted=counted;m_onlineSessionCache.insert(session.id,new Session(session));if(delta||counted!=previous){m_totalsValid=false;emit statsChanged();}return true;
 }
 bool Library::saveSession(Session &s, qint64 delta, int threshold, bool finished) {
     if (!s.id || !s.track)
@@ -866,6 +879,7 @@ bool Library::saveSession(Session &s, qint64 delta, int threshold, bool finished
                    (s.heard >= ((s.duration * threshold + 99) / 100) ||
                     (finished && threshold == 100 && s.heard >= s.duration - 250));
     qint64 change = int(counted) - int(stored.counted);
+    if(!finished&&!delta&&!change&&s.duration==stored.duration&&s.sought==stored.sought){s.counted=counted;return true;}
     if (!m_db.transaction())
         return false;
     if (!exec("UPDATE sessions SET "
@@ -878,8 +892,8 @@ bool Library::saveSession(Session &s, qint64 delta, int threshold, bool finished
     if (!m_db.commit())
         return false;
     s.counted = counted;
-    if (delta || change)
-        emit statsChanged();
+    m_sessionCache.insert(s.id,new Session(s));
+    if (delta || change){m_totalsValid=false;emit statsChanged();}
     return true;
 }
 bool Library::recordPlaybackHistory(const Track &track){
@@ -917,16 +931,13 @@ QVariantList Library::playbackHistory(const QString &text,int offset,const QStri
     });
     return rows.mid(qMax(0,offset),100);
 }
-qint64 Library::totalHeard() const {
+void Library::refreshTotals()const{
+    if(m_totalsValid)return;
     QSqlQuery q(m_db);
-    q.exec("SELECT (SELECT COALESCE(SUM(heard),0) FROM tracks)+(SELECT COALESCE(SUM(heard),0) FROM online_tracks)");
-    q.next();
-    return q.value(0).toLongLong();
+    if(q.exec("SELECT (SELECT COALESCE(SUM(heard),0) FROM tracks)+(SELECT COALESCE(SUM(heard),0) FROM online_tracks),(SELECT COALESCE(SUM(plays),0) FROM tracks)+(SELECT COALESCE(SUM(plays),0) FROM online_tracks)")&&q.next()){
+        m_totalHeard=q.value(0).toLongLong();m_totalPlays=q.value(1).toLongLong();m_totalsValid=true;
+    }
 }
-qint64 Library::totalPlays() const {
-    QSqlQuery q(m_db);
-    q.exec("SELECT (SELECT COALESCE(SUM(plays),0) FROM tracks)+(SELECT COALESCE(SUM(plays),0) FROM online_tracks)");
-    q.next();
-    return q.value(0).toLongLong();
-}
+qint64 Library::totalHeard() const {refreshTotals();return m_totalHeard;}
+qint64 Library::totalPlays() const {refreshTotals();return m_totalPlays;}
 } // namespace relaxer

@@ -120,6 +120,7 @@ class PlaybackBridge final : public QObject {
     int m_muteRestoreVolume = 0;
     int m_transitionDirection = 0;
     void refresh();
+    void applySnapshot(const PlaybackSnapshot &next);
     void refreshMetadata();
     void readMetadata();
     void beginTransition(int direction);

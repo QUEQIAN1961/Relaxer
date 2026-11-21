@@ -28,6 +28,8 @@ QtObject {
     readonly property color progress: custom.progressFill || accent
     readonly property color progressUnloaded: Qt.darker(progressTrack, dark ? 1.28 : 1.10)
     readonly property color progressTrack: custom.progressTrack || (dark ? "#45414a" : "#e6e1e7")
+    // The same optical corner ratio follows every cover size and transition.
+    readonly property real artworkCornerRatio: .08
     readonly property int radius: 10
     readonly property int spacing: 16
     property real fontScale:1

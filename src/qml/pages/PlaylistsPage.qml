@@ -51,8 +51,8 @@ Item {
                 }
                 Artwork {
                     id:cardArt;objectName:"playlistCardCover-"+card.playlistKey
-                    x:7;y:7;width:Math.min((170-122*page.shrink)*(card.provider==="bilibili"?1+page.shrink/3:1),Math.max(0,card.width-14));height:width*(card.provider==="bilibili"?.75:1);videoCover:card.provider==="bilibili";radius:12
-                    file:card.cover;seed:card.name;resolution:350;animated:false
+                    x:7;y:7;width:Math.min((170-122*page.shrink)*(card.provider==="bilibili"?1+page.shrink/3:1),Math.max(0,card.width-14));height:width*(card.provider==="bilibili"?.75:1);videoCover:card.provider==="bilibili";
+                    file:card.cover;contentKey:card.provider+":"+card.playlistKey;seed:card.name;resolution:350;animated:false
                 }
                 UiText {
                     id:cardTitle;objectName:"playlistCardTitle-"+card.playlistKey

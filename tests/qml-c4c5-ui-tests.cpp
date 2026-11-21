@@ -25,7 +25,7 @@ private slots:
         QTRY_COMPARE(window->property("playerProgress").toReal(),1.);
         auto *panel=visual(window->contentItem(),"lyricsPanel");auto *list=visual(window->contentItem(),"lyricsList");QVERIFY(panel);QVERIFY(list);
         const auto rows=delegates(list);QVERIFY(!rows.isEmpty());QVERIFY(rows.size()<20);int active=0;
-        for(auto *row:rows){if(row->property("current").toBool()){++active;QCOMPARE(row->property("activeScale").toDouble(),1.2);QVERIFY(qAbs(row->childItems().first()->scale()-1.2)<0.001);}else QCOMPARE(row->property("activeScale").toDouble(),1.0);}
+        for(auto *row:rows){if(row->property("current").toBool()){++active;QCOMPARE(row->property("activeScale").toDouble(),1.2);QTRY_VERIFY(qAbs(row->childItems().first()->scale()-1.2)<0.001);}else QCOMPARE(row->property("activeScale").toDouble(),1.0);}
         QCOMPARE(active,1);const auto point=list->mapToScene(QPointF(list->width()/2,list->height()/2));
         QVERIFY(list->width()>250);QVERIFY(QRectF(0,0,window->width(),window->height()).contains(point));
         QTest::mouseMove(window,point.toPoint());QTest::qWait(20);

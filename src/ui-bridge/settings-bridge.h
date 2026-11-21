@@ -18,6 +18,8 @@ class SettingsBridge final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList changelog READ changelog CONSTANT)
     Q_PROPERTY(QVariantMap values READ values NOTIFY settingsChanged)
+    Q_PROPERTY(bool gpuAccelerationRestartRequired READ gpuAccelerationRestartRequired NOTIFY settingsChanged)
+    Q_PROPERTY(bool gpuAccelerationAtStartup READ gpuAccelerationAtStartup CONSTANT)
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY draftChanged)
     Q_PROPERTY(QVariantMap palette READ palette NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList appearances READ appearances NOTIFY settingsChanged)
@@ -42,6 +44,8 @@ public:
     ~SettingsBridge() override;
     QVariantList changelog() const;
     QVariantMap values() const;
+    bool gpuAccelerationRestartRequired() const { return values().value("uiGpuAcceleration").toBool()!=m_gpuAccelerationAtStartup; }
+    bool gpuAccelerationAtStartup() const { return m_gpuAccelerationAtStartup; }
     QVariantMap windowBounds() const { return values().value("windowBounds").toMap(); }
     QVariantMap draft() const { return m_draft.toVariantMap(); }
     QVariantMap palette() const;
@@ -102,6 +106,7 @@ private:
     SettingsStore m_store;
     AppearanceStore m_appearance;
     const SystemThemeReader m_systemTheme;
+    const bool m_gpuAccelerationAtStartup;
     QJsonObject m_draft;
     QJsonObject m_appearanceDraft;
     QJsonObject m_preview;

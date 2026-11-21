@@ -219,7 +219,7 @@ else()
 endif()
 if(RELAXER_PLAYBACK_FACADE_ONLY OR NOT (RELAXER_IMPORT_ONLY OR RELAXER_TRANSLATION_ONLY OR RELAXER_LYRICS_SEARCH_ONLY OR RELAXER_STORAGE_ONLY))
 find_package(Qt6 6.4 REQUIRED COMPONENTS Network)
-add_library(relaxer_playback_facade STATIC src/dash-stream.cpp src/dash-stream.h src/media-preload.cpp src/media-preload.h src/playback-facade.cpp src/online-playback.cpp src/online-track-matcher.cpp src/online-track-matcher.h src/playback-facade.h)
+add_library(relaxer_playback_facade STATIC src/dash-stream.cpp src/dash-stream.h src/media-preload.cpp src/media-preload.h src/media-preload-worker.cpp src/media-preload-worker.h src/playback-facade.cpp src/online-playback.cpp src/online-track-matcher.cpp src/online-track-matcher.h src/playback-facade.h)
 # FFmpeg 9.0.2 needs the retained DASH cancellation patch on Windows.
 set(RELAXER_FFMPEG_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.dependencies/ffmpeg" CACHE PATH "Prepared DASH-safe avformat runtime")
 if(WIN32)
@@ -538,6 +538,7 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/upcoming-model.cpp src/ui-bridge/upcoming-model.h
     src/ui-bridge/ui-images.cpp src/ui-bridge/ui-images.h
     src/ui-bridge/ui-integration.cpp src/ui-bridge/ui-integration.h
+    src/ui-bridge/ui-graphics-policy.cpp src/ui-bridge/ui-graphics-policy.h
     src/ui-bridge/queue-model.cpp src/ui-bridge/queue-model.h
     src/ui-bridge/lyrics-model.cpp src/ui-bridge/lyrics-model.h
     src/ui-bridge/settings-bridge.cpp src/ui-bridge/settings-bridge.h
@@ -562,7 +563,7 @@ if(RELAXER_ENABLE_QML)
   target_link_libraries(relaxer_qml PUBLIC relaxer_shortcut_rules relaxer_lyrics_translation_classification relaxer_library_models relaxer_playback_facade relaxer_translation relaxer_lyrics_search relaxer_services Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2)
   target_link_libraries(relaxer_qml PRIVATE Qt6::Svg)
   if(WIN32)
-    target_link_libraries(relaxer_qml PRIVATE user32 dwmapi crypt32 bcrypt)
+    target_link_libraries(relaxer_qml PRIVATE user32 dwmapi crypt32 bcrypt dxgi)
   endif()
   if(BUILD_TESTING)
   add_executable(relaxer_shortcut_integration_tests tests/shortcut-integration-tests.cpp)

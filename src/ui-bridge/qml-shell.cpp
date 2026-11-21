@@ -2,6 +2,7 @@
 #include "ui-images.h"
 #include <QQmlContext>
 #include <QQuickStyle>
+#include "ui-graphics-policy.h"
 #include <QEventLoop>
 #include <QCoreApplication>
 #include <QEvent>
@@ -159,7 +160,15 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     QCoreApplication::instance()->installEventFilter(this);
 }
 QmlShell::~QmlShell() {
-    m_feedback.setClosing(true);m_engine.reset();shutdown();
+    m_feedback.setClosing(true);
+    // The engine teardown destroys the root window while it may still be
+    // visible. That emits visibilityChanged, whose handler re-enters the
+    // engine currently being destroyed (imageProvider). Drop every
+    // connection from the QML windows to this shell before resetting the
+    // engine; shutdown() below never needs window signals.
+    if (auto *root = window()) root->disconnect(this);
+    m_engine.reset();
+    shutdown();
     // Direct owner destruction also waits for ImportCoordinator's existing
     // cancellation/result/thread-exit barrier before the Library can disappear.
     if(!m_import.isIdle()){
@@ -186,21 +195,17 @@ bool QmlShell::load(int initialPage) {
     m_engine->load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
     if (auto *loaded = window()) {
         m_rememberNavigation=initialPage<0;
-        // Release render resources on unexpose, preserving the QML state,
-        // playback, tasks and native shortcut registrations.
-        loaded->setPersistentGraphics(false);
-        loaded->setPersistentSceneGraph(false);
-        m_backgroundRelease.setSingleShot(true);m_backgroundRelease.setInterval(300);
-        connect(&m_backgroundRelease,&QTimer::timeout,this,[this]{
-                auto *view = window();
-                if (!view || (view->isVisible() && view->visibility() != QWindow::Minimized)) return;
-                view->releaseResources();
-        });
+        configureUiGraphics(loaded,m_settings.gpuAccelerationAtStartup());
+        // The main window must keep decoded artwork and its mask/layer textures
+        // across hiding as well as minimizing. Releasing its scene graph leaves
+        // ready QML images with empty GPU layers on the first restored frame.
+        // Ordinary hidden delegates and transient windows still release locally.
+        loaded->setPersistentGraphics(true);
+        loaded->setPersistentSceneGraph(true);
         connect(loaded, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility) {
             const bool backgrounded=visibility==QWindow::Hidden||visibility==QWindow::Minimized;
             if(auto *images=dynamic_cast<UiImages *>(m_engine->imageProvider("relaxer")))images->setBackgrounded(backgrounded);
             m_onlineArtwork.setPresentationActive(!backgrounded);
-            if(backgrounded)m_backgroundRelease.start();else m_backgroundRelease.stop();
         });
         loaded->create();
         m_uiIntegration.attach(loaded);
@@ -236,8 +241,9 @@ bool QmlShell::eventFilter(QObject *object,QEvent *event){
             auto *owner=view->transientParent();
             while(owner&&owner!=window())owner=owner->transientParent();
             if(owner&&owner==window()){
-                // Queue, volume and tooltip windows must release their own
-                // scene graphs too; releasing only the main window misses them.
+                if(event->type()==QEvent::Show&&!view->isSceneGraphInitialized())configureUiGraphics(view,m_settings.gpuAccelerationAtStartup());
+                // Transient queue, volume and tooltip windows can still release
+                // their scene graphs without discarding the main artwork layers.
                 view->setPersistentGraphics(false);view->setPersistentSceneGraph(false);
                 if(event->type()==QEvent::Hide)QTimer::singleShot(300,view,[view]{if(!view->isExposed())view->releaseResources();});
             }

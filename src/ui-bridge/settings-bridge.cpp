@@ -91,7 +91,7 @@ private:
     QColor m_border;
 };
 QStringList preferenceKeys() {
-    return {"theme", "threshold", "closeToTray", "showLyricTranslation", "playerCoverBackground", "lyricColor", "reduceMotion", "animationMode", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "fontSize", "playlistCovers", "playlistHeaderAnimation", "mutedBold", "showFavorites", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode"};
+    return {"theme", "threshold", "closeToTray", "showLyricTranslation", "playerCoverBackground", "lyricColor", "reduceMotion", "animationMode", "uiGpuAcceleration", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "fontSize", "playlistCovers", "playlistHeaderAnimation", "mutedBold", "showFavorites", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode"};
 }
 QColor mixed(const QColor &first, const QColor &second, double amount) {
     return QColor(qRound(first.red() * amount + second.red() * (1 - amount)),
@@ -121,13 +121,14 @@ bool systemDark() {
 }
 
 SettingsBridge::SettingsBridge(Library *library, QObject *parent, SystemThemeReader systemTheme)
-    : QObject(parent), m_library(library), m_store(library), m_appearance(library), m_systemTheme(std::move(systemTheme)) {
+    : QObject(parent), m_library(library), m_store(library), m_appearance(library), m_systemTheme(std::move(systemTheme)),
+      m_gpuAccelerationAtStartup(m_store.get("uiGpuAcceleration",true).toBool(true)) {
     // Invalidate before QML handles the existing notification, including live previews.
     connect(this, &SettingsBridge::settingsChanged, this, &SettingsBridge::invalidateCaches);
     connect(library, &Library::settingsUpdated, this, [this](const QStringList &keys) {
         static const QStringList relevant{"theme", "threshold", "closeToTray", "showLyricTranslation",
             "playerCoverBackground", "lyricColor", "qml.reduceMotion", "mutedBold", "showFavorites", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode",
-            "qml.animationMode", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "discoveryActionLayout", "fontSize", "playlistCovers", "playlistHeaderAnimation", "shortcuts", "uiFont", "windowWidth", "windowHeight", "windowMaximized", "appearanceHistory"};
+            "qml.animationMode", "uiGpuAcceleration", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "discoveryActionLayout", "fontSize", "playlistCovers", "playlistHeaderAnimation", "shortcuts", "uiFont", "windowWidth", "windowHeight", "windowMaximized", "appearanceHistory"};
         for (const auto &key : keys) if (relevant.contains(key)) { invalidateCaches(); break; }
     });
     resetDraft();
@@ -160,6 +161,7 @@ QVariantMap SettingsBridge::values() const {
             {"showFavorites", m_store.get("showFavorites", true).toBool()},
             {"reduceMotion", m_store.get("qml.animationMode",m_store.get("qml.reduceMotion",false).toBool()?2:0).toInt()==2},
             {"animationMode",m_store.get("qml.animationMode",m_store.get("qml.reduceMotion",false).toBool()?2:0).toInt()},
+            {"uiGpuAcceleration",m_store.get("uiGpuAcceleration",true).toBool(true)},
             {"playbackFade",m_store.get("playbackFade",false).toBool()},
             {"rememberPosition",m_store.get("rememberPosition",true).toBool()},
             {"settingsEntryMode",m_store.get("settingsEntryMode",0).toInt()},

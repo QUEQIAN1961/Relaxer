@@ -1,3 +1,4 @@
+#include "continuous-corner.h"
 #include "ui-images.h"
 #include "artwork-recovery.h"
 #include "appearance-image.h"
@@ -284,7 +285,14 @@ QImage UiImages::requestImage(const QString &id,QSize *resultSize,const QSize &r
     }
 
     if(blur)out=gaussianBlur(out,query.hasQueryItem("blur") ? qBound(0.,query.queryItemValue("blur").toDouble(),50.) : 50.);
-    else {QImage rounded(out.size(),QImage::Format_ARGB32_Premultiplied);rounded.fill(Qt::transparent);QPainter p(&rounded);p.setRenderHint(QPainter::Antialiasing);QPainterPath mask;const auto ratio=qBound(.0,query.queryItemValue("radiusRatio").isEmpty()?.075:query.queryItemValue("radiusRatio").toDouble(),.5);mask.addRoundedRect(rounded.rect(),size*ratio,size*ratio);p.setClipPath(mask);p.drawImage(0,0,out);p.end();out=rounded;}
+    else {
+        const auto ratio=qBound(.0,query.queryItemValue("radiusRatio").isEmpty()?ArtworkCornerRatio:query.queryItemValue("radiusRatio").toDouble(),.5);
+        if(ratio>0){
+            QImage mask(out.size(),QImage::Format_ARGB32_Premultiplied);mask.fill(Qt::transparent);
+            {QPainter painter(&mask);painter.setRenderHint(QPainter::Antialiasing);painter.fillPath(continuousCornerPath(QRectF(mask.rect()),qMin(out.width(),out.height())*ratio),Qt::white);}
+            QPainter painter(&out);painter.setCompositionMode(QPainter::CompositionMode_DestinationIn);painter.drawImage(0,0,mask);
+        }
+    }
     if(resultSize)*resultSize=out.size();
     {QMutexLocker lock(&m_mutex);m_cache.insert(cacheKey,new QImage(out),qMax(1,int(out.sizeInBytes()/1024)));}
     return out;

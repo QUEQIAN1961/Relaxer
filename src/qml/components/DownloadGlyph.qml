@@ -18,6 +18,7 @@ Item {
     property real checkAmount:complete?1:0
     property real displayedProgress:progress
     readonly property bool animating:slide.running
+    readonly property bool presentationActive:visible&&(!Window.window||(Window.window.visible&&Window.window.visibility!==Window.Minimized))
     implicitWidth:24;implicitHeight:24
     Component.onCompleted:ready=true
     Behavior on circleAmount {enabled:glyph.ready&&!settingsBridge.values.reduceMotion;NumberAnimation {duration:240;easing.type:Easing.InOutCubic}}
@@ -85,5 +86,5 @@ Item {
         }
     }
     QtObject {id:spin;property real angle:0}
-    NumberAnimation {target:spin;property:"angle";from:0;to:360;duration:1000;loops:Animation.Infinite;running:glyph.visible&&glyph.active&&glyph.indeterminate&&!settingsBridge.values.reduceMotion}
+    NumberAnimation {target:spin;property:"angle";from:0;to:360;duration:1000;loops:Animation.Infinite;running:glyph.presentationActive&&glyph.active&&glyph.indeterminate&&!settingsBridge.values.reduceMotion}
 }

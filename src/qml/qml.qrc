@@ -22,7 +22,7 @@
   <file>components/IconButton.qml</file>
   <file>components/DownloadGlyph.qml</file><file>components/OnlineDownloadButton.qml</file><file>components/DownloadList.qml</file>
   <file>components/VolumeButton.qml</file><file>components/MiniPlayer.qml</file>
-  <file>components/Artwork.qml</file><file>components/Avatar.qml</file><file>components/ProfileAvatar.qml</file>
+  <file>components/ContinuousCorner.qml</file><file>components/Artwork.qml</file><file>components/Avatar.qml</file><file>components/ProfileAvatar.qml</file>
   <file>components/PlaybackSlider.qml</file>
   <file>components/UpcomingPanel.qml</file>
   <file>components/LyricsWorkspace.qml</file>

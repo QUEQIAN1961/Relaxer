@@ -1,3 +1,4 @@
+#include "continuous-corner.h"
 #include "nextqueue.h"
 #include "appearance.h"
 #include "widgets.h"
@@ -85,7 +86,7 @@ void NextQueuePanel::paintEvent(QPaintEvent *){
     p.setPen(ink);p.drawText(arrow,Qt::AlignCenter,m_expanded?"⌄":"⌃");p.drawText(QRect(m_large?12:!m_expanded?30:38,0,!m_large&&!m_expanded?44:m_large&&!m_expanded?76:58,hh),Qt::AlignLeft|Qt::AlignVCenter,"下一首");
     p.setFont(f);
     auto names=[&](const Track &t,int x,int y,int height){const QFontMetrics fm(f);const int tw=fm.horizontalAdvance(QString(8,QChar(0x6b4c))),aw=fm.horizontalAdvance(QString(5,QChar(0x6b4c))),dw=fm.horizontalAdvance("—");p.drawText(QRect(x,y,tw,height),Qt::AlignLeft|Qt::AlignVCenter,limitedText(t.title,f,8));p.drawText(QRect(x+tw,y,dw,height),Qt::AlignCenter,"—");p.drawText(QRect(x+tw+dw,y,aw,height),Qt::AlignLeft|Qt::AlignVCenter,limitedText(t.artist,f,5));};
-    auto drawCover=[&](const Track &track,const QRect &rect){QPainterPath clip;clip.addRoundedRect(rect,5,5);p.save();p.setClipPath(clip,Qt::IntersectClip);p.drawPixmap(rect,coverPixmap(m_library->absolute(track.cover),track.title,80));p.restore();};
+    auto drawCover=[&](const Track &track,const QRect &rect){QPainterPath clip;clip=continuousCornerPath(rect,artworkCornerRadius(rect));p.save();p.setClipPath(clip,Qt::IntersectClip);p.drawPixmap(rect,coverPixmap(m_library->absolute(track.cover),track.title,80));p.restore();};
     if(m_tracks.isEmpty()){const bool rows=m_large||m_expanded;p.drawText(QRect(rows?12:80,rows?hh:0,width()-(rows?24:92),rows?height()-hh-4:hh),Qt::AlignLeft|Qt::AlignVCenter,"暂无待播放歌曲");glass();return;}
     if(!m_large&&!m_expanded){const int size=coverSize(),x=80+size+8;drawCover(m_tracks[0],QRect(80,(hh-size)/2,size,size));p.drawText(QRect(x,0,qMax(0,width()-x-12),hh),Qt::AlignLeft|Qt::AlignVCenter,QFontMetrics(f).elidedText(m_tracks[0].title,Qt::ElideRight,qMax(0,width()-x-12)));return;}
     p.save();p.setClipRect(QRect(0,hh,width(),qMax(0,height()-hh-4)),Qt::IntersectClip);const int first=qFloor(m_scrollPosition);
@@ -125,23 +126,23 @@ void ArtworkFlight::start(MovingArtwork art,std::function<void()> done,int stepD
 }
 void ArtworkFlight::paintEvent(QPaintEvent *){
     QPainter p(this);p.setRenderHint(QPainter::Antialiasing);p.setRenderHint(QPainter::SmoothPixmapTransform);
-    const auto drawCover=[&](const QRectF &rect,const QPixmap &image,qreal radius){
-        if(image.isNull()||rect.isEmpty())return;QPainterPath clip;clip.addRoundedRect(rect,radius,radius);
+    const auto drawCover=[&](const QRectF &rect,const QPixmap &image){
+        if(image.isNull()||rect.isEmpty())return;QPainterPath clip;clip=continuousCornerPath(rect,artworkCornerRadius(rect));
         p.save();p.setClipPath(clip,Qt::IntersectClip);p.drawPixmap(rect,image,QRectF(image.rect()));p.restore();
     };
     // The old cover stays opaque until the replacement fully covers it.
     if(m_stepDirection==0){
-        drawCover(m_art.coverOld,m_art.coverOutgoing,24);
+        drawCover(m_art.coverOld,m_art.coverOutgoing);
         const auto lerp=[this](const QRectF &a,const QRectF &b){return QRectF(a.topLeft()+(b.topLeft()-a.topLeft())*m_progress,a.size()+(b.size()-a.size())*m_progress);};
-        drawCover(lerp(m_art.coverFrom,m_art.coverTo),m_art.cover,5+19*m_progress);
+        drawCover(lerp(m_art.coverFrom,m_art.coverTo),m_art.cover);
     }else{
-        QPainterPath pocket;pocket.addRoundedRect(m_art.coverTo,24,24);p.save();p.setClipPath(pocket,Qt::IntersectClip);
+        QPainterPath pocket;pocket=continuousCornerPath(m_art.coverTo,artworkCornerRadius(m_art.coverTo));p.save();p.setClipPath(pocket,Qt::IntersectClip);
         if(m_stepDirection>0){
-            drawCover(m_art.coverOld,m_art.coverOutgoing,24);
-            drawCover(m_art.coverTo.translated(m_art.coverTo.width()*(1-m_progress),0),m_art.cover,24);
+            drawCover(m_art.coverOld,m_art.coverOutgoing);
+            drawCover(m_art.coverTo.translated(m_art.coverTo.width()*(1-m_progress),0),m_art.cover);
         }else{
-            drawCover(m_art.coverTo,m_art.cover,24);
-            drawCover(m_art.coverOld.translated(m_art.coverOld.width()*m_progress,0),m_art.coverOutgoing,24);
+            drawCover(m_art.coverTo,m_art.cover);
+            drawCover(m_art.coverOld.translated(m_art.coverOld.width()*m_progress,0),m_art.coverOutgoing);
         }
         p.restore();
     }

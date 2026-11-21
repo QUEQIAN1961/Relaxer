@@ -30,7 +30,7 @@ Popup {
                 objectName:"downloadTask-"+model.taskId
                 RowLayout {
                     anchors.fill:parent;anchors.margins:6;spacing:10
-                    Artwork {Layout.preferredWidth:34;Layout.preferredHeight:34;radius:5;animated:false;file:entry.model.cover||"";seed:entry.model.title;resolution:80}
+                    Artwork {Layout.preferredWidth:34;Layout.preferredHeight:34;animated:false;file:entry.model.cover||"";contentKey:String(entry.model.taskId);seed:entry.model.title;resolution:80}
                     ColumnLayout {
                         Layout.fillWidth:true;Layout.minimumWidth:0;spacing:3
                         UiText {Layout.fillWidth:true;text:entry.model.title;textFormat:Text.PlainText;basePixelSize:13;elide:Text.ElideRight}

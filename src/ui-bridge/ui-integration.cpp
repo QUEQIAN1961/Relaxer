@@ -139,6 +139,13 @@ void UiIntegration::beginResizeAnchor(int edges){
     RECT r{};
     m_resizeWindow=m_window&&QGuiApplication::platformName()==QStringLiteral("windows")?m_window->winId():0;
     if(m_resizeWindow&&GetWindowRect(reinterpret_cast<HWND>(m_resizeWindow),&r)){
+        // Maximized frameless HWNDs can retain an invisible system resize
+        // border. QWindow geometry describes the client, not that border.
+        if(m_window->visibility()==QWindow::Maximized||m_window->visibility()==QWindow::FullScreen){
+            RECT client{};POINT origin{};const auto handle=reinterpret_cast<HWND>(m_resizeWindow);
+            if(GetClientRect(handle,&client)&&ClientToScreen(handle,&origin))
+                r={origin.x+client.left,origin.y+client.top,origin.x+client.right,origin.y+client.bottom};
+        }
         m_nativeResizeAnchor={int(edges&Qt::LeftEdge?r.right:edges&Qt::RightEdge?r.left:(r.left+r.right)/2),int(edges&Qt::TopEdge?r.bottom:r.top)};
         m_nativeResizeHeight=r.bottom-r.top;
     }else m_resizeWindow=0;

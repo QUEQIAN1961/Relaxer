@@ -3,6 +3,7 @@
 // (MIT, Copyright (c) 2026 sayqz). Modified by QUEQIAN, 2026-11-14.
 // See docs/third-party/music-platforms for retained licenses and scope.
 #include "additional-music-bridge.h"
+#include "online-catalog-memory.h"
 #include "disk-cache.h"
 #include "account-membership.h"
 #include "qishui-protocol.h"
@@ -577,13 +578,28 @@ void AdditionalMusicBridge::loadKugouCovers(quint64 revision,const QStringList &
         },false,QJsonDocument(body).toJson(QJsonDocument::Compact));
 }
 void AdditionalMusicBridge::registerSongs(QVariantList rows){
+    if(m_identifiers.isEmpty()){
+        const qint64 base=m_platform==Kugou?3000000000000LL:4000000000000LL;
+        for(const auto key:m_facade->queue().items){
+            if(key<=base||key>=base+1000000000000LL)continue;
+            const auto track=m_facade->track(key);if(!track.hash.startsWith(provider()+":"))continue;
+            m_identifiers.insert(track.hash.mid(provider().size()+1),key);m_nextInternal=qMax(m_nextInternal,key-base+1);
+        }
+    }
     m_songs=std::move(rows);
-    for(auto &v:m_songs){auto row=v.toMap();const auto id=row.value("id").toString();auto previous=m_catalog.value(id);qint64 internal=previous.value("internalId").toLongLong();if(!internal)internal=(m_platform==Kugou?3000000000000LL:4000000000000LL)+m_catalog.size()+1;
+    for(auto &v:m_songs){auto row=v.toMap();const auto id=row.value("id").toString();auto previous=m_catalog.value(id);qint64 internal=m_identifiers.value(id);if(!internal){internal=(m_platform==Kugou?3000000000000LL:4000000000000LL)+m_nextInternal++;m_identifiers.insert(id,internal);}
         if(m_platform==Kugou&&row.value("cover").toString().isEmpty()&&!previous.value("cover").toString().isEmpty()){
             row["cover"]=previous.value("cover");row["thumbnail"]=previous.value("thumbnail");
         }
         row["internalId"]=QString::number(internal);row["provider"]=provider();row["key"]=provider()+":"+id;m_catalog[id]=row;m_internal[internal]=id;v=row;}
-    emit songsChanged();
+    trimCatalog();emit songsChanged();
+}
+void AdditionalMusicBridge::trimCatalog(){
+    QSet<QString> songs;for(const auto &v:m_songs)songs.insert(v.toMap().value("id").toString());
+    trimCatalogMap(m_catalog,songs);
+    for(auto it=m_internal.begin();it!=m_internal.end();)if(!m_catalog.contains(it.value()))it=m_internal.erase(it);else ++it;
+    QSet<QString> lists;for(const auto &v:m_playlists)lists.insert(v.toMap().value("id").toString());
+    lists.insert(m_currentPlaylist.value("id").toString());trimCatalogMap(m_playlistCatalog,lists,64);
 }
 void AdditionalMusicBridge::cachePage(){
     if(m_catalogLoading||((m_kind=="mine"||m_kind=="daily")&&!m_loggedIn))return;

@@ -23,7 +23,10 @@ inline void reveal(QQuickItem *item){
         if(!parent->property("contentY").isValid()||!parent->property("contentHeight").isValid())continue;
         const auto box=item->mapRectToItem(parent,QRectF(QPointF(),item->size()));
         const auto delta=box.bottom()>parent->height()-8?box.bottom()-parent->height()+8:box.top()<8?box.top()-8:0;
-        if(delta!=0){parent->setProperty("contentY",qBound(0.,parent->property("contentY").toReal()+delta,qMax(0.,parent->property("contentHeight").toReal()-parent->height())));QTest::qWait(40);}
+        // ListView can rebase its origin when rows are recycled (notably a
+        // reopened Menu). Zero is not necessarily the top of its content.
+        const auto origin=parent->property("originY");const qreal minimum=origin.isValid()?origin.toReal():0.;
+        if(delta!=0){parent->setProperty("contentY",qBound(minimum,parent->property("contentY").toReal()+delta,minimum+qMax(0.,parent->property("contentHeight").toReal()-parent->height())));QTest::qWait(40);}
     }
 }
 struct Fixture {

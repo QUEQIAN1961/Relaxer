@@ -177,11 +177,15 @@ class QmlFoundationTests final : public QObject {
     void queuedSnapshotsCannotRegressNewerState() {
         QTemporaryDir dir; Library library(dir.path()); QVERIFY(library.open());
         PlaybackFacade facade(&library, nullptr, true); PlaybackBridge bridge(&facade);
-        facade.setVolume(21); facade.setVolume(72);
+        facade.setVolume(21); const auto older=facade.snapshot(); facade.setVolume(72);
         QCoreApplication::processEvents(); QCOMPARE(bridge.volume(), 72);
+        QSignalSpy changed(&bridge,&PlaybackBridge::volumeChanged);
+        emit facade.snapshotChanged(older);
+        QCOMPARE(bridge.volume(),72);QCOMPARE(changed.size(),0);
         PlaybackSnapshot stale; stale.volume = 1;
         emit facade.snapshotChanged(stale);
-        QCOMPARE(bridge.volume(), 72);
+        QCOMPARE(bridge.volume(), 72);QCOMPARE(changed.size(),0);
+        facade.setVolume(38);QCoreApplication::processEvents();QCOMPARE(bridge.volume(),38);QCOMPARE(changed.size(),1);
     }
     void borrowedObjectsMayDisappear() {
         QTemporaryDir dir;

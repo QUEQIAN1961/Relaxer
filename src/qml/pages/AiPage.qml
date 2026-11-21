@@ -16,6 +16,7 @@ ColumnLayout {
     spacing: 18
     enabled: aiBridge.available
 
+    function canUnloadPage(){return !key.text.length&&!style.dirty&&!removeConsent.visible}
     function saveField(name, value) {
         if (!aiBridge.edit(name, value) || !aiBridge.save())
             aiBridge.resetDraft()

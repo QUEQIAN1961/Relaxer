@@ -10,6 +10,9 @@ import "." as Pages
 ColumnLayout {
     id: page
     objectName: "settingsPage"
+    function canUnloadPage(){return !lyricColorEditor.visible&&!fontDialog.visible&&!discoveryActions.visible&&!sidebarEditor.visible}
+    function savePageState(){return {y:scroll.contentItem?scroll.contentItem.contentY:0}}
+    function restorePageState(state){Qt.callLater(function(){if(scroll.contentItem)scroll.contentItem.contentY=Math.max(0,Math.min(Number(state.y||0),scroll.contentItem.contentHeight-scroll.contentItem.height))})}
     signal aiRequested()
     signal platformsRequested()
     signal appearanceRequested()
@@ -87,13 +90,6 @@ ColumnLayout {
                             }
                         }
                         SettingsRow {label:"音乐资料库侧栏";ShellButton {objectName:"customizeSidebar";text:"自定义侧栏";onClicked:sidebarEditor.openEditor()}}
-                        SettingsRow {id:animationRow;label:"动画效果";optionLabels:["全量动画","少量动画","关闭动画"]
-                            ChoiceBox {objectName:"animationModeSetting";visible:!animationRow.optionsInline;width:Math.min(280,parent.width);model:["全量动画","少量动画","关闭动画"];currentIndex:settingsBridge.values.animationMode;onActivated:settingsBridge.setPreference("animationMode",currentIndex)}
-                            Repeater {model:["全量动画","少量动画","关闭动画"]
-                                ShellButton {required property int index;required property string modelData;objectName:"animationOption-"+index;visible:animationRow.optionsInline;text:modelData;primary:settingsBridge.values.animationMode===index;onClicked:settingsBridge.setPreference("animationMode",index)}
-                            }
-                        }
-                        SettingsRow {label:"歌单收起动画";ToggleButton {objectName:"playlistHeaderAnimationSetting";text:"滚动切换详情";checked:settingsBridge.values.playlistHeaderAnimation;onClicked:settingsBridge.setPreference("playlistHeaderAnimation",checked)}}
                         SettingsRow {label:"歌曲封面";ToggleButton {objectName:"playlistCoversSetting";text:"显示封面";checked:settingsBridge.values.playlistCovers;onClicked:settingsBridge.setPreference("playlistCovers",checked)}}
                         SettingsRow {label:"歌曲列表标记";ToggleButton {objectName:"showFavoritesSetting";text:"展示红心";checked:settingsBridge.values.showFavorites;onClicked:settingsBridge.setPreference("showFavorites",checked)}}
                         SettingsRow {id:closeRow;objectName:"settingsCloseCell";label:"关闭窗口时";optionLabels:["退出播放器","最小化到系统托盘"]
@@ -109,6 +105,24 @@ ColumnLayout {
                                 }
                             }
                         }
+                    }
+                    SettingsGroup {title:"动画";objectName:"settingsAnimationGroup"
+                        SettingsRow {objectName:"uiGpuAccelerationRow";label:"启动GPU加速"
+                            RowLayout {
+                                width:parent.width;spacing:8
+                                ToggleButton {objectName:"uiGpuAccelerationSetting";text:"启用";checked:settingsBridge.values.uiGpuAcceleration;onClicked:settingsBridge.setPreference("uiGpuAcceleration",checked)
+                                    HintBubble {visible:parent.hovered;text:"更改后下次启动生效；关闭后使用软件绘图，玻璃效果会简化。"}
+                                }
+                                UiText {objectName:"uiGpuAccelerationHint";Layout.fillWidth:true;Layout.alignment:Qt.AlignVCenter;text:settingsBridge.gpuAccelerationRestartRequired?"已保存，重启生效":"重启后生效";basePixelSize:12;color:Theme.secondary;maximumLineCount:1;elide:Text.ElideRight}
+                            }
+                        }
+                        SettingsRow {id:animationRow;label:"动画效果";optionLabels:["全量动画","少量动画","关闭动画"]
+                            ChoiceBox {objectName:"animationModeSetting";visible:!animationRow.optionsInline;width:Math.min(280,parent.width);model:["全量动画","少量动画","关闭动画"];currentIndex:settingsBridge.values.animationMode;onActivated:settingsBridge.setPreference("animationMode",currentIndex)}
+                            Repeater {model:["全量动画","少量动画","关闭动画"]
+                                ShellButton {required property int index;required property string modelData;objectName:"animationOption-"+index;visible:animationRow.optionsInline;text:modelData;primary:settingsBridge.values.animationMode===index;onClicked:settingsBridge.setPreference("animationMode",index)}
+                            }
+                        }
+                        SettingsRow {label:"歌单收起动画";ToggleButton {objectName:"playlistHeaderAnimationSetting";text:"滚动切换详情";checked:settingsBridge.values.playlistHeaderAnimation;onClicked:settingsBridge.setPreference("playlistHeaderAnimation",checked)}}
                     }
             }
             SettingsCard {title:"发现";objectName:"settingsDiscoveryCard"

@@ -9,6 +9,7 @@
 #include "ui-bridge/account-membership.h"
 #include "ui-bridge/ui-images.h"
 #include <QDataStream>
+#include <QCryptographicHash>
 #include <QEnterEvent>
 #include <QAudioBufferOutput>
 #include <QTcpServer>
@@ -18,6 +19,7 @@
 #include <QJsonDocument>
 #include <QJSValue>
 #include <QQuickItem>
+#include <QQuickItemGrabResult>
 #include <QQmlEngine>
 #include <QQmlContext>
 #include <QQmlExpression>
@@ -61,7 +63,7 @@ private slots:
     void audioFaderRampsAndCancelsAPendingPause();
     void localProgressSurvivesLoadingAndHonorsTheMemorySwitch();
     void onlineProgressRestoresPausedWithoutPersistingStreamUrls();
-    void animationModesOnlySkipTheShortcutEntryInLightMode();
+    void lightModeSkipsBothShortcutMiniTransitions();
     void sharedUpcomingActuallyAdvancesAcrossLocalAndOnlineAudio();
     void cloudVipAndCoverlessRowsSurviveFontSizeChanges();
     void compactChromeAndFixedPlaylistHeaderFollowThePreferences();
@@ -91,6 +93,7 @@ private slots:
     void videoAutoExpansionCanBeEnabledAfterEarlierPlayback();
     void collectionSearchPagesWithinTheCurrentBiliFolderAndUser();
     void startupVideoCoverAndClosingMetadataKeepTheirBounds();
+    void backgroundingRetainsArtworkWithoutDefaultFrames();
     void unavailableQueueItemsSkipUntilPlayableAndStopAfterOneRound();
     void bilibiliPartSelectionResolvesCidAndPreservesQueueAndProgress();
     void videoPartsContinueNaturallyBeforeAdvancingTheQueue();
@@ -102,9 +105,11 @@ namespace {
 class Reply final:public QNetworkReply {
     QByteArray m_bytes;qsizetype m_offset=0;bool m_done=false;
 public:
-    Reply(const QNetworkRequest &r,const QByteArray &data,QObject *parent):QNetworkReply(parent),m_bytes(data){
+    Reply(const QNetworkRequest &r,const QByteArray &data,QObject *parent,int delay=0):QNetworkReply(parent),m_bytes(data){
         setRequest(r);setUrl(r.url());setAttribute(QNetworkRequest::HttpStatusCodeAttribute,200);open(QIODevice::ReadOnly);
-        QTimer::singleShot(0,this,[this]{if(m_done)return;m_done=true;setFinished(true);emit readyRead();emit finished();});
+        if(r.url().path()=="/passport/open/get_access_ticket/")
+            setRawHeader("bd-ticket-guard-server-data",QJsonDocument(QJsonObject{{"ticket","synthetic-ticket"},{"ts_sign","synthetic-signature"},{"client_cert","synthetic-certificate"}}).toJson(QJsonDocument::Compact).toBase64());
+        QTimer::singleShot(delay,this,[this]{if(m_done)return;m_done=true;setFinished(true);emit readyRead();emit finished();});
     }
     void abort()override{if(m_done)return;m_done=true;setError(OperationCanceledError,"mock cancelled");setFinished(true);emit finished();}
     qint64 bytesAvailable()const override{return m_bytes.size()-m_offset+QNetworkReply::bytesAvailable();}
@@ -113,8 +118,9 @@ public:
 class Transport final:public QNetworkAccessManager {
 public:
     QList<QByteArray> responses;QStringList paths;QList<QUrl> urls;QList<bool> http2;
+    std::function<QByteArray(const QNetworkRequest &)> respond;std::function<int(const QNetworkRequest &)> delay;
     QNetworkReply *createRequest(Operation,const QNetworkRequest &r,QIODevice *)override{
-        paths.append(r.url().path());urls.append(r.url());http2.append(r.attribute(QNetworkRequest::Http2AllowedAttribute,true).toBool());return new Reply(r,responses.isEmpty()?QByteArray("{}"):responses.takeFirst(),this);
+        paths.append(r.url().path());urls.append(r.url());http2.append(r.attribute(QNetworkRequest::Http2AllowedAttribute,true).toBool());return new Reply(r,respond?respond(r):responses.isEmpty()?QByteArray("{}"):responses.takeFirst(),this,delay?delay(r):0);
     }
 };
 QQuickItem *visual(QQuickItem *root,const QString &name){if(root->objectName()==name)return root;for(auto *child:root->childItems())if(auto *item=visual(child,name))return item;return nullptr;}
@@ -147,7 +153,15 @@ void PhaseGTests::nativeCatalogsPreserveOpaqueIdsAndMembership(){
 void PhaseGTests::searchCancellationKeepsOnlyTheLatestCatalog(){
         Fixture f;QVERIFY(f.ok);AdditionalMusicBridge bridge(AdditionalMusicBridge::Kugou,&f.library,&f.facade,&f.lyrics,&f.artwork,nullptr,&f.transport);
         f.transport.responses={R"({"status":1,"data":{"lists":[{"FileHash":"OLD","SongName":"Old","Duration":1}]}})",R"({"status":1,"data":{"lists":[{"FileHash":"NEW","SongName":"New","Duration":2}]}})"};
-        bridge.search("old");bridge.search("new");QTRY_VERIFY(!bridge.busy());QCOMPARE(bridge.songs().size(),1);QCOMPARE(bridge.songs().first().toMap().value("id").toString(),QString("NEW"));QVERIFY(!bridge.catalogLoading());QCOMPARE(f.transport.paths.size(),2);
+        bridge.search("old");bridge.search("new");QTRY_VERIFY(!bridge.busy());QCOMPARE(bridge.songs().size(),1);QCOMPARE(bridge.songs().first().toMap().value("id").toString(),QString("NEW"));QVERIFY(!bridge.catalogLoading());
+        // §7: authentication/paging/cover requests must not be conflated with
+        // search requests. Each search issues exactly one request; the stale
+        // one leaves no additional traffic. Kugou then batches one cover
+        // lookup for the surviving catalog only.
+        int searchRequests=0,coverRequests=0;
+        for(const auto &path:f.transport.paths){if(path=="/v2/search/song")++searchRequests;else if(path=="/v1/audio/audio")++coverRequests;}
+        QCOMPARE(searchRequests,2);
+        QCOMPARE(coverRequests,1);
         QSignalSpy ready(&bridge,&AdditionalMusicBridge::downloadReady);QSignalSpy failed(&bridge,&AdditionalMusicBridge::downloadFailed);
         f.transport.responses={R"({"status":1,"url":["https://audio.example.test/synthetic.flac"],"extName":"flac"})"};
         auto song=bridge.songs().first().toMap();song["_downloadTask"]=42;bridge.resolveDownload(song,"lossless");QTRY_COMPARE(ready.size(),1);QCOMPARE(failed.size(),0);QCOMPARE(ready.first().at(0).toMap().value("_downloadTask").toInt(),42);QCOMPARE(ready.first().at(2).toString(),QString("flac"));
@@ -184,7 +198,7 @@ void PhaseGTests::platformLoginAndCancellationUseIsolatedMockSessions(){
     for(auto platform:{AdditionalMusicBridge::Kugou,AdditionalMusicBridge::Qishui}){
         Fixture f;QVERIFY(f.ok);AdditionalMusicBridge bridge(platform,&f.library,&f.facade,&f.lyrics,&f.artwork,nullptr,&f.transport);
         if(platform==AdditionalMusicBridge::Kugou)f.transport.responses={R"({"data":{"qrcode":"synthetic-qr"}})",R"({"data":{"status":4,"token":"synthetic-token","userid":"12345","nickname":"Mock Account"}})"};
-        else f.transport.responses={R"({"data":{"qrcode_index_url":"https://example.test/login","token":"synthetic-token"}})",R"({"data":{"status":"confirmed"}})",R"({"my_info":{"id":"12345","nickname":"Mock Account"}})"};
+        else f.transport.responses={R"({"data":{"qrcode_index_url":"https://example.test/login","token":"synthetic-token"}})",R"({"data":{"status":"confirmed","auth_code":"synthetic-auth-code"}})",R"({"data":{"access_code":"synthetic-access-code","open_id":"synthetic-open-id","expires_time":3600}})",R"({"data":{}})",R"({"data":{"my_info":{"id":"12345","nickname":"Mock Account"}}})"};
         QSignalSpy completed(&bridge,&AdditionalMusicBridge::loginCompleted);
         bridge.startLogin();QTRY_VERIFY(!bridge.qrImage().isEmpty());QTRY_COMPARE_WITH_TIMEOUT(completed.size(),1,6000);QVERIFY(bridge.loggedIn());QCOMPARE(bridge.nickname(),QString("Mock Account"));
         bridge.logout();QVERIFY(!bridge.loggedIn());QVERIFY(bridge.nickname().isEmpty());
@@ -193,18 +207,21 @@ void PhaseGTests::platformLoginAndCancellationUseIsolatedMockSessions(){
 }
 void PhaseGTests::expandedBackdropKeepsAPrewarmedThumbnailUnderTheHighResolutionImage(){
     QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QVERIFY(library.setSetting("qml.reduceMotion",true));QmlShell shell(&library,nullptr,true);QVERIFY(shell.load());
-    const auto online=QDir(library.root()).filePath("Online");QVERIFY(QDir().mkpath(online));
-    const qint64 id=3999999999999LL;const auto thumb=QDir(online).filePath(QString("thumbnail-%1.png").arg(id));const auto original=QDir(online).filePath("synthetic-original.png");
+    const auto online=DiskCache::online(&library);QVERIFY(QDir().mkpath(online));
+    const qint64 id=3999999999999LL;
+    const QUrl thumbUrl("https://img.example.test/thumb.png"),originalUrl("https://img.example.test/original.png");
+    const auto key=QCryptographicHash::hash((QString("kugou:synthetic\n")+thumbUrl.toString(QUrl::FullyEncoded)+'\n'+originalUrl.toString(QUrl::FullyEncoded)).toUtf8(),QCryptographicHash::Sha256).toHex();
+    const auto thumb=QDir(online).filePath("thumbnail-v2-"+key+".png"),original=QDir(online).filePath("cover-v2-"+key+".png");
     QImage low(160,160,QImage::Format_RGB32);low.fill(QColor("#d35b95"));QVERIFY(low.save(thumb));
     QImage high(1024,1024,QImage::Format_RGB32);high.fill(QColor("#539a82"));QVERIFY(high.save(original));
     Track track;track.id=id;track.title="Synthetic cover";track.artist="Mock artist";track.hash="kugou:synthetic";
-    shell.onlineArtworkCache()->prepare(track,QUrl("https://img.example.test/thumb.png"),QUrl("https://img.example.test/original.png"),original);
+    shell.onlineArtworkCache()->prepare(track,thumbUrl,originalUrl,original);
     shell.facade()->playOnline({track},id);QCOMPARE(shell.onlineArtworkCache()->thumbnailCover(),QUrl::fromLocalFile(thumb));
     auto *window=shell.window();auto *root=window->contentItem();auto *warm=visual(root,"playerBackdropWarmup");QVERIFY(warm);
     QTRY_COMPARE(warm->property("status").toInt(),1);QVERIFY(QMetaObject::invokeMethod(window,"showLyrics"));
     QTRY_VERIFY(visual(root,"playerBackdropPreview"));auto *preview=visual(root,"playerBackdropPreview");auto *backdrop=visual(root,"playerBackdrop");QVERIFY(backdrop);
     QCOMPARE(preview->property("status").toInt(),1);QCOMPARE(preview->property("source").toUrl(),warm->property("source").toUrl());QVERIFY(preview->property("source").toUrl().toString().contains("thumbnail-"));
-    QTRY_COMPARE(backdrop->property("status").toInt(),1);QVERIFY(backdrop->property("source").toUrl().toString().contains("synthetic-original"));QCOMPARE(preview->property("status").toInt(),1);
+    QTRY_COMPARE(backdrop->property("status").toInt(),1);QVERIFY(backdrop->property("source").toUrl().toString().contains("cover-v2-"));QCOMPARE(preview->property("status").toInt(),1);
     QVERIFY2(shell.warnings().isEmpty(),qPrintable(shell.warnings().join('\n')));
 }
 void PhaseGTests::explicitOnlineBatchesKeepTheirOrderAcrossModes(){
@@ -242,9 +259,11 @@ void PhaseGTests::platformButtonsAndGeneralGroupsFitWideAndNarrowWindows(){
             if(width>=620){QTRY_VERIFY(body->x()>=heading->width()+24*.7-.1);QCOMPARE(body->y(),heading->y());}
             else{QCOMPARE(body->x(),qreal(0));QTRY_VERIFY(body->y()>=heading->height()+10);}
         }
-        QCOMPARE(visual(root,"qmlThemeSetting")->isVisible(),width<620);QCOMPARE(visual(root,"closeSetting")->isVisible(),width<620);
-        for(int i=0;i<4;++i)QCOMPARE(visual(root,QString("themeOption-%1").arg(i))->isVisible(),width>=620);
-        for(int i=0;i<2;++i)QCOMPARE(visual(root,QString("closeOption-%1").arg(i))->isVisible(),width>=620);
+        const bool themeInline=themeRow->property("optionsInline").toBool();
+        const bool closeInline=visual(root,"settingsCloseCell")->property("optionsInline").toBool();
+        QCOMPARE(visual(root,"qmlThemeSetting")->isVisible(),!themeInline);QCOMPARE(visual(root,"closeSetting")->isVisible(),!closeInline);
+        for(int i=0;i<4;++i)QCOMPARE(visual(root,QString("themeOption-%1").arg(i))->isVisible(),themeInline);
+        for(int i=0;i<2;++i)QCOMPARE(visual(root,QString("closeOption-%1").arg(i))->isVisible(),closeInline);
         if(width>=620){
             for(const auto &name:{QString("settingsAppearanceCell"),QString("settingsCloseCell"),QString("settingsThresholdCell")}){
                 auto *labels=visual(root,name+"Labels"),*controls=visual(root,name+"Controls");QVERIFY(labels);QVERIFY(controls);
@@ -293,12 +312,20 @@ void PhaseGTests::discoverySelectionAndDownloadBatchesUseTheVisibleSongs(){
     QVERIFY(QMetaObject::invokeMethod(page,"submitSearch",Q_ARG(QVariant,"synthetic")));QTRY_COMPARE(source.songs().size(),3);
     auto *avatar=visual(shell.window()->contentItem(),"onlineAccountAvatar");QVERIFY(avatar);
     const QColor quadrants[]={QColor("#ed4050"),QColor("#33cc55"),QColor("#2255ee"),QColor("#f2dd22")};
-    QImage sharp(256,256,QImage::Format_RGB32);for(int y=0;y<256;++y)for(int x=0;x<256;++x)sharp.setPixelColor(x,y,quadrants[(y>=128?2:0)+(x>=128?1:0)]);const auto avatarPath=dir.filePath("synthetic-avatar.png");QVERIFY(sharp.save(avatarPath));avatar->setProperty("file",QUrl::fromLocalFile(avatarPath));avatar->setVisible(true);QTRY_VERIFY(avatar->property("ready").toBool());
+    QImage sharp(256,256,QImage::Format_RGB32);for(int y=0;y<256;++y)for(int x=0;x<256;++x)sharp.setPixelColor(x,y,quadrants[(y>=128?2:0)+(x>=128?1:0)]);const auto avatarPath=dir.filePath("synthetic-avatar.png");QVERIFY(sharp.save(avatarPath));
+    // Authenticate the synthetic source so the logged-out person glyph does
+    // not remain painted on top of a forcibly shown avatar.
+    transport.responses={R"({"data":{"qrcode":"synthetic-avatar-qr"}})",QJsonDocument(QJsonObject{{"data",QJsonObject{{"status",4},{"token","synthetic-avatar-token"},{"userid","12345"},{"nickname","Mock Account"},{"avatar",QUrl::fromLocalFile(avatarPath).toString()}}}}).toJson()};
+    source.startLogin();QTRY_VERIFY_WITH_TIMEOUT(source.loggedIn(),6000);QTRY_VERIFY(avatar->isVisible());QTRY_COMPARE(avatar->property("file").toUrl(),QUrl::fromLocalFile(avatarPath));QTRY_VERIFY(avatar->property("ready").toBool());
     auto completeAvatar=[&]{
         const auto frame=shell.window()->grabWindow();if(frame.isNull())return false;const auto origin=avatar->mapToScene(QPointF());const qreal ratio=qreal(frame.width())/shell.window()->width();
         for(int i=0;i<4;++i){const auto color=frame.pixelColor(qRound((origin.x()+avatar->width()*(i%2?.75:.25))*ratio),qRound((origin.y()+avatar->height()*(i/2?.75:.25))*ratio));const auto expected=quadrants[i];if(qAbs(color.red()-expected.red())>25||qAbs(color.green()-expected.green())>25||qAbs(color.blue()-expected.blue())>25)return false;}
-        const auto corner=frame.pixelColor(qRound((origin.x()+avatar->width()*.04)*ratio),qRound((origin.y()+avatar->height()*.04)*ratio));return qAbs(corner.green()-quadrants[0].green())>40||qAbs(corner.blue()-quadrants[0].blue())>40;
-    };QTRY_VERIFY(completeAvatar());
+        // The optical radius is now 8% with a continuous corner. A 4% inset
+        // is inside the image; probe the actual cutout near the outer corner.
+        const auto corner=frame.pixelColor(qRound((origin.x()+avatar->width()*.01)*ratio),qRound((origin.y()+avatar->height()*.01)*ratio));return qMax(qAbs(corner.red()-quadrants[0].red()),qMax(qAbs(corner.green()-quadrants[0].green()),qAbs(corner.blue()-quadrants[0].blue())))>40;
+    };const bool avatarComplete=QTest::qWaitFor(completeAvatar);
+    if(!avatarComplete){const auto folder=qEnvironmentVariable("RELAXER_PHASE_G_SCREENSHOTS");if(!folder.isEmpty())shell.window()->grabWindow().save(QDir(folder).filePath("avatar-failure.png"));}
+    QVERIFY(avatarComplete);
     QVERIFY(!visual(shell.window()->contentItem(),"onlineMultiSelect"));QTRY_VERIFY(visual(shell.window()->contentItem(),"onlineSong-A"));QVERIFY(shell.settingsBridge()->setPreference("playlistCovers",false));QTRY_VERIFY(visual(shell.window()->contentItem(),"onlineCover-A")->isVisible());
     auto *first=visual(shell.window()->contentItem(),"onlineSong-A");
     QTest::mouseClick(shell.window(),Qt::RightButton,Qt::NoModifier,first->mapToScene(QPointF(first->width()/2,first->height()/2)).toPoint());
@@ -484,7 +511,7 @@ void PhaseGTests::onlineProgressRestoresPausedWithoutPersistingStreamUrls(){
     {PlaybackFacade facade(&library,nullptr,true);QSignalSpy requested(&facade,&PlaybackFacade::onlineSourceRequested);facade.restore(true);QVERIFY(facade.onlineActive());QCOMPARE(facade.current().id,track.id);QVERIFY(facade.position()>=savedPosition);QVERIFY(!facade.playing());QCOMPARE(requested.size(),0);QCOMPARE(facade.current().onlineMetadata.value("mid").toString(),QString("synthetic-mid"));facade.toggle();QCOMPARE(requested.size(),1);facade.setOnlineSource(track.id,QUrl::fromLocalFile(wave));QTRY_VERIFY(facade.seekable());QTRY_VERIFY(facade.position()>=savedPosition);QVERIFY(facade.shutdown());}
     QVERIFY(library.setSetting("rememberPosition",false));{PlaybackFacade facade(&library,nullptr,true);facade.restore(true);QVERIFY(!facade.onlineActive());QVERIFY(facade.save());QVERIFY(library.setting("onlinePlayback").toObject().isEmpty());}
 }
-void PhaseGTests::animationModesOnlySkipTheShortcutEntryInLightMode(){
+void PhaseGTests::lightModeSkipsBothShortcutMiniTransitions(){
     QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QmlShell shell(&library,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *root=w->contentItem();
     QVERIFY(shell.settingsBridge()->setPreference("animationMode",1));QVERIFY(shell.appBridge()->navigate(3));QTRY_VERIFY(visual(root,"settingsStorageCard"));
     for(const auto *name:{"settingsAppearanceCard","settingsPlaybackCard","settingsStorageCard","playbackFadeSetting","rememberPositionSetting","cacheLimitSetting","customizeDiscoveryActions","lyricColorFollowSetting","lyricColorCustomSetting"})QVERIFY2(visual(root,name),name);
@@ -496,9 +523,10 @@ void PhaseGTests::animationModesOnlySkipTheShortcutEntryInLightMode(){
     auto *handle=visual(root,"discoveryDrag-2");QVERIFY(handle);const auto grab=handle->mapToScene(QPointF(handle->width()/2,handle->height()/2)).toPoint();QTest::mousePress(w,Qt::LeftButton,Qt::NoModifier,grab);QTest::mouseMove(w,grab-QPoint(0,96),20);QTest::mouseRelease(w,Qt::LeftButton,Qt::NoModifier,grab-QPoint(0,96));QTRY_VERIFY(!dialog->property("settling").toBool());
     const auto editorShot=qEnvironmentVariable("RELAXER_PHASE_G_SCREENSHOTS");if(!editorShot.isEmpty()){QDir().mkpath(editorShot);QTest::qWait(80);w->grabWindow().save(QDir(editorShot).filePath("discovery-shortcuts-editor.png"));}
     QCOMPARE(shell.settingsBridge()->values().value("discoveryActions").toList().size(),3);QVERIFY(QMetaObject::invokeMethod(dialog,"save"));QCOMPARE(shell.settingsBridge()->values().value("discoveryActions").toList(),(QVariantList{QString("more"),QString("next")}));QTRY_VERIFY(!dialog->property("visible").toBool());
-    QVERIFY(QMetaObject::invokeMethod(w,"toggleMiniPlayer"));QTRY_VERIFY(w->property("miniMode").toBool());QTRY_VERIFY(!w->property("miniSwitching").toBool());QVERIFY(w->property("skipMiniEnterAnimation").toBool());
-    QVERIFY(QMetaObject::invokeMethod(w,"toggleMiniPlayer"));QVERIFY(!w->property("miniMode").toBool());QVERIFY(w->property("miniSwitching").toBool());QVERIFY(!w->property("skipMiniEnterAnimation").toBool());QTRY_VERIFY(!w->property("miniSwitching").toBool());
-    QVERIFY(QMetaObject::invokeMethod(w,"enterMiniFromEdge",Q_ARG(QVariant,0),Q_ARG(QVariant,false)));QVERIFY(w->property("miniSwitching").toBool());QVERIFY(!w->property("skipMiniEnterAnimation").toBool());QTRY_VERIFY(!w->property("miniSwitching").toBool());
+    QSignalSpy miniFrames(w,SIGNAL(miniTransitionProgressChanged()));QVERIFY(miniFrames.isValid());
+    QVERIFY(QMetaObject::invokeMethod(w,"toggleMiniPlayer"));QTRY_VERIFY(w->property("miniMode").toBool());QTRY_VERIFY(!w->property("miniSwitching").toBool());QVERIFY(miniFrames.size()<=2);
+    miniFrames.clear();QVERIFY(QMetaObject::invokeMethod(w,"toggleMiniPlayer"));QVERIFY(!w->property("miniMode").toBool());QTRY_VERIFY(!w->property("miniSwitching").toBool());QVERIFY(miniFrames.size()<=2);
+    QVERIFY(QMetaObject::invokeMethod(w,"enterMiniFromEdge",Q_ARG(QVariant,0),Q_ARG(QVariant,false)));QVERIFY(w->property("miniSwitching").toBool());QVERIFY(!w->property("skipMiniAnimation").toBool());QTRY_VERIFY(!w->property("miniSwitching").toBool());
     QVERIFY(shell.settingsBridge()->setPreference("animationMode",2));QVERIFY(QMetaObject::invokeMethod(w,"toggleMiniPlayer"));QTRY_VERIFY(!w->property("miniSwitching").toBool());QVERIFY(shell.settingsBridge()->values().value("reduceMotion").toBool());
     QVERIFY2(shell.warnings().isEmpty(),qPrintable(shell.warnings().join('\n')));
 }
@@ -676,8 +704,14 @@ void PhaseGTests::membershipModesAndDiscoverySettingsFollowAccountFacts(){
 void PhaseGTests::catalogScrollBarsCanBeDragged(){
     QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QVERIFY(library.setSetting("qml.reduceMotion",true));QVector<qint64> ids;for(int i=0;i<80;++i){Track t;t.file=QString("Music/synthetic-%1.wav").arg(i);t.hash=t.file;t.title=QString("Synthetic %1").arg(i);t.duration=12000;ids.append(library.insert(t));}const auto playlist=library.createPlaylist("Scroll fixture");QVERIFY(library.addToPlaylist(playlist,ids));QVERIFY(library.setSetting("playlistHeaderAnimation",false));for(auto id:ids){auto session=library.startSession(id,12000);QVERIFY(library.saveSession(session,1000,80,true));}
     QmlShell shell(&library,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *root=w->contentItem();w->resize(1000,700);
+    QVERIFY(QTest::qWaitForWindowExposed(w));
     auto drag=[&](QQuickItem *list){if(!list)return false;auto *bar=visual(list,"listScrollBar");if(!bar)bar=visual(list->parentItem()->parentItem(),"listScrollBar");if(!bar)return false;
-        QTest::mouseMove(w,QPoint(5,5));QTest::qWait(30);if(bar->isVisible()){qInfo()<<"visible outside"<<bar->parentItem()->objectName()<<bar->property("hoverTarget");return false;}
+        // Earlier windows can leave native hover inside this newly exposed window.
+        // Deliver a complete pointer boundary before testing the outside position;
+        // repeated synthetic moves alone can be coalesced at the previous position.
+        const QPoint outside(5,5);QEvent leave(QEvent::Leave);QCoreApplication::sendEvent(w,&leave);
+        QEnterEvent enter(outside,outside,w->mapToGlobal(outside));QCoreApplication::sendEvent(w,&enter);
+        QTest::mouseMove(w,QPoint(6,5));QTest::mouseMove(w,QPoint(5,5));QTest::qWait(30);if(bar->isVisible()){qInfo()<<"visible outside"<<bar->parentItem()->objectName()<<bar->property("hoverTarget");return false;}
         QTest::mouseMove(w,list->mapToScene(QPointF(list->width()/2,list->height()/2)).toPoint());QTest::qWait(30);if(!bar->isVisible()){qInfo()<<"hidden inside"<<bar->parentItem()->objectName()<<bar->property("size")<<bar->property("hoverTarget")<<list->isVisible();return false;}
         if(bar->mapToScene(QPointF()).y()<list->mapToScene(QPointF()).y()){qInfo()<<"bad top";return false;}
         const auto shots=qEnvironmentVariable("RELAXER_PHASE_G_SCREENSHOTS");if(!shots.isEmpty()){QDir().mkpath(shots);w->grabWindow().save(QDir(shots).filePath("catalog-hover-"+shell.libraryBridge()->playlistId()+".png"));}
@@ -764,7 +798,11 @@ void PhaseGTests::bufferedProgressUsesKnownRangesAndKeepsVolumeUnchanged(){
     Track online;online.id=1000000000099LL;online.hash="netease:99";online.title="Generated HTTP silence";online.duration=12000;
     facade->playOnline({online},online.id);QVERIFY(bridge->bufferedRanges().isEmpty());
     facade->setOnlineSource(online.id,QUrl(QString("http://127.0.0.1:%1/synthetic.wav").arg(server.serverPort())));
-    QTRY_VERIFY_WITH_TIMEOUT(!facade->snapshot().buffered.isEmpty(),8000);
+    // The first range may contain only one network chunk. Wait for the actual
+    // required lead within the original 8s budget, rather than equating nonempty
+    // with a full second of buffered media. Keep the numeric lead assertion below.
+    QTRY_VERIFY2_WITH_TIMEOUT(([&]{const auto state=facade->snapshot();return !state.buffered.isEmpty()&&state.buffered.latestTime()>state.position+1000;})(),
+        qPrintable(QString("buffer position=%1 latest=%2 duration=%3 sent=%4").arg(facade->position()).arg(facade->snapshot().buffered.latestTime()).arg(facade->duration()).arg(sent)),8000);
     QVERIFY(sent>0);const auto initial=facade->snapshot();QVERIFY(initial.buffered.latestTime()>0);QVERIFY(initial.buffered.latestTime()<initial.duration);QVERIFY(initial.buffered.latestTime()>initial.position+1000);
     qInfo()<<"Actual cached media range:"<<initial.position<<initial.buffered.latestTime()<<initial.duration;
     QTRY_VERIFY(!bridge->bufferedRanges().isEmpty());QTRY_VERIFY(visual(progress,"bufferedProgressSegment"));
@@ -934,7 +972,7 @@ void PhaseGTests::dashVideoAndAudioShareTheQtClockAndQualityCeiling(){
     QVideoSink sink;f.facade.setVideoSink(&sink);QSignalSpy failures(&f.facade,&PlaybackFacade::playbackFailure);
     connect(&f.facade,&PlaybackFacade::onlineSourceRequested,&f.facade,[&](qint64 id){f.facade.setOnlineDashSource(id,media[0],media[1]);});f.facade.setMode(Mode::Sequential);f.facade.playOnline({track},track.id);
     QTRY_VERIFY_WITH_TIMEOUT(sink.videoFrame().isValid(),8000);QCOMPARE(failures.size(),0);QTRY_VERIFY(f.facade.seekable());
-    QMediaPlayer *player=nullptr;for(auto *candidate:f.facade.findChildren<QMediaPlayer *>())if(candidate!=f.facade.backend()->media())player=candidate;QVERIFY(player);QVERIFY(player->hasAudio());QVERIFY(player->hasVideo());QVERIFY(player->audioBufferOutput());QSignalSpy samples(player->audioBufferOutput(),&QAudioBufferOutput::audioBufferReceived);QTRY_VERIFY(samples.size()>0);QCOMPARE(samples.first().first().value<QAudioBuffer>().format().sampleRate(),96000);
+    QMediaPlayer *player=nullptr;for(auto *candidate:f.facade.findChildren<QMediaPlayer *>())if(candidate!=f.facade.backend()->media())player=candidate;QVERIFY(player);QVERIFY(player->hasAudio());QVERIFY(!player->hasVideo());QVERIFY(sink.videoFrame().isValid());QCOMPARE(sink.videoFrame().size(),QSize(160,90));QTRY_VERIFY(qAbs(sink.videoFrame().startTime()/1000-player->position())<=150);QVERIFY(player->audioBufferOutput());QSignalSpy samples(player->audioBufferOutput(),&QAudioBufferOutput::audioBufferReceived);QTRY_VERIFY(samples.size()>0);QCOMPARE(samples.first().first().value<QAudioBuffer>().format().sampleRate(),96000);
     f.facade.seek(2000);QTRY_VERIFY(f.facade.position()>=2000);
     f.facade.toggle();QTRY_VERIFY(!f.facade.playing());
     f.facade.refreshOnlineSource();QTRY_VERIFY(f.facade.seekable());QTest::qWait(250);
@@ -977,6 +1015,9 @@ void PhaseGTests::biliFoldersUsersAndPagingRemainCompatibleWithSidebarPins(){
     f.transport.responses={biliNav(),R"({"code":0,"data":{"numPages":1,"result":[{"mid":99,"uname":"Synthetic user","upic":"","videos":3}]}})"};bridge.search("ABCD",1);QTRY_COMPARE(bridge.searchResults().size(),1);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("search_type"),QString("bili_user"));QVERIFY(bridge.songs().isEmpty());QCOMPARE(bridge.searchResults().first().toMap().value("kind").toString(),QString("user"));
     f.transport.responses={R"({"code":0,"data":{"list":{"vlist":[{"bvid":"BVuser","title":"User upload","length":"2:03","author":"Synthetic user"}]},"page":{"count":1}}})"};bridge.showPage("user","99");QTRY_COMPARE(bridge.songs().size(),1);QCOMPARE(bridge.songs().first().toMap().value("duration").toLongLong(),qint64(123000));
     QVERIFY(f.library.tracks(pinned).isEmpty());for(bool enabled:f.transport.http2)QVERIFY(!enabled);
+    const auto cacheFile=QDir(DiskCache::online(&f.library)).filePath("catalog-bilibili-"+QCryptographicHash::hash(QByteArray("playlist:7"),QCryptographicHash::Sha256).toHex()+".json");
+    auto persisted=[&]{QFile file(cacheFile);return file.open(QIODevice::ReadOnly)?QJsonDocument::fromJson(file.readAll()).object():QJsonObject{};};
+    QTRY_COMPARE_WITH_TIMEOUT(persisted().value("songs").toArray().size(),45,3000);
     Transport restoredTransport;restoredTransport.responses={biliNav(),biliPage(1,20,true,cover)};BilibiliBridge restored(&f.library,&f.facade,nullptr,nullptr,&restoredTransport);restored.openPlaylist("7");QCOMPARE(restored.songs().size(),45);QVERIFY(!restored.hasMore());QCOMPARE(restored.currentPlaylist().value("cover").toString(),cover);QTRY_COMPARE(restored.songs().size(),20);QVERIFY(restored.hasMore());
 }
 void PhaseGTests::discoveryAutoPagesAndRetainsQueriesAcrossSources(){
@@ -1015,7 +1056,7 @@ void PhaseGTests::videoChromePartsAndCoverRatiosFitBothLayouts(){
     connect(facade,&PlaybackFacade::onlineSourceRequested,facade,[&](qint64 id){facade->setOnlineSource(id,QUrl::fromLocalFile(file));});facade->playOnline({online},online.id);QTRY_VERIFY(shell.playbackBridge()->video());QTRY_VERIFY(facade->playing());QTest::qWait(250);facade->toggle();QTRY_VERIFY(!facade->playing());
     auto *w=shell.window();auto *root=w->contentItem();QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toReal()>=.999);auto *entry=visual(root,"videoPartsEntry"),*caption=visual(root,"titleBar"),*metadata=visual(root,"videoMetadata"),*surface=visual(root,"videoPlaybackSurface"),*art=visual(root,"videoMetadataCover");QVERIFY(entry&&caption&&metadata&&surface&&art);auto *panel=w->findChild<QObject *>("videoPartsPanel");QVERIFY(panel);
     for(int width:{1240,800,547,414}){
-        w->resize(width,790);QTest::qWait(380);entry=visual(root,width<547?"compactVideoPartsEntry":"videoPartsEntry");QVERIFY(entry);QTest::mouseMove(w,QPoint(150,150));QTRY_VERIFY(entry->opacity()>.99);QVERIFY(entry->isVisible());QVERIFY(entry->isEnabled());QVERIFY(qAbs(caption->height()-25.6)<.01);QVERIFY(qAbs(caption->width()-134.4)<.01);if(width<547)QVERIFY(entry->mapToScene(QPointF(entry->width(),0)).x()<=caption->mapToScene(QPointF()).x()-3.9);else{QCOMPARE(entry->y(),qreal(28));QVERIFY(visual(root,"playerCollapse")->mapToScene(QPointF()).x()<art->mapToScene(QPointF()).x());}QVERIFY(qAbs(art->width()/art->height()-4./3)<.001);QVERIFY(metadata->mapToScene(QPointF(0,metadata->height())).y()<surface->mapToScene(QPointF()).y());
+        w->resize(width,790);QTest::qWait(380);entry=visual(root,width<547?"compactVideoPartsEntry":"videoPartsEntry");QVERIFY(entry);QTest::mouseMove(w,QPoint(150,150));QTRY_VERIFY(entry->opacity()>.99);QVERIFY(entry->isVisible());QVERIFY(entry->isEnabled());QVERIFY(qAbs(caption->height()-25.6)<.01);QVERIFY(qAbs(caption->width()-134.4)<.01);if(width<547)QVERIFY(entry->mapToScene(QPointF(entry->width(),0)).x()<=caption->mapToScene(QPointF()).x()-3.9);else{QCOMPARE(entry->y(),qreal(28));QVERIFY(visual(root,"playerCollapse")->mapToScene(QPointF()).x()<art->mapToScene(QPointF()).x());}QVERIFY(qAbs(art->width()/art->height()-16./9)<.001);QVERIFY(metadata->mapToScene(QPointF(0,metadata->height())).y()<surface->mapToScene(QPointF()).y());
         const auto hit=entry->mapToScene(QPointF(entry->width()/2,entry->height()/2)).toPoint();QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,hit);QTRY_VERIFY(panel->property("visible").toBool());QTest::qWait(45);
         auto *partsList=visual(root,"videoPartsList");QVERIFY(partsList);const auto progress=panel->property("reveal").toReal();QVERIFY(progress>0&&progress<1);QCOMPARE(panel->property("opacity").toReal(),qreal(1));
         if(width>=547){const auto finalX=width-34-panel->property("width").toReal();QVERIFY(panel->property("x").toReal()>finalX+5);QVERIFY(qAbs(partsList->mapToScene(QPointF()).x()-16-panel->property("x").toReal())<2);}
@@ -1030,8 +1071,8 @@ void PhaseGTests::videoChromePartsAndCoverRatiosFitBothLayouts(){
         QTRY_VERIFY(!panel->property("visible").toBool());
         auto single=facade->current();single.onlineMetadata["pages"]=QJsonArray{parts.first()};facade->updateOnlineTrack(single);QTRY_VERIFY(!entry->isEnabled());QVERIFY(entry->isVisible());QTest::mouseClick(w,Qt::LeftButton,Qt::NoModifier,hit);QTest::qWait(40);QVERIFY(!panel->property("visible").toBool());single.onlineMetadata["pages"]=parts;facade->updateOnlineTrack(single);QTRY_VERIFY(entry->isEnabled());
     }
-    // Bypass the image provider once to check native 16:9 -> 4:3 Canvas cropping.
-    art->setProperty("imageUrl",QUrl::fromLocalFile(coverFile));QTest::qWait(150);const auto frame=w->grabWindow();const auto point=art->mapToScene(QPointF(art->width()*.1,art->height()/2));const auto ratio=qreal(frame.width())/w->width();const auto pixel=frame.pixelColor(qRound(point.x()*ratio),qRound(point.y()*ratio));QVERIFY(pixel.blue()>220&&pixel.red()<30);
+    // Expanded 16:9 covers preserve the red edge; the 4:3 provider assertion above still checks list cropping.
+    art->setProperty("imageUrl",QUrl::fromLocalFile(coverFile));QTest::qWait(150);const auto frame=w->grabWindow();const auto point=art->mapToScene(QPointF(art->width()*.1,art->height()/2));const auto ratio=qreal(frame.width())/w->width();const auto pixel=frame.pixelColor(qRound(point.x()*ratio),qRound(point.y()*ratio));QVERIFY(pixel.red()>220&&pixel.blue()<30);
     QTest::mouseMove(w,QPoint(180,200));QTRY_VERIFY(entry->opacity()>.99);QTest::qWait(3350);QTRY_VERIFY(entry->opacity()<.01);QVERIFY(!entry->isEnabled());QTest::mouseMove(w,QPoint(190,210));QTRY_VERIFY(entry->opacity()>.99);
     QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));QTRY_VERIFY(w->property("playerProgress").toReal()<=.001);auto *bottom=visual(root,"bottomCover");QVERIFY(bottom);QVERIFY(qAbs(bottom->width()/bottom->height()-4./3)<.001);
     Track local;local.file=file;local.cover=coverFile;local.hash="generated-local-video";local.title="Local generated video";local.duration=3000;const auto id=library.insert(local);QVERIFY(id>0);TrackListModel source(&library);QCOMPARE(source.data(source.index(0),TrackListModel::VideoTrack).toBool(),true);local.id=id;QVERIFY(facade->enqueueTracks({local},true));QTRY_VERIFY(shell.upcomingModel()->firstVideo());
@@ -1079,14 +1120,19 @@ void PhaseGTests::bilibiliPartSelectionResolvesCidAndPreservesQueueAndProgress()
     const QString url=QString("http://127.0.0.1:%1/generated.mp4").arg(origin.serverPort());
     const QByteArray view=R"({"code":0,"data":{"title":"Generated video","pages":[{"cid":301,"page":1,"part":"Part one","duration":3},{"cid":302,"page":2,"part":"Part two","duration":3},{"cid":303,"page":3,"part":"Part three","duration":3}]}})";
     const auto source=QJsonDocument(QJsonObject{{"code",0},{"data",QJsonObject{{"durl",QJsonArray{QJsonObject{{"url",url}}}}}}}).toJson();
+    f.transport.respond=[&](const QNetworkRequest &r){const auto path=r.url().path();if(path=="/x/web-interface/view")return view;if(path=="/x/web-interface/nav")return biliNav();if(path=="/x/player/wbi/playurl")return source;return QByteArray("{}");};
+    bool delaySecondPart=false;
+    f.transport.delay=[&](const QNetworkRequest &r){return delaySecondPart&&r.url().path()=="/x/player/wbi/playurl"&&QUrlQuery(r.url()).queryItemValue("cid")=="302"?250:0;};
     Track video;video.id=5000000000301LL;video.hash="bilibili:BVgenerated";video.title="Generated video";video.duration=3000;
     Track local;local.file=syntheticWave(f.dir.filePath("audio"));local.hash="generated-local";local.duration=12000;local.id=f.library.insert(local);QVERIFY(local.id);
-    f.transport.responses={view,biliNav(),source};f.facade.playOnline({video,local},video.id);QTRY_VERIFY(f.facade.playing()&&f.facade.seekable());f.facade.toggle();QTRY_VERIFY(!f.facade.playing());f.facade.seek(1000);QTRY_COMPARE(f.facade.position(),qint64(1000));
+    f.facade.playOnline({video,local},video.id);QTRY_VERIFY(f.facade.playing()&&f.facade.seekable());f.facade.toggle();QTRY_VERIFY(!f.facade.playing());f.facade.seek(1000);QTRY_COMPARE(f.facade.position(),qint64(1000));
     QVERIFY(!bridge.selectPart(1));QVERIFY(!bridge.selectPart(99));
-    f.transport.responses={view,source};QVERIFY(bridge.selectPart(2));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable());QCOMPARE(bridge.currentPart(),2);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("302"));QCOMPARE(f.facade.current().title,QString("Part two"));f.facade.seek(1500);QTRY_COMPARE(f.facade.position(),qint64(1500));
-    f.transport.responses={view,source};QVERIFY(bridge.selectPart(1));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable()&&f.facade.position()>=950);QCOMPARE(bridge.currentPart(),1);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("301"));
-    f.transport.responses={view,source};bridge.setQuality("80");QTRY_COMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("qn"),QString("80"));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable()&&f.facade.position()>=950);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("301"));
-    f.transport.responses={view,view,source};QVERIFY(bridge.selectPart(2));QVERIFY(bridge.selectPart(3));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable());QCOMPARE(bridge.currentPart(),3);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("303"));QCOMPARE(f.facade.queue().items,(QVector<qint64>{video.id,local.id}));
+    QVERIFY(bridge.selectPart(2));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable());QCOMPARE(bridge.currentPart(),2);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("302"));QCOMPARE(f.facade.current().title,QString("Part two"));f.facade.seek(1500);QTRY_COMPARE(f.facade.position(),qint64(1500));
+    QVERIFY(bridge.selectPart(1));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable()&&f.facade.position()>=950);QCOMPARE(bridge.currentPart(),1);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("301"));
+    bridge.setQuality("80");QTRY_COMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("qn"),QString("80"));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable()&&f.facade.position()>=950);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("301"));
+    const auto viewsBefore=f.transport.paths.count("/x/web-interface/view");QVERIFY(bridge.selectPart(2));QVERIFY(bridge.selectPart(3));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable());QCOMPARE(bridge.currentPart(),3);QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("303"));QCOMPARE(f.facade.queue().items,(QVector<qint64>{video.id,local.id}));QCOMPARE(f.transport.paths.count("/x/web-interface/view"),viewsBefore+1);
+    // Also let P2's media URL response arrive after a newer P3 response.
+    delaySecondPart=true;QVERIFY(bridge.selectPart(2));QTRY_COMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("302"));QVERIFY(bridge.selectPart(3));QTRY_VERIFY(!f.facade.playing()&&f.facade.seekable());QCOMPARE(bridge.currentPart(),3);QTest::qWait(350);QCOMPARE(bridge.currentPart(),3);QVERIFY(!f.facade.playing());QVERIFY(f.facade.seekable());QCOMPARE(QUrlQuery(f.transport.urls.last()).queryItemValue("cid"),QString("303"));
     QVERIFY(f.facade.save());const auto saved=f.library.setting("onlinePlayback").toObject();const auto metadata=saved.value("tracks").toArray().first().toObject().value("metadata").toObject();QCOMPARE(metadata.value("page").toInt(),3);QCOMPARE(metadata.value("cid").toString(),QString("303"));QVERIFY(metadata.value("partProgress").toObject().value("301").toDouble()>=950);QVERIFY(!metadata.contains("pages"));QVERIFY(!QJsonDocument(saved).toJson().contains(url.toUtf8()));
     f.facade.next();QCOMPARE(f.facade.current().id,local.id);QTRY_VERIFY(f.facade.playing());QVERIFY(f.facade.shutdown());
     QVERIFY(f.library.setSetting("onlinePlayback",saved));PlaybackFacade restored(&f.library,nullptr,true);Transport restoredTransport;BilibiliBridge restoredBridge(&f.library,&restored,nullptr,nullptr,&restoredTransport);restored.restore(true);QVERIFY(!restored.playing());QCOMPARE(restoredBridge.currentPart(),3);
@@ -1117,13 +1163,40 @@ void PhaseGTests::collectionSearchPagesWithinTheCurrentBiliFolderAndUser(){
     QVERIFY2(shell.warnings().isEmpty(),qPrintable(shell.warnings().join('\n')));QVERIFY(shell.shutdown());
 }
 
+void PhaseGTests::backgroundingRetainsArtworkWithoutDefaultFrames(){
+    QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QVERIFY(library.setSetting("qml.reduceMotion",true));
+    QImage red(320,180,QImage::Format_RGB32);red.fill(Qt::red);const auto cover=dir.filePath("retained.png");QVERIFY(red.save(cover));
+    const auto wave=syntheticWave(dir.path());Track local;local.file=wave;local.hash="retained-local";local.title="Retained cover";local.cover=cover;local.duration=12000;local.id=library.insert(local);QVERIFY(local.id);
+    QmlShell shell(&library,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *facade=shell.facade();auto *root=w->contentItem();
+    facade->play({local.id},local.id);QTRY_VERIFY(facade->playing());facade->toggle();QTRY_VERIFY(!facade->playing());
+    auto retain=[&](QQuickItem *art){
+        if(!art||!QTest::qWaitFor([&]{return art->property("status").toInt()==1;}))return false;
+        const auto url=art->property("displayedUrl").toUrl();const auto slot=art->property("activeSlot").toInt();
+        w->showMinimized();QTest::qWait(600);
+        const bool unchanged=art->property("displayedUrl").toUrl()==url&&art->property("activeSlot").toInt()==slot&&art->property("status").toInt()==1;
+        bool allReady=true;int frames=0;const auto observed=connect(w,&QQuickWindow::frameSwapped,w,[&]{++frames;allReady&=art->property("status").toInt()==1&&art->property("displayedUrl").toUrl()==url;});
+        w->showNormal();const bool exposed=QTest::qWaitForWindowExposed(w);w->requestUpdate();const bool painted=QTest::qWaitFor([&]{return frames>0;});const auto shot=w->grabWindow();disconnect(observed);
+        if(!unchanged||!exposed||!painted||!allReady||shot.isNull())return false;
+        const auto center=art->mapToScene(QPointF(art->width()/2,art->height()/2));const auto ratio=qreal(shot.width())/w->width();return shot.pixelColor(qRound(center.x()*ratio),qRound(center.y()*ratio)).red()>220;
+    };
+    QVERIFY(retain(visual(root,"bottomCover")));
+    QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_COMPARE(w->property("playerProgress").toReal(),qreal(1));QVERIFY(retain(visual(root,"currentArtwork")));
+    QObject::disconnect(facade,&PlaybackFacade::onlineSourceRequested,nullptr,nullptr);
+    QVERIFY(shell.settingsBridge()->setPreference("onlineVideoMode",1));Track online=local;online.id=5000000000789LL;online.hash="bilibili:BVretained";online.file.clear();facade->playOnline({online},online.id);
+    QTRY_COMPARE(shell.playbackBridge()->trackId(),QString::number(online.id));QVERIFY(retain(visual(root,"currentArtwork")));
+    QVERIFY(shell.settingsBridge()->setPreference("onlineVideoMode",0));auto *loading=visual(root,"onlineAudioCover");QVERIFY(loading);QTRY_VERIFY(loading->isVisible());QVERIFY(retain(loading));
+    const auto loadingUrl=loading->property("displayedUrl").toUrl();loading->setVisible(false);QTest::qWait(50);QCOMPARE(loading->property("displayedUrl").toUrl(),loadingUrl);QCOMPARE(loading->property("status").toInt(),1);loading->setVisible(true);QVERIFY(retain(loading));QCOMPARE(loading->property("radius").toReal(),qreal(0));
+    QVERIFY2(shell.warnings().isEmpty(),qPrintable(shell.warnings().join('\n')));QVERIFY(shell.shutdown());
+}
+
 void PhaseGTests::startupVideoCoverAndClosingMetadataKeepTheirBounds(){
     QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());const auto file=syntheticVideo(dir.path());QVERIFY(!file.isEmpty());QImage image(640,360,QImage::Format_RGB32);image.fill(Qt::red);const auto cover=dir.filePath("cover.png");QVERIFY(image.save(cover));const QString id="5000000000099";
     const QJsonObject track{{"id",id},{"hash","bilibili:BVstartup"},{"title",QString(100,'W')},{"artist",QString(70,'M')},{"duration",3000},{"cover",cover},{"metadata",QJsonObject{{"bvid","BVstartup"},{"cid","99"}}}};
     QVERIFY(library.setSetting("onlinePlayback",QJsonObject{{"tracks",QJsonArray{track}},{"current",id},{"position",0}}));QmlShell shell(&library,nullptr,true);QVERIFY(shell.load());auto *facade=shell.facade();disconnect(facade,&PlaybackFacade::onlineSourceRequested,shell.bilibiliBridge(),nullptr);connect(facade,&PlaybackFacade::onlineSourceRequested,facade,[&](qint64 key){facade->setOnlineSource(key,QUrl::fromLocalFile(file));});
-    auto *w=shell.window();w->resize(1240,790);auto *root=w->contentItem();QVERIFY(!facade->playing());QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toReal()>=.999);auto *preview=visual(root,"startupVideoPreview");QVERIFY(preview);QTRY_VERIFY(preview->isVisible());QTRY_COMPARE(preview->property("status").toInt(),1);QVERIFY(qAbs(preview->width()/preview->height()-16./9)<.001);
+    auto *w=shell.window();w->resize(1240,790);auto *root=w->contentItem();QVERIFY(!facade->playing());QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toReal()>=.999);auto *preview=visual(root,"startupVideoPreview");QVERIFY(preview);QTRY_VERIFY(preview->isVisible());QTRY_COMPARE(preview->property("status").toInt(),1);QCOMPARE(preview->property("radius").toReal(),qreal(0));QVERIFY(qAbs(preview->width()/preview->height()-16./9)<.001);
     auto *output=visual(root,"activeVideoOutput");QVERIFY(output);auto *sink=qobject_cast<QVideoSink *>(output->property("videoSink").value<QObject *>());QVERIFY(sink);QVERIFY(!sink->videoFrame().isValid());QTest::qWait(100);const auto pixelAt=[&](QQuickItem *item){const auto point=item->mapToScene(QPointF(item->width()/2,item->height()/2));const auto shot=w->grabWindow();const auto scale=qreal(shot.width())/w->width();return shot.pixelColor(qRound(point.x()*scale),qRound(point.y()*scale));};QVERIFY(pixelAt(preview).red()>220);
-    facade->toggle();QTRY_VERIFY_WITH_TIMEOUT(sink->videoFrame().isValid(),6000);QTRY_VERIFY(!preview->isVisible());QTest::qWait(80);QVERIFY(pixelAt(output).blue()>180);facade->toggle();QTRY_VERIFY(!facade->playing());
+    facade->toggle();QTRY_VERIFY_WITH_TIMEOUT(sink->videoFrame().isValid(),6000);QTRY_VERIFY(!preview->isVisible());QTest::qWait(80);const auto decoded=sink->videoFrame().toImage();QVERIFY(!decoded.isNull());QVERIFY(decoded.pixelColor(decoded.width()/2,decoded.height()/2).blue()>180);
+    QTRY_COMPARE(output->opacity(),qreal(1));if(qEnvironmentVariable("QT_QUICK_BACKEND")=="software")qInfo()<<"Native video screen pixels NOT RUN on Qt Quick software backend; decoded frame, sink, visibility and cover handoff verified";else QTRY_VERIFY(pixelAt(output).blue()>180);facade->toggle();QTRY_VERIFY(!facade->playing());
     QVERIFY(QMetaObject::invokeMethod(w,"closeLyrics"));bool sampled=false;for(int i=0;i<50&&w->property("metadataTravelling").toBool();++i){auto *flight=visual(root,"sharedTitleFlight");const auto progress=w->property("coverProgress").toReal();if(progress>.97&&progress<1){sampled=true;const auto right=flight->x()+flight->width()*flight->property("flightScale").toReal();const auto control=visual(root,"currentFavoriteButton")->mapToScene(QPointF()).x();QVERIFY2(right<control-8,qPrintable(QString("flight right %1; controls %2").arg(right).arg(control)));}QTest::qWait(10);}QVERIFY(sampled);QTRY_VERIFY(!w->property("metadataTravelling").toBool());
     QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toReal()>=.999);QVERIFY(!preview->isVisible());QVERIFY(w->property("initialVideoPreviewId").toString().isEmpty());QVERIFY2(shell.warnings().isEmpty(),qPrintable(shell.warnings().join('\n')));QVERIFY(shell.shutdown());
     // A newly selected, paused video after an empty startup is not this special case.
@@ -1174,7 +1247,9 @@ void PhaseGTests::historyTableSortsAllRowsAndShowsPlatformLogos(){
     page->setProperty("query",QString("本地"));QVERIFY(QMetaObject::invokeMethod(page,"reload"));QVERIFY(!first().value("cloud").toBool());
     page->setProperty("query",QString());QVERIFY(QMetaObject::invokeMethod(page,"sortBy",Q_ARG(QVariant,"title")));QTRY_COMPARE(first().value("title").toString(),QString("Song 0"));auto *list=visual(root,"historyList");list->setProperty("contentY",list->property("contentHeight").toReal()-list->height());QTRY_COMPARE(list->property("count").toInt(),125);QCOMPARE(visibleRows().last().toMap().value("title").toString(),QString("Song 124"));
     const auto shots=qEnvironmentVariable("RELAXER_PHASE_G_SCREENSHOTS");if(!shots.isEmpty()){QDir().mkpath(shots);QVERIFY(QMetaObject::invokeMethod(page,"reload"));QTest::qWait(120);w->grabWindow().save(QDir(shots).filePath("history-table-1240.png"));}
-    w->resize(414,790);QTest::qWait(380);auto *viewport=visual(root,"historyTableViewport");QVERIFY(viewport);QVERIFY(viewport->property("contentWidth").toReal()>viewport->width());viewport->setProperty("contentX",viewport->property("contentWidth").toReal()-viewport->width());QTest::qWait(100);auto *platformHeading=visual(root,"historyHeading-platform");QVERIFY(platformHeading->mapToScene(QPointF(platformHeading->width(),0)).x()<=w->width());if(!shots.isEmpty())w->grabWindow().save(QDir(shots).filePath("history-table-414.png"));
+    w->resize(414,790);QTest::qWait(380);auto *viewport=visual(root,"historyTableViewport");QVERIFY(viewport);QCOMPARE(viewport->property("contentWidth").toReal(),viewport->width());QVERIFY(!viewport->property("interactive").toBool());QCOMPARE(viewport->property("contentX").toReal(),qreal(0));
+    for(const auto &key:QStringList{"title","endedAt"}){auto *heading=visual(root,"historyHeading-"+key);QVERIFY(heading&&heading->isVisible());QVERIFY(heading->width()>0);QVERIFY(heading->mapToScene(QPointF(heading->width(),0)).x()<=w->width());}
+    for(const auto &key:QStringList{"artist","platform"}){auto *heading=visual(root,"historyHeading-"+key);QVERIFY(heading&&!heading->isVisible());QCOMPARE(heading->width(),qreal(0));}if(!shots.isEmpty())w->grabWindow().save(QDir(shots).filePath("history-table-414.png"));
     page->setProperty("query",QString("not-in-generated-history"));QVERIFY(QMetaObject::invokeMethod(page,"reload"));QTRY_COMPARE(list->property("count").toInt(),0);auto *empty=visual(root,"historyEmptyState");QVERIFY(empty&&empty->isVisible());QVERIFY(qAbs(empty->mapToScene(QPointF(empty->width()/2,0)).x()-w->width()/2)<2);
     QVERIFY2(shell.warnings().isEmpty(),qPrintable(shell.warnings().join('\n')));QVERIFY(shell.shutdown());
 }
@@ -1208,8 +1283,8 @@ void PhaseGTests::audioOnlyRejectsMergedSourcesAndKeepsTheVideoPreference(){
     f.transport.responses={R"({"code":0,"data":{"pages":[{"cid":702}]}})",biliNav(),R"({"code":0,"data":{"durl":[{"url":"https://not-requested.example.test/merged.mp4"}]}})"};f.facade.playOnline({track},track.id);QTRY_COMPARE(failed.size(),1);QVERIFY(!f.facade.playing());QVERIFY(bridge.status().contains("独立音轨"));QVERIFY(!f.facade.findChild<MediaPreload *>());QCOMPARE(f.library.setting("onlineVideoMode").toInt(),1);QVERIFY(f.facade.shutdown());
 }
 void PhaseGTests::onlineVideoPreferenceKeepsLocalVideoAndPartControls(){
-    QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QmlShell shell(&library,nullptr,true);QVERIFY(shell.settingsBridge()->setPreference("onlineVideoMode",1));QVERIFY(shell.settingsBridge()->setPreference("autoExpandVideo",true));QVERIFY(!shell.settingsBridge()->setPreference("onlineVideoMode",2));QVERIFY(shell.load());auto *w=shell.window();auto *root=w->contentItem();w->resize(1240,790);QTest::qWait(380);QVERIFY(shell.appBridge()->navigate(3));QTRY_VERIFY(visual(root,"onlineVideoMode-1"));QTRY_VERIFY(visual(root,"onlineVideoMode-1")->isVisible());w->resize(414,790);QTest::qWait(380);QVERIFY(visual(root,"onlineVideoModeSetting")->isVisible());
-    auto *facade=shell.facade();disconnect(facade,&PlaybackFacade::onlineSourceRequested,shell.bilibiliBridge(),nullptr);const auto wave=syntheticWave(dir.filePath("audio"));QImage thumbnail(400,300,QImage::Format_RGB32);thumbnail.fill(Qt::red);const auto coverPath=dir.filePath("audio-cover.png");QVERIFY(thumbnail.save(coverPath));connect(facade,&PlaybackFacade::onlineSourceRequested,facade,[&](qint64 id){facade->setOnlineSource(id,QUrl::fromLocalFile(wave));});Track cloud;cloud.id=5000000000703LL;cloud.hash="bilibili:BVaudioUI";cloud.title="Generated audio-only video";cloud.artist="Synthetic author";cloud.cover=coverPath;cloud.duration=12000;cloud.onlineMetadata={{"pages",QJsonArray{QJsonObject{{"cid","703"},{"page",1},{"part","One"},{"duration",12}},QJsonObject{{"cid","704"},{"page",2},{"part","Two"},{"duration",12}}}},{"cid","703"},{"page",1}};facade->playOnline({cloud},cloud.id);QTRY_VERIFY(facade->playing());QTRY_VERIFY(w->property("lyricsOpen").toBool());QTRY_VERIFY(w->property("playerProgress").toReal()>=.999);auto *picture=visual(root,"activeVideoOutput"),*cover=visual(root,"currentArtwork"),*surface=visual(root,"videoPlaybackSurface");QVERIFY(picture&&cover&&surface);QVERIFY(!picture->isVisible());QVERIFY(cover->isVisible());QVERIFY(qAbs(cover->width()/cover->height()-4./3)<.001);QVERIFY(!surface->isVisible());QCOMPARE(visual(root,"videoAudioMessage")->property("text").toString(),QString("云端视频音轨，请欣赏"));QTest::mouseMove(w,QPoint(180,180));QTRY_VERIFY(visual(root,"compactVideoPartsEntry")->isEnabled());
+    QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QmlShell shell(&library,nullptr,true);QVERIFY(shell.settingsBridge()->setPreference("onlineVideoMode",1));QVERIFY(shell.settingsBridge()->setPreference("autoExpandVideo",true));QVERIFY(!shell.settingsBridge()->setPreference("onlineVideoMode",2));QVERIFY(shell.load());auto *w=shell.window();auto *root=w->contentItem();w->resize(1240,790);QTest::qWait(380);QVERIFY(shell.appBridge()->navigate(3));QTRY_VERIFY(visual(root,"onlineVideoMode-1"));QTRY_VERIFY(visual(root,"onlineVideoMode-1")->isVisible());w->resize(414,790);QTest::qWait(380);QVERIFY(!visual(root,"onlineVideoModeSetting")->isVisible());QVERIFY(visual(root,"onlineVideoMode-0")->isVisible());QVERIFY(visual(root,"onlineVideoMode-1")->isVisible());QVERIFY(QMetaObject::invokeMethod(visual(root,"onlineVideoMode-0"),"clicked"));QCOMPARE(shell.settingsBridge()->values().value("onlineVideoMode").toInt(),0);QVERIFY(QMetaObject::invokeMethod(visual(root,"onlineVideoMode-1"),"clicked"));QCOMPARE(shell.settingsBridge()->values().value("onlineVideoMode").toInt(),1);
+    auto *facade=shell.facade();disconnect(facade,&PlaybackFacade::onlineSourceRequested,shell.bilibiliBridge(),nullptr);const auto wave=syntheticWave(dir.filePath("audio"));QImage thumbnail(400,300,QImage::Format_RGB32);thumbnail.fill(Qt::red);const auto coverPath=dir.filePath("audio-cover.png");QVERIFY(thumbnail.save(coverPath));connect(facade,&PlaybackFacade::onlineSourceRequested,facade,[&](qint64 id){facade->setOnlineSource(id,QUrl::fromLocalFile(wave));});Track cloud;cloud.id=5000000000703LL;cloud.hash="bilibili:BVaudioUI";cloud.title="Generated audio-only video";cloud.artist="Synthetic author";cloud.cover=coverPath;cloud.duration=12000;cloud.onlineMetadata={{"pages",QJsonArray{QJsonObject{{"cid","703"},{"page",1},{"part","One"},{"duration",12}},QJsonObject{{"cid","704"},{"page",2},{"part","Two"},{"duration",12}}}},{"cid","703"},{"page",1}};facade->playOnline({cloud},cloud.id);QTRY_VERIFY(facade->playing());QTRY_VERIFY(w->property("lyricsOpen").toBool());QTRY_VERIFY(w->property("playerProgress").toReal()>=.999);auto *picture=visual(root,"activeVideoOutput"),*cover=visual(root,"currentArtwork"),*surface=visual(root,"videoPlaybackSurface");QVERIFY(picture&&cover&&surface);QVERIFY(!picture->isVisible());QVERIFY(cover->isVisible());QVERIFY(qAbs(cover->width()/cover->height()-16./9)<.001);QVERIFY(!surface->isVisible());QCOMPARE(visual(root,"videoAudioMessage")->property("text").toString(),QString("云端视频音轨，请欣赏"));QTest::mouseMove(w,QPoint(180,180));QTRY_VERIFY(visual(root,"compactVideoPartsEntry")->isEnabled());
     w->showMinimized();QTRY_VERIFY(!facade->onlineVideoVisible());w->showNormal();QTRY_VERIFY(facade->onlineVideoVisible());
     const auto shots=qEnvironmentVariable("RELAXER_PHASE_G_SCREENSHOTS");if(!shots.isEmpty()){QDir().mkpath(shots);for(int width:{1240,414}){w->resize(width,790);QTest::qWait(380);w->grabWindow().save(QDir(shots).filePath(QString("audio-only-%1.png").arg(width)));}}
     QVERIFY(shell.bilibiliBridge()->selectPart(2));QTRY_COMPARE(shell.bilibiliBridge()->currentPart(),2);QTRY_VERIFY(facade->playing());QVERIFY(!picture->isVisible());
@@ -1222,15 +1297,15 @@ void PhaseGTests::localVideoAudioAndLyricsModesUseCoversAndSubtitles(){
     imported.track.cover.clear();imported.track.coverOrigin="none";const auto id=library.insert(imported.track);QVERIFY(id);const auto repair=Importer::repairArtwork(library.root(),library.track(id));QCOMPARE(repair.origin,QString("video-frame"));QVERIFY2(library.applyArtworkRepair(repair),qPrintable(library.lastError()));QVERIFY(!library.track(id).cover.isEmpty());QVERIFY(library.saveLyrics(id,"[00:00.00]First local lyric\n[00:01.00]Second local lyric\n"));
     QImage sidecar(320,240,QImage::Format_RGB32);sidecar.fill(Qt::red);QVERIFY(sidecar.save(dir.filePath("generated.png")));Library other(dir.filePath("sidecar-data"));QVERIFY(other.open());const auto withCover=Importer::importOne(other.root(),video);QVERIFY(withCover.error.isEmpty());QCOMPARE(withCover.track.coverOrigin,QString("sidecar"));QImage preferred(other.absolute(withCover.track.cover));QVERIFY(preferred.pixelColor(20,20).red()>220);
     QmlShell shell(&library,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();w->resize(1240,790);auto *root=w->contentItem();auto *facade=shell.facade();auto *settings=shell.settingsBridge();facade->play({id},id);QTRY_VERIFY(facade->playing()&&facade->seekable());QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toReal()>=.999);auto *picture=visual(root,"activeVideoOutput");QVERIFY(picture);auto *sink=qobject_cast<QVideoSink *>(picture->property("videoSink").value<QObject *>());QVERIFY(sink);QTRY_VERIFY(sink->videoFrame().isValid());facade->toggle();QTRY_VERIFY(!facade->playing());facade->seek(1500);QTRY_COMPARE(shell.lyricsModel()->currentIndex(),1);auto *caption=visual(root,"videoLyricCaption");QVERIFY(caption);QVERIFY(!caption->isVisible());
-    QVERIFY(settings->setPreference("showLocalVideoLyrics",true));QTRY_VERIFY(caption->isVisible());QCOMPARE(caption->property("text").toString(),QString("Second local lyric"));QTRY_VERIFY(visual(root,"videoLyricBlur")->isVisible());QTest::qWait(200);const auto screenshot=w->grabWindow();const auto ratio=qreal(screenshot.width())/w->width();auto sample=[&](qreal x){const auto p=caption->mapToScene(QPointF(caption->width()*x,caption->height()/2));return screenshot.pixelColor(qRound(p.x()*ratio),qRound(p.y()*ratio));};QVERIFY2(sample(.25).blue()<sample(.01).blue()-8,qPrintable(QString("blur center %1 edge %2").arg(sample(.25).name()).arg(sample(.01).name())));
+    QVERIFY(settings->setPreference("showLocalVideoLyrics",true));QTRY_VERIFY(caption->isVisible());QCOMPARE(caption->property("text").toString(),QString("Second local lyric"));auto *blur=visual(root,"videoLyricBlur"),*shade=visual(root,"videoLyricSoftwareShade");QVERIFY(blur&&shade);const bool softwareCaption=caption->property("software").toBool();QCOMPARE(blur->isVisible(),!softwareCaption);QCOMPARE(shade->isVisible(),softwareCaption);QTest::qWait(200);const auto screenshot=w->grabWindow();const auto ratio=qreal(screenshot.width())/w->width();auto sample=[&](qreal x){const auto p=caption->mapToScene(QPointF(caption->width()*x,caption->height()/2));return screenshot.pixelColor(qRound(p.x()*ratio),qRound(p.y()*ratio));};if(softwareCaption){auto shadeGrab=shade->grabToImage();QVERIFY(shadeGrab);QTRY_VERIFY(!shadeGrab->image().isNull());const auto shadeImage=shadeGrab->image();QVERIFY(shadeImage.pixelColor(shadeImage.width()/4,shadeImage.height()/2).alpha()>shadeImage.pixelColor(qMax(0,shadeImage.width()/100),shadeImage.height()/2).alpha()+8);qInfo()<<"Software lyric shade verified by alpha falloff; GPU Gaussian blur NOT RUN in this backend";}else QVERIFY2(sample(.25).blue()<sample(.01).blue()-8,qPrintable(QString("blur center %1 edge %2").arg(sample(.25).name()).arg(sample(.01).name())));
     const auto shots=qEnvironmentVariable("RELAXER_PHASE_G_SCREENSHOTS");if(!shots.isEmpty()){QDir().mkpath(shots);screenshot.save(QDir(shots).filePath("local-video-lyrics-1240.png"));}
-    QVERIFY(settings->setPreference("localVideoMode",1));QTRY_VERIFY(!picture->isVisible());QTRY_COMPARE(facade->backend()->media()->activeVideoTrack(),-1);QVERIFY(!facade->playing());QVERIFY(facade->position()>=1450);auto *art=visual(root,"currentArtwork"),*message=visual(root,"videoAudioMessage");QVERIFY(art&&message);QVERIFY(art->isVisible());QVERIFY(qAbs(art->width()/art->height()-4./3)<.001);auto *lyrics=visual(root,"lyricsPanel");QVERIFY(lyrics&&lyrics->isVisible());QVERIFY(!message->isVisible());QVERIFY(!caption->isVisible());
+    QVERIFY(settings->setPreference("localVideoMode",1));QTRY_VERIFY(!picture->isVisible());QTRY_COMPARE(facade->backend()->media()->activeVideoTrack(),-1);QVERIFY(!facade->playing());QVERIFY(facade->position()>=1450);auto *art=visual(root,"currentArtwork"),*message=visual(root,"videoAudioMessage");QVERIFY(art&&message);QVERIFY(art->isVisible());QVERIFY(qAbs(art->width()/art->height()-16./9)<.001);auto *lyrics=visual(root,"lyricsPanel");QVERIFY(lyrics&&lyrics->isVisible());QVERIFY(!message->isVisible());QVERIFY(!caption->isVisible());
     QVERIFY(settings->setPreference("showLocalVideoLyrics",false));QTRY_VERIFY(!lyrics->isVisible());QVERIFY(message->isVisible());QCOMPARE(message->property("text").toString(),QString("本地视频音轨，请欣赏"));QVERIFY(qAbs(art->x()+art->width()/2-art->parentItem()->width()/2)<1);
     if(!shots.isEmpty()){QTest::qWait(100);w->grabWindow().save(QDir(shots).filePath("local-audio-message-1240.png"));}
     QVERIFY(settings->setPreference("localVideoMode",0));QTRY_VERIFY(picture->isVisible());QTRY_COMPARE(facade->backend()->media()->activeVideoTrack(),0);QTRY_VERIFY(sink->videoFrame().isValid());QVERIFY(!facade->playing());QVERIFY(facade->position()>=1450);QVERIFY(!caption->isVisible());QVERIFY(visual(root,"videoLyricsSearch")->isVisible());QVERIFY(QMetaObject::invokeMethod(visual(root,"videoLyricsSearch"),"clicked"));QTRY_COMPARE(shell.lyricsSearchBridge()->targetTrackKey(),QString::number(id));auto *workspace=visual(root,"lyricsWorkspace");QVERIFY(workspace);QTRY_VERIFY(workspace->property("opened").toBool());QVERIFY(QMetaObject::invokeMethod(workspace,"close"));QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("playerProgress").toReal()>=.999);w->resize(414,790);QTest::qWait(380);QVERIFY(visual(root,"compactVideoLyricsSearch")->isVisible());QVERIFY(settings->setPreference("showLocalVideoLyrics",true));QTRY_VERIFY(caption->isVisible());if(!shots.isEmpty())w->grabWindow().save(QDir(shots).filePath("local-video-lyrics-414.png"));
     QVERIFY2(shell.warnings().isEmpty(),qPrintable(shell.warnings().join('\n')));QVERIFY(shell.shutdown());
 }
-
+
 void PhaseGTests::regressionLayoutsUseAvailableTextSpace(){
     QTemporaryDir dir;Library library(dir.filePath("data"));QVERIFY(library.open());QVERIFY(library.setSetting("qml.reduceMotion",true));QVERIFY(library.setSetting("autoExpandVideo",false));
     QVector<qint64> ids;

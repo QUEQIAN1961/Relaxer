@@ -24,7 +24,7 @@ PlaybackFacade::PlaybackFacade(Library *library, QObject *parent, bool decodeOnl
     m_onlineVideoSync.setInterval(100);
     connect(&m_onlineVideoSync,&QTimer::timeout,this,[this]{syncOnlineVideo();});
     connect(library,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("onlineVideoMode"))m_onlineVideoTimer.start();});
-    m_onlineClock.start();connect(library,&Library::changed,this,[this]{m_matchCandidatesReady=false;m_onlineMatches.clear();});
+    m_onlineClock.start();connect(library,&Library::changed,this,[this]{m_matchCandidatesReady=false;m_matchIndex.reset();m_onlineMatches.clear();++m_onlineMetadataRevision;});
     connect(m_playback, &Playback::trackChanged, this, [this] { if(!m_onlineActive){resetVideoFrame();notify(Notice::Track);} });
     connect(m_playback, &Playback::stateChanged, this, [this] { if(!m_onlineActive)notify(Notice::State); });
     connect(m_playback, &Playback::positionChanged, this,
@@ -49,12 +49,16 @@ PlaybackFacade::PlaybackFacade(Library *library, QObject *parent, bool decodeOnl
 PlaybackFacade::~PlaybackFacade() {
     disconnect(this, nullptr, nullptr, nullptr);
     shutdown(true);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    m_onlineBufferOutput.reset();
+#endif
     m_onlinePlayer.reset();m_onlineAudio.reset();
     // Release media/process children before QObject deletes other facade children.
     delete m_playback;
 }
 PlaybackSnapshot PlaybackFacade::snapshot() const {
     PlaybackSnapshot value;
+    value.revision = m_snapshotSerial;
     value.track = current();
     value.position = position();
     value.duration = duration();
@@ -102,6 +106,7 @@ QMediaTimeRange PlaybackFacade::bufferedTimeRanges() const {
 void PlaybackFacade::notify(Notice notice, qint64 pos, qint64 duration, const QString &message) {
     if (isShutdown())
         return;
+    const auto serial=++m_snapshotSerial;
     const auto value = snapshot();
     if (notice == Notice::State && value.playing && m_failedTrack) {
         m_failedTrack = 0;
@@ -111,8 +116,8 @@ void PlaybackFacade::notify(Notice notice, qint64 pos, qint64 duration, const QS
     // UI signal timing: animations and immediate error toasts depend on it.
     QMetaObject::invokeMethod(
         this,
-        [this, value] {
-            if (!isShutdown())
+        [this, value, serial] {
+            if (!isShutdown()&&serial==m_snapshotSerial)
                 emit snapshotChanged(value);
         },
         Qt::QueuedConnection);
@@ -170,7 +175,7 @@ void PlaybackFacade::applyVideoSink(){
     }
 }
 void PlaybackFacade::publish() {
-    applyVideoSink();
+    ++m_snapshotSerial;applyVideoSink();
     if (!isShutdown())
         emit snapshotChanged(snapshot());
 }
@@ -185,7 +190,7 @@ void PlaybackFacade::play(const QVector<qint64> &ids, qint64 start) {
     if (!isShutdown()) {
         if(m_sharedQueueActive&&std::any_of(ids.cbegin(),ids.cend(),[this](qint64 id){return isOnline(track(id));})){m_queueFailures.clear();m_onlineQueue.set(ids,start);activateQueuedCurrent();return;}
         stopOnline();
-        m_sharedQueueActive=false;m_playback->setExternalQueue(false);m_queueFailures.clear();
+        m_sharedQueueActive=false;pruneOnlineTracks();m_playback->setExternalQueue(false);m_queueFailures.clear();
         beginAttempt(start ? start : ids.value(0));
         m_playback->play(ids, start);
         m_requestedTrack = 0;
@@ -299,6 +304,13 @@ bool PlaybackFacade::selectAudioOutput(const QString &id){
     if(m_onlineAudio)m_onlineAudio->setDevice(device);
     emit audioOutputsChanged();return true;
 }
+void PlaybackFacade::pruneOnlineTracks(){
+    const QSet<qint64> retained(m_onlineQueue.items.cbegin(),m_onlineQueue.items.cend());
+    for(auto it=m_onlineTracks.begin();it!=m_onlineTracks.end();)
+        if(!m_sharedQueueActive||!retained.contains(it.key()))it=m_onlineTracks.erase(it);else ++it;
+    if(!m_sharedQueueActive){m_onlineQueue.set({},0);m_matchIndex.reset();m_matchCandidatesReady=false;m_onlineMatches.clear();}
+    ++m_onlineMetadataRevision;
+}
 void PlaybackFacade::forget(const QVector<qint64> &ids) {
     if(m_sharedQueueActive){
         auto remaining=m_onlineQueue.items;const auto before=m_onlineQueue.current();for(auto id:ids)remaining.removeAll(id);
@@ -306,7 +318,7 @@ void PlaybackFacade::forget(const QVector<qint64> &ids) {
         if(remaining.isEmpty()){stopOnline();m_sharedQueueActive=false;m_playback->setExternalQueue(false);m_playback->play({});emit trackChanged();publish();}
         else if(before!=m_onlineQueue.current())activateQueuedCurrent();
         else{emit stateChanged();publish();}
-        return;
+        pruneOnlineTracks();return;
     }
     if (!isShutdown())
         m_playback->forget(ids);
@@ -315,7 +327,16 @@ void PlaybackFacade::restore(bool includeOnline) {
     if (!isShutdown()) {
         beginAttempt();
         m_playback->restore();
-        const auto saved=m_library->setting("onlinePlayback").toObject();
+        auto saved=m_library->setting("onlinePlayback").toObject();
+        const auto progress=m_library->setting("onlinePlaybackProgress").toObject();
+        if(!saved.value("revision").toString().isEmpty()&&progress.value("revision")==saved.value("revision")){
+            saved["current"]=progress.value("current");saved["position"]=progress.value("position");
+            auto rows=saved.value("tracks").toArray();
+            for(int i=0;i<rows.size();++i){auto row=rows[i].toObject();if(row.value("id")==progress.value("current")){
+                auto metadata=row.value("metadata").toObject();const auto cid=metadata.value("cid").toString();
+                if(!cid.isEmpty()){auto positions=metadata.value("partProgress").toObject();positions[cid]=progress.value("position");metadata["partProgress"]=positions;row["metadata"]=metadata;rows[i]=row;}
+            }}saved["tracks"]=rows;
+        }
         if(includeOnline&&m_library->setting("rememberPosition",true).toBool()&&!saved.isEmpty()){
             QVector<qint64> ids;
             for(const auto &entry:saved.value("tracks").toArray()){
@@ -347,7 +368,10 @@ bool PlaybackFacade::shutdown(bool force) {
     if (isShutdown() || m_shuttingDown)
         return m_playback->isShutdown()?m_playback->shutdown():false;
     m_shuttingDown = true;
-    if(!saveOnlineState()&&!force){m_shuttingDown=false;return false;}
+    // A failed online save must still notify subscribers: the exit dialog and
+    // the persistence tests drive their cancel/retry contract from saved(false),
+    // not only from the boolean return value.
+    if(!saveOnlineState()&&!force){m_shuttingDown=false;emit saved(false);return false;}
     finishOnlineSession();
     const bool ok = m_playback->shutdown(force);
     if(isShutdown()){m_saveTimer.stop();m_onlineRetryTimer.stop();m_onlineWatchdog.stop();clearOnlineSource();m_preload.reset();m_dash.reset();m_onlineFader.reset();}

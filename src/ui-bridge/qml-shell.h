@@ -98,7 +98,6 @@ class QmlShell final : public QObject {
     QTranslator m_controlsTranslator;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     QStringList m_warnings;
-    QTimer m_backgroundRelease;
     bool m_artworkRecoveryScheduled=false;
 };
 }

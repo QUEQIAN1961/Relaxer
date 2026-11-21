@@ -6,6 +6,7 @@
 #include <QAudioBuffer>
 #include <QRandomGenerator>
 #include <QJsonArray>
+#include <QUuid>
 
 namespace relaxer {
 bool PlaybackFacade::batchOnline(const QVector<Track> &tracks,const QString &action){
@@ -26,7 +27,7 @@ bool PlaybackFacade::enqueueTracks(const QVector<Track> &tracks,bool next){
     if(ids.isEmpty())return false;
     if(!m_sharedQueueActive){m_onlineQueue=m_playback->queue();m_sharedQueueActive=true;m_playback->setExternalQueue(true);}
     const bool hadCurrent=m_onlineQueue.current()>0;
-    for(const auto &item:tracks)if(item.id!=current().id&&isOnline(item))m_onlineTracks.insert(item.id,item);
+    for(const auto &item:tracks)if(item.id!=current().id&&isOnline(item)){++m_onlineMetadataRevision;m_onlineTracks.insert(item.id,item);}
     if(!m_onlineQueue.enqueue(ids,next))return false;
     m_queueFailures.clear();
     if(!hadCurrent){m_onlineActive=isOnline(current());if(m_onlineActive){ensureOnlinePlayer();m_onlinePending=false;m_onlineResumePosition=0;}else m_playback->restoreQueued(current().id,0);emit trackChanged();}
@@ -78,7 +79,7 @@ void PlaybackFacade::playOnline(const QVector<Track> &tracks, qint64 start) {
     ensureOnlinePlayer();
     finishOnlineSession();m_onlineFader.reset();clearOnlineSource();
     m_onlineTracks.clear();QVector<qint64> ids;
-    for(const auto &track:tracks){if(track.id>0){m_onlineTracks.insert(track.id,track);ids.append(track.id);}}
+    for(const auto &track:tracks){if(track.id>0){++m_onlineMetadataRevision;m_onlineTracks.insert(track.id,track);ids.append(track.id);}}
     m_onlineQueue.mode=m_playback->mode();m_onlineQueue.set(ids,start);m_sharedQueueActive=!ids.isEmpty();m_onlineActive=m_sharedQueueActive;m_playback->setExternalQueue(m_sharedQueueActive);m_queueFailures.clear();
     if(m_onlineActive)requestOnlineCurrent();
 }
@@ -156,6 +157,7 @@ void PlaybackFacade::ensureOnlinePlayer(){
         connect(player,&QMediaPlayer::errorOccurred,this,[this,player]{
             if(player&&player==m_onlinePlayer.get()&&m_onlineActive&&!m_onlinePending)failOnlineSource(current().id,QStringLiteral("在线音频播放失败，请重新选择歌曲或刷新登录状态"),true);
         });
+        resetOnlineBuffer();
     }
 }
 void PlaybackFacade::cancelOnlineStreams(){
@@ -168,6 +170,13 @@ void PlaybackFacade::clearOnlineSource(){
     stopOnlineVideo();resetVideoFrame();cancelOnlineStreams();
     // A track change gets a fresh reader. Detach callbacks before cancelling
     // its source, so old EOF/error delivery cannot advance the new queue item.
+    // Destroy a tap while its player is still alive. Qt 6.11's buffer output
+    // destructor can call back into its previous player; carrying that tap
+    // across replacement readers leaves a dangling player pointer. Keep one
+    // stable tap per reader (including seeks), never across reader lifetimes.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    m_onlineBufferOutput.reset();
+#endif
     m_onlinePlayer.reset();
     if(!isShutdown())ensureOnlinePlayer();
 }
@@ -381,7 +390,7 @@ void PlaybackFacade::applyOnlineResume(){
 }
 void PlaybackFacade::updateOnlineTrack(const Track &track){
     if(!m_onlineTracks.contains(track.id))return;
-    m_onlineTracks.insert(track.id,track);
+    ++m_onlineMetadataRevision;m_onlineTracks.insert(track.id,track);
     if(m_onlineSession.id&&m_onlineHistoryTrack.id==track.id){
         m_onlineHistoryTrack=track;
         const auto full=track.onlineMetadata.value("fullDurationMs").toInteger();
@@ -415,9 +424,10 @@ void PlaybackFacade::beginOnlineSession(){
     auto track=current();
     auto matchTrack=track;const auto full=track.onlineMetadata.value("fullDurationMs").toInteger();
     if(track.onlineMetadata.value("preview").toBool()&&full>0)matchTrack.duration=full;
-    if(!m_matchCandidatesReady){m_matchCandidates=m_library->tracks();m_matchCandidatesReady=true;}
-    if(!m_onlineMatches.contains(track.hash))m_onlineMatches.insert(track.hash,matchOnlineTrack(matchTrack,m_matchCandidates));
-    track.matchedLocalId=m_onlineMatches.value(track.hash);m_onlineTracks.insert(track.id,track);
+    if(!m_matchCandidatesReady){m_matchIndex=sharedOnlineTrackIndex(m_library);m_matchCandidatesReady=true;}
+    if(m_onlineMatches.size()>2048)m_onlineMatches.clear();
+    if(!m_onlineMatches.contains(track.hash))m_onlineMatches.insert(track.hash,m_matchIndex?m_matchIndex->match(matchTrack):0);
+    track.matchedLocalId=m_onlineMatches.value(track.hash);++m_onlineMetadataRevision;m_onlineTracks.insert(track.id,track);
     m_onlineHistoryTrack=track;m_onlineHistoryHeard=0;
     m_onlineSessionMatched=track.matchedLocalId>0;m_onlineThreshold=qBound(70,m_library->setting("threshold",80).toInt(),100);
     matchTrack.matchedLocalId=track.matchedLocalId;
@@ -434,19 +444,59 @@ void PlaybackFacade::sampleOnline(bool finishing,bool flush){
     if(delta>0||finishing){const bool ok=m_onlineSessionMatched?m_library->saveSession(m_onlineSession,delta,m_onlineThreshold,finishing):m_library->saveOnlineSession(m_onlineSession,delta,m_onlineThreshold,finishing);if(!ok)emit saveFailed("在线收听统计未能保存");else m_onlineHistoryHeard+=delta;}
     if(pos!=m_onlineLastPosition){m_onlineLastPosition=pos;m_onlineLastWall=now;}
 }
-void PlaybackFacade::finishOnlineSession(){if(!m_onlineSession.id)return;sampleOnline(m_onlinePlayer&&m_onlinePlayer->mediaStatus()==QMediaPlayer::EndOfMedia,true);if(m_onlineHistoryHeard>0&&!m_library->recordPlaybackHistory(m_onlineHistoryTrack))emit saveFailed("播放历史未能保存");m_onlineHistoryHeard=0;m_onlineSession={};}
-bool PlaybackFacade::saveOnlineState(){
-    QJsonObject saved;
-    if(m_sharedQueueActive&&m_library->setting("rememberPosition",true).toBool()){
-        QJsonArray tracks;
-        for(auto id:m_onlineQueue.items){const auto track=this->track(id);QJsonObject metadata;
-            for(const auto &key:QStringList{"id","mid","mediaMid","songType","albumId","audioId","bvid","cid","page","videoTitle","partProgress","cover","thumbnail","provider","preview","previewStartMs","previewDurationMs","fullDurationMs"})if(track.onlineMetadata.contains(key))metadata[key]=track.onlineMetadata.value(key);
-            if(track.hash.startsWith("bilibili:")&&id==current().id){const auto cid=metadata.value("cid").toString();if(!cid.isEmpty()){auto positions=metadata.value("partProgress").toObject();positions[cid]=double(position());metadata["partProgress"]=positions;}}
-            tracks.append(QJsonObject{{"id",QString::number(id)},{"hash",track.hash},{"title",track.title},{"artist",track.artist},{"album",track.album},{"duration",double(track.duration)},{"cover",track.cover},{"vip",track.requiresSubscription},{"metadata",metadata}});
+void PlaybackFacade::finishOnlineSession(){
+    if(!m_onlineSession.id)return;
+    // Preserve this track's per-part resume point before a new current ID or
+    // compact progress record replaces it. This does not touch either stream.
+    if(m_onlineHistoryTrack.hash.startsWith("bilibili:")&&m_onlineTracks.contains(m_onlineHistoryTrack.id)){
+        auto track=m_onlineTracks.value(m_onlineHistoryTrack.id);const auto cid=m_onlineHistoryTrack.onlineMetadata.value("cid").toString();
+        if(!cid.isEmpty()&&cid==track.onlineMetadata.value("cid").toString()){
+            auto positions=track.onlineMetadata.value("partProgress").toObject();positions[cid]=double(qMax<qint64>(0,position()));track.onlineMetadata["partProgress"]=positions;
+            m_onlineTracks.insert(track.id,track);++m_onlineMetadataRevision;
         }
-        saved={{"tracks",tracks},{"current",QString::number(m_onlineQueue.current())},{"position",double(position())}};
     }
-    if(saved==m_savedOnline&&m_library->setting("onlinePlayback").toObject()==saved){m_onlineSaveError.clear();return true;}
-    const bool ok=m_library->setSetting("onlinePlayback",saved);if(ok){m_savedOnline=saved;m_onlineSaveError.clear();}else{m_onlineSaveError="在线播放进度未能保存："+m_library->lastError();emit saveFailed(m_onlineSaveError);}return ok;
+    sampleOnline(m_onlinePlayer&&m_onlinePlayer->mediaStatus()==QMediaPlayer::EndOfMedia,true);if(m_onlineHistoryHeard>0&&!m_library->recordPlaybackHistory(m_onlineHistoryTrack))emit saveFailed("播放历史未能保存");m_onlineHistoryHeard=0;m_onlineSession={};}
+bool PlaybackFacade::saveOnlineState(){
+    const bool enabled=m_sharedQueueActive&&m_library->setting("rememberPosition",true).toBool();
+    const bool changed=m_savedOnlineRevision!=m_onlineMetadataRevision||m_savedOnlineIds!=m_onlineQueue.items||enabled!=m_savedOnlineEnabled;
+    auto saved=m_savedOnline;
+    if(changed){
+        saved={};
+        if(enabled){
+            QJsonArray tracks;
+            for(auto id:m_onlineQueue.items){
+                const auto track=this->track(id);QJsonObject metadata;
+                for(const auto &key:QStringList{"id","mid","mediaMid","songType","albumId","audioId","bvid","cid","page","videoTitle","partProgress","cover","thumbnail","provider","preview","previewStartMs","previewDurationMs","fullDurationMs"})
+                    if(track.onlineMetadata.contains(key))metadata[key]=track.onlineMetadata.value(key);
+                tracks.append(QJsonObject{{"id",QString::number(id)},{"hash",track.hash},{"title",track.title},{"artist",track.artist},{"album",track.album},{"duration",double(track.duration)},{"cover",track.cover},{"vip",track.requiresSubscription},{"metadata",metadata}});
+            }
+            saved={{"tracks",tracks},{"current",QString::number(m_onlineQueue.current())},{"position",double(position())},{"revision",QUuid::createUuid().toString(QUuid::WithoutBraces)}};
+        }
+    }
+    const QJsonObject progress=enabled?QJsonObject{{"revision",saved.value("revision")},{"current",QString::number(m_onlineQueue.current())},{"position",double(position())}}:QJsonObject{};
+    QJsonObject values;
+    if(changed){
+        // Write the clearing snapshot only when the session actually owns
+        // online state (switching back to pure local) or the database still
+        // holds a previous snapshot to clear. A session that never went
+        // online must neither issue empty writes nor clobber the queue a
+        // previous session persisted.
+        const auto stored=m_library->setting("onlinePlayback").toObject();
+        if(!saved.isEmpty()||!stored.isEmpty())values["onlinePlayback"]=saved;
+    }
+    if(changed||progress!=m_savedOnlineProgress){
+        const auto storedProgress=m_library->setting("onlinePlaybackProgress").toObject();
+        if(!progress.isEmpty()||!storedProgress.isEmpty())values["onlinePlaybackProgress"]=progress;
+    }
+    if(values.isEmpty()){
+        // Nothing to persist and nothing to clear: book-keep like a successful
+        // save so unchanged sessions stop re-evaluating on every timer tick.
+        m_savedOnline=saved;m_savedOnlineProgress=progress;m_savedOnlineIds=m_onlineQueue.items;
+        m_savedOnlineRevision=m_onlineMetadataRevision;m_savedOnlineEnabled=enabled;m_onlineSaveError.clear();
+        return true;
+    }
+    const bool ok=m_library->setSettings(values);
+    if(ok){m_savedOnline=saved;m_savedOnlineProgress=progress;m_savedOnlineIds=m_onlineQueue.items;m_savedOnlineRevision=m_onlineMetadataRevision;m_savedOnlineEnabled=enabled;m_onlineSaveError.clear();}
+    else{m_onlineSaveError="在线播放进度未能保存："+m_library->lastError();emit saveFailed(m_onlineSaveError);}return ok;
 }
 }

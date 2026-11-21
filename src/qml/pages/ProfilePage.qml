@@ -76,7 +76,7 @@ Item {
                 }
                 HighlightSurface {anchors.fill:parent;anchors.margins:-8;radius:12;hovered:identityMouse.containsMouse}
                 ProfileAvatar {
-                    objectName:"profileAvatar";y:identity.contentInset;width:76-20*page.headerProgress;height:width;radius:width/2;resolution:512;
+                    objectName:"profileAvatar";y:identity.contentInset;width:76-20*page.headerProgress;height:width;resolution:512;
                     file:libraryBridge.profile.avatar||"";seed:libraryBridge.profile.nickname||"Relaxer Listener";revision:String(page.avatarRevision)
                 }
                 UiText {
@@ -182,7 +182,7 @@ Item {
                     background:Rectangle {radius:12;color:parent.hovered?Theme.hover:Theme.panel;Rectangle {anchors.right:parent.right;width:12;height:parent.height;color:parent.color}}
                     contentItem:Item {
                         ProfileAvatar {
-                            objectName:"profileEditorAvatar";anchors.centerIn:parent;width:Math.max(32,Math.min(parent.width-28,180));height:width;radius:width/2
+                            objectName:"profileEditorAvatar";anchors.centerIn:parent;width:Math.max(32,Math.min(parent.width-28,180));height:width
                             file:String(profileEditor.pendingAvatar).length?profileEditor.pendingAvatar:libraryBridge.profile.avatar||"";seed:nickname.text||"Relaxer Listener"
                             revision:String(page.avatarRevision);resolution:512;
                         }

@@ -1,3 +1,4 @@
+#include "continuous-corner.h"
 #include "widgets.h"
 #include "artwork-recovery.h"
 #include <QScrollBar>
@@ -315,7 +316,7 @@ void Cover::paintEvent(QPaintEvent *) {
     int s = qMin(width(), height());
     QRectF rect((width() - s) / 2., (height() - s) / 2., s, s);
     QPainterPath clip;
-    clip.addRoundedRect(rect, m_radius, m_radius);
+    clip=continuousCornerPath(rect,artworkCornerRadius(rect));
     p.setClipPath(clip);
     p.drawPixmap(rect.toRect(), coverPixmap(m_path, m_seed, qMin(900, qMax(100, s))));
 }
@@ -462,7 +463,7 @@ void SongDelegate::paint(QPainter *p, const QStyleOptionViewItem &opt, const QMo
         if(selected){QPainterPath tick;tick.moveTo(box.left()+4,box.top()+8);tick.lineTo(box.left()+7,box.top()+11);tick.lineTo(box.left()+12,box.top()+5);p->drawPath(tick);}
     }else if(idx.column()==SongTable::TitleColumn){
         const int y=o.rect.center().y();QRect art(o.rect.x()+10,y-23,46,46);
-        QPainterPath clip;clip.addRoundedRect(art,8,8);p->setClipPath(clip);
+        QPainterPath clip;clip=continuousCornerPath(art,artworkCornerRadius(art));p->setClipPath(clip);
         p->drawPixmap(art,coverPixmap(idx.data(Qt::UserRole+1).toString(),idx.data().toString(),100));
         p->setClipping(false);
         const QRect text(art.right()+13,o.rect.y(),qMax(0,o.rect.width()-art.width()-34),o.rect.height());

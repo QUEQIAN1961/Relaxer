@@ -30,20 +30,20 @@ class PlaybackDiagnostics {
 };
 } // namespace relaxer
 namespace {
-QVector<qint64> seed(Library &library, int count = 3) {
+QVector<qint64> seed(Library &library, int count = 3, int durationMs = 10000) {
     QVector<qint64> ids;
     for (int n = 0; n < count; ++n) {
         Track t;
         t.title = QString("B9 %1").arg(n);
         t.hash = t.title;
         t.file = QString("Music/b9-%1.wav").arg(n);
-        t.duration = 10000;
+        t.duration = durationMs;
         QFile file(library.absolute(t.file));
         if (!file.open(QIODevice::WriteOnly))
             return {};
         QDataStream out(&file);
         out.setByteOrder(QDataStream::LittleEndian);
-        constexpr quint32 bytes = 160000;
+        const quint32 bytes = quint32(durationMs) * 16;
         out.writeRawData("RIFF", 4);
         out << quint32(36 + bytes);
         out.writeRawData("WAVEfmt ", 8);
@@ -78,9 +78,9 @@ class AuditDatabase {
         QSqlQuery q(db);
         return q.exec(sql);
     }
-    qint64 count() {
+    qint64 count(const QString &table = QStringLiteral("b9_writes")) {
         QSqlQuery q(db);
-        if (!q.exec("SELECT COUNT(*) FROM b9_writes") || !q.next())
+        if (!q.exec("SELECT COUNT(*) FROM " + table) || !q.next())
             return -1;
         return q.value(0).toLongLong();
     }
@@ -459,20 +459,38 @@ class PlaybackFacadeTests : public QObject {
         QVERIFY(facade.shutdown());QCOMPARE(audit.count(),qint64(1));qInfo()<<"P3 real 4000ms timer cycles="<<ticks.size()<<"queue writes="<<audit.count();
     }
     void movingPositionPersistsAndFailedChangedSnapshotRetries(){
-        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto ids=seed(library);AuditDatabase audit(library);
+        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto ids=seed(library,3,30000);AuditDatabase audit(library);
         QVERIFY(audit.exec("CREATE TABLE b9_writes(id INTEGER)"));
         QVERIFY(audit.exec("CREATE TRIGGER p3_queue_insert AFTER INSERT ON settings WHEN NEW.key='queue' BEGIN INSERT INTO b9_writes VALUES(1); END"));
         QVERIFY(audit.exec("CREATE TRIGGER p3_queue_update AFTER UPDATE ON settings WHEN NEW.key='queue' BEGIN INSERT INTO b9_writes VALUES(1); END"));
+        QVERIFY(audit.exec("CREATE TABLE position_writes(id INTEGER)"));
+        QVERIFY(audit.exec("CREATE TRIGGER p3_position_insert AFTER INSERT ON settings WHEN NEW.key='position' BEGIN INSERT INTO position_writes VALUES(1); END"));
+        QVERIFY(audit.exec("CREATE TRIGGER p3_position_update AFTER UPDATE ON settings WHEN NEW.key='position' BEGIN INSERT INTO position_writes VALUES(1); END"));
         PlaybackFacade facade(&library,nullptr,true);facade.play(ids,ids[0]);QTRY_VERIFY(facade.playing());QTRY_VERIFY(facade.seekable());
-        const auto before=audit.count();QTRY_VERIFY_WITH_TIMEOUT(audit.count()>before,4500);QVERIFY(library.setting("position").toDouble()>0);
-        facade.toggle();QVERIFY(!facade.playing());const auto paused=audit.count();
+        // §11 contract: the 4s window persists a small position record only.
+        // The queue row may be written once for the new structure (before or
+        // inside the first cycle); later cycles must not rewrite it.
+        const auto structural=audit.count();
+        QTRY_VERIFY_WITH_TIMEOUT(library.setting("position").toDouble()>0,4500);
+        QVERIFY(audit.count("position_writes")>0);
+        const auto afterPosition=audit.count();
+        QVERIFY(afterPosition<=structural+1);
         auto *timer=facade.findChild<QTimer *>("playbackPersistenceTimer");QSignalSpy ticks(timer,&QTimer::timeout);
-        QTRY_VERIFY_WITH_TIMEOUT(ticks.size()>=2,9000);QCOMPARE(audit.count(),paused);
-        facade.seek(2500);QVERIFY(audit.count()>paused);
+        QTRY_VERIFY_WITH_TIMEOUT(ticks.size()>=2,9000);
+        QCOMPARE(audit.count(),afterPosition); // moving cycles persist position without a full-queue rewrite
+        facade.toggle();QVERIFY(!facade.playing());
+        // Flush the pause edge before observing idle cycles. Neither key may
+        // be rewritten after this settled snapshot, including position.
+        QVERIFY(facade.save());const auto paused=audit.count(),pausedPosition=audit.count("position_writes");ticks.clear();
+        QTRY_VERIFY_WITH_TIMEOUT(ticks.size()>=2,9000);QCOMPARE(audit.count(),paused);QCOMPARE(audit.count("position_writes"),pausedPosition);
+        facade.seek(2500);
+        QTRY_COMPARE(library.setting("position").toInt(),2500); // seek flushes the position record
+        QCOMPARE(audit.count(),paused); // and still no queue rewrite
         QVERIFY(audit.exec("CREATE TRIGGER p3_snapshot_fail BEFORE INSERT ON settings WHEN NEW.key='position' BEGIN SELECT RAISE(ABORT,'P3 snapshot'); END"));
         facade.seek(3000);QVERIFY(!facade.save());QCOMPARE(library.setting("position").toInt(),2500);
-        const auto failedCount=audit.count();QVERIFY(audit.exec("DROP TRIGGER p3_snapshot_fail"));QVERIFY(facade.save());QCOMPARE(audit.count(),failedCount+1);
-        QCOMPARE(library.setting("position").toInt(),3000);QVERIFY(facade.shutdown());
+        const auto failedCount=audit.count();QVERIFY(audit.exec("DROP TRIGGER p3_snapshot_fail"));QVERIFY(facade.save());
+        QCOMPARE(audit.count(),failedCount); // the successful retry persists only the position record
+        QTRY_COMPARE(library.setting("position").toInt(),3000);QVERIFY(facade.shutdown());
         PlaybackFacade restored(&library,nullptr,true);restored.restore();QCOMPARE(restored.queue().items,ids);QTRY_COMPARE(restored.position(),qint64(3000));QVERIFY(!restored.playing());
         qInfo()<<"P3 moving/paused/seek/retry/restored SQL queue writes="<<audit.count();
     }

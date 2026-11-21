@@ -22,6 +22,8 @@ class BilibiliBridge final : public QObject {
     Q_PROPERTY(QVariantList searchResults READ searchResults NOTIFY changed)
     Q_PROPERTY(QVariantMap currentPlaylist READ currentPlaylist NOTIFY changed)
     Q_PROPERTY(QVariantList videoParts READ videoParts NOTIFY changed)
+    Q_PROPERTY(bool currentVideo READ currentVideo NOTIFY changed)
+    Q_PROPERTY(bool partsLoading READ partsLoading NOTIFY changed)
     Q_PROPERTY(int currentPart READ currentPart NOTIFY changed)
     Q_PROPERTY(bool hasMore READ hasMore NOTIFY changed)
     Q_PROPERTY(bool needsVerification READ needsVerification NOTIFY changed)
@@ -46,6 +48,9 @@ public:
     QVariantList searchResults()const{return m_searchResults;}
     QVariantMap currentPlaylist()const{return m_currentPlaylist;}
     QVariantList videoParts()const;
+    bool currentVideo()const{return m_facade->current().hash.startsWith("bilibili:");}
+    bool partsLoading()const{return m_partsLoading;}
+    Q_INVOKABLE void ensureVideoParts();
     int currentPart()const;
     Q_INVOKABLE bool selectPart(int page);
     bool hasMore()const{return m_hasMore;}
@@ -100,8 +105,13 @@ private:
     void readPage(bool append=false);
     void cachePage();
     void registerVideos(QVariantList rows,bool append=false);
+    void trimCatalog();
     QVector<Track> tracksFor(const QStringList &ids);
     void requestSource(qint64 id);
+    void readVideoInfo(const QString &bvid,Done done);
+    QHash<QString,QVector<Done>> m_videoInfoPending;
+    QHash<QString,quint64> m_videoInfoTokens;quint64 m_videoInfoSerial=0;
+    QString m_partsKey;quint64 m_partsRevision=0;bool m_partsLoading=false;
     void status(const QString &text){m_status=text;emit changed();}
 };
 }

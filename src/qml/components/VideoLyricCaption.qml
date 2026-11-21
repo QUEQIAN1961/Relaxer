@@ -7,7 +7,7 @@ Item {
     required property Item videoItem
     property string text:""
     property string translation:""
-    readonly property bool software:GraphicsInfo.api===GraphicsInfo.Software
+    readonly property bool software:GraphicsInfo.api===GraphicsInfo.Software||!settingsBridge.gpuAccelerationAtStartup
     readonly property real imageWidth:Math.min(videoItem.width,videoItem.height*videoItem.videoAspect)
     readonly property real imageHeight:Math.min(videoItem.height,videoItem.width/videoItem.videoAspect)
     width:Math.max(0,Math.min(imageWidth-16,Math.min(720,imageWidth*.86)))
@@ -22,7 +22,7 @@ Item {
         sourceRect:{const at=caption.mapToItem(caption.videoItem,0,0);return Qt.rect(at.x,at.y,caption.width,caption.height)}
     }
     Canvas {
-        id:fade;anchors.fill:parent;visible:caption.software;layer.enabled:true
+        id:fade;objectName:"videoLyricSoftwareShade";anchors.fill:parent;visible:caption.software;layer.enabled:true
         onWidthChanged:requestPaint();onHeightChanged:requestPaint()
         onPaint:{
             const c=getContext("2d");c.clearRect(0,0,width,height);if(width<=0||height<=0)return

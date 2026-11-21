@@ -14,8 +14,12 @@ def checked(path, expected):
     return data
 
 
-def assemble(source, build, assets):
+def assemble(source, build, assets, release_revision=None):
     version = re.search(r'Version\[\]\s*=\s*"([^"]+)"', (source / 'src/phase-c-version.h').read_text())[1]
+    if release_revision is not None:
+        if not re.fullmatch(r'r[1-9]\d*', release_revision):
+            raise ValueError('Expected a release revision such as r2')
+        version += '-' + release_revision
     midi = json.loads((build / 'runtime-midi.json').read_text(encoding='utf-8'))
     ffmpeg = json.loads((build / 'runtime-ffmpeg.json').read_text(encoding='utf-8'))
     for label in ('MIDI', 'FFmpeg'):
@@ -49,5 +53,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('source', 'build', 'assets'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--release-revision')
     args = parser.parse_args()
-    assemble(args.source.resolve(), args.build.resolve(), args.assets.resolve())
+    assemble(args.source.resolve(), args.build.resolve(), args.assets.resolve(), args.release_revision)

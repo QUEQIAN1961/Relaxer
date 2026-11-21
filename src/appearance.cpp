@@ -1,3 +1,4 @@
+#include "continuous-corner.h"
 #include "appearance.h"
 #include "widgets.h"
 #include <QBuffer>
@@ -479,7 +480,7 @@ void AppearancePage::rebuildHistory() {
             QPainter painter(&preview);
             painter.setRenderHint(QPainter::Antialiasing);
             QPainterPath mask;
-            mask.addRoundedRect(preview.rect(), 5, 5);
+            mask=continuousCornerPath(preview.rect(),artworkCornerRadius(preview.rect()));
             painter.setClipPath(mask);
             painter.drawImage(QPoint((64 - scaled.width()) / 2, (42 - scaled.height()) / 2), scaled);
             painter.end();

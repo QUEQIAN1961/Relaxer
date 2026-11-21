@@ -32,6 +32,22 @@ int runQml(QCoreApplication *app, const relaxer::QmlLaunchOptions *options,
     diagnostics->result["dataRoot"] = library.root();
     diagnostics->result["qtVersion"] = qVersion();
     diagnostics->mark("uiConstructStartMs");
+    // Select the Quick renderer once, before any Quick window or player is
+    // created. Persisted changes never rebuild the renderer during playback.
+    // On Windows, WARP keeps the RHI video output available while rasterizing
+    // on the CPU. The plain software scene graph cannot draw VideoOutput's
+    // shader material. Enabled preserves Qt's normal diagnostic overrides.
+    if (!library.setting("uiGpuAcceleration",true).toBool(true)) {
+#ifdef Q_OS_WIN
+        qputenv("QT_QUICK_BACKEND","rhi");
+        qputenv("QSG_RHI_PREFER_SOFTWARE_RENDERER","1");
+        QQuickWindow::setSceneGraphBackend(QStringLiteral("rhi"));
+        QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
+#else
+        qputenv("QT_QUICK_BACKEND","software");
+        QQuickWindow::setSceneGraphBackend(QStringLiteral("software"));
+#endif
+    }
     relaxer::QmlShell shell(&library);
     diagnostics->mark("qmlLoadStartMs");
     app->setProperty("relaxerNonInteractiveExit",options->quitAfter>0||!options->screenshot.isEmpty());

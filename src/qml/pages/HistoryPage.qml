@@ -11,6 +11,8 @@ Item {
     property bool descending:true
     property var rows:[]
     property bool hasMore:false
+    function savePageState(){return {query:query,sortKey:sortKey,descending:descending}}
+    function restorePageState(state){query=state.query||"";sortKey=state.sortKey||"endedAt";descending=state.descending!==false;reload()}
     readonly property var columnKeys:["title","artist","endedAt","platform"]
     readonly property var columnLabels:["歌曲","歌手","播放时间","平台"]
     readonly property var columnWidths:{const width=tableViewport.contentWidth-10,time=166*Theme.fontScale;if(Theme.compact)return [Math.max(0,width-time),0,time,0];const platform=84*Theme.fontScale,artist=Math.max(100*Theme.fontScale,(width-time-platform)*.27);return [width-time-platform-artist,artist,time,platform]}
@@ -63,7 +65,7 @@ Item {
                         Item {
                             width:page.columnWidths[0];height:parent.height
                             IconButton {objectName:"historyPlay-"+row.modelData.historyId;x:4;anchors.verticalCenter:parent.verticalCenter;symbol:"play";tip:"重新播放";showTooltip:true;enabled:row.modelData.available;width:30;height:30;padding:5;onClicked:playbackBridge.playHistory(row.modelData)}
-                            Artwork {id:cover;x:38;anchors.verticalCenter:parent.verticalCenter;width:row.modelData.video?40*4/3:40;height:40;videoCover:row.modelData.video;file:row.modelData.coverUrl;seed:row.modelData.title;resolution:128;animated:false;radius:6}
+                            Artwork {id:cover;x:38;anchors.verticalCenter:parent.verticalCenter;width:row.modelData.video?40*4/3:40;height:40;videoCover:row.modelData.video;file:row.modelData.coverUrl;contentKey:String(row.modelData.hash||row.modelData.trackId);seed:row.modelData.title;resolution:128;animated:false;}
                             UiText {objectName:"historyTitle-"+row.modelData.historyId;x:cover.x+cover.width+8;anchors.verticalCenter:parent.verticalCenter;width:Math.max(0,parent.width-x-8);text:row.modelData.title;elide:Text.ElideRight;textFormat:Text.PlainText;basePixelSize:14;font.weight:Font.DemiBold;color:Theme.text}
                         }
                         UiText {objectName:"historyArtist-"+row.modelData.historyId;visible:!Theme.compact;x:page.columnX(1)+8;width:Math.max(0,page.columnWidths[1]-16);anchors.verticalCenter:parent.verticalCenter;text:row.modelData.artist;elide:Text.ElideRight;textFormat:Text.PlainText;basePixelSize:13;color:Theme.secondary}

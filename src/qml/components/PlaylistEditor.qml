@@ -45,7 +45,7 @@ ConfirmDialog{
         RowLayout {
             Layout.fillWidth:true;spacing:14
             Artwork {
-                objectName:"playlistEditorCover";Layout.preferredWidth:64;Layout.preferredHeight:64;radius:10;resolution:160;animated:false
+                objectName:"playlistEditorCover";Layout.preferredWidth:64;Layout.preferredHeight:64;resolution:160;animated:false
                 file:String(dialog.pendingCover).length?dialog.pendingCover:dialog.savedCover
                 seed:nameInput.text.trim()||"新歌单"
             }

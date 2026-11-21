@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QLineF>
+#include <QSignalSpy>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQmlProperty>
@@ -109,33 +110,86 @@ private slots:
         f.shell->settingsBridge()->discardAppearance();
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
-    void backgroundReleasesImagesAndRestoresWhileTransportContinues() {
+    void backgroundRetainsImagesAndRestoresWhileTransportContinues() {
         Fixture f; QVERIFY(prepare(f)); auto *w=f.shell->window(); auto *root=w->contentItem();
         auto *art=visual(root,"bottomCover"); QVERIFY(art);
-        QTRY_VERIFY(!art->property("displayedUrl").toUrl().isEmpty());
+        QTRY_COMPARE(art->property("status").toInt(),1);
+        const auto url=art->property("displayedUrl").toUrl(); QVERIFY(!url.isEmpty());
+        const auto slot=art->property("activeSlot").toInt(); QVERIFY(slot>=0);
+        const auto retained=[&]{return art->property("displayedUrl").toUrl()==url
+            &&art->property("activeSlot").toInt()==slot&&art->property("status").toInt()==1;};
+        auto *rowArt=visual(root,"trackCover-"+QString::number(f.a.id)); QVERIFY(rowArt);
+        QTRY_COMPARE(rowArt->property("status").toInt(),1);
+        const auto rowUrl=rowArt->property("displayedUrl").toUrl();
         f.shell->facade()->toggle(); QTRY_VERIFY(f.shell->facade()->playing());
         const auto track=f.shell->facade()->current().id;
         const auto queue=f.shell->facade()->queue().items;
+        auto *media=f.shell->facade()->backend()->media();
+        const auto source=media->source();
+        QSignalSpy sourceChanges(media,&QMediaPlayer::sourceChanged);
+        QSignalSpy attempts(f.shell->facade(),&PlaybackFacade::playbackAttemptStarted);
+        QSignalSpy invalidations(w,&QQuickWindow::sceneGraphInvalidated);
+        // Observe every restored frame, then inspect the first available window
+        // capture. Ready state alone cannot prove that the cover was painted.
+        const auto restore=[&]{
+            int frames=0;bool allReady=true;
+            QObject observer;
+            connect(w,&QQuickWindow::frameSwapped,&observer,[&]{++frames;allReady&=retained();});
+            w->showNormal();
+            if(!QTest::qWaitForWindowExposed(w))return false;
+            w->requestUpdate();
+            if(!QTest::qWaitFor([&]{return frames>0;}))return false;
+            const auto image=w->grabWindow();
+            qInfo()<<"Restored artwork frame"<<frames<<allReady<<retained()<<image.size()<<art->property("displayedUrl");
+            if(image.isNull()||!allReady||!retained())return false;
+            const auto center=bounds(art).center();const auto ratio=qreal(image.width())/w->width();
+            const auto pixel=image.pixelColor(qRound(center.x()*ratio),qRound(center.y()*ratio));
+            const auto shots=qEnvironmentVariable("RELAXER_PHASE_E_SCREENSHOTS");
+            if(!shots.isEmpty()){QDir().mkpath(shots);image.save(QDir(shots).filePath("retained-frame-"+QString::number(f.shell->facade()->position())+".png"));}
+            qInfo()<<"Restored artwork pixel"<<center<<ratio<<pixel;
+            const QColor expected("#b52d50");
+            return qAbs(pixel.red()-expected.red())<=1&&qAbs(pixel.green()-expected.green())<=1
+                &&qAbs(pixel.blue()-expected.blue())<=1&&pixel.alpha()==255;
+        };
         QTest::qWait(1200);
         QJsonObject evidence{{"foreground",memorySnapshot()}};
-        const auto position=f.shell->facade()->position();
+        auto position=f.shell->facade()->position();
         w->hide(); QTRY_VERIFY(w->property("backgrounded").toBool());
-        QTRY_VERIFY(art->property("displayedUrl").toUrl().isEmpty());
+        QVERIFY(retained());
         QTest::qWait(1600); evidence["hidden"]=memorySnapshot();
+        QVERIFY(retained());
         QVERIFY(f.shell->facade()->playing());
         QVERIFY(f.shell->facade()->position()>position+500);
         QCOMPARE(f.shell->facade()->current().id,track); QCOMPARE(f.shell->facade()->queue().items,queue);
-        w->showNormal(); QTRY_VERIFY(QTest::qWaitForWindowExposed(w));
-        QTRY_VERIFY(!art->property("displayedUrl").toUrl().isEmpty());
+        QVERIFY2(restore(),"Hidden window did not restore the decoded cover on its first available frame");
+        QTRY_VERIFY(!w->property("backgrounded").toBool());
         QTest::qWait(500); evidence["restored"]=memorySnapshot();
+        position=f.shell->facade()->position();
         w->showMinimized(); QTRY_VERIFY(w->property("backgrounded").toBool());
-        QTRY_VERIFY(art->property("displayedUrl").toUrl().isEmpty());
-        QTest::qWait(500); evidence["minimized"]=memorySnapshot();
+        QVERIFY(retained());
+        QTest::qWait(1600); evidence["minimized"]=memorySnapshot();
+        QVERIFY(retained());
         QVERIFY(f.shell->facade()->playing());
-        w->showNormal(); QTRY_VERIFY(!w->property("backgrounded").toBool());
-        QTRY_VERIFY(!art->property("displayedUrl").toUrl().isEmpty());
+        QVERIFY(f.shell->facade()->position()>position+500);
+        QCOMPARE(f.shell->facade()->current().id,track); QCOMPARE(f.shell->facade()->queue().items,queue);
+        QVERIFY2(restore(),"Minimized window did not restore the decoded cover on its first available frame");
+        QTRY_VERIFY(!w->property("backgrounded").toBool());
+        // Leaving the actual list page must still release ordinary delegate images.
+        // This uses the real row and navigation visibility, without calling suspendImages.
+        QVERIFY(f.shell->appBridge()->navigate(3));
+        QTRY_VERIFY(!rowArt->isVisible());
+        QTRY_VERIFY(rowArt->property("displayedUrl").toUrl().isEmpty());
+        QCOMPARE(rowArt->property("activeSlot").toInt(),-1);
+        QVERIFY(rowArt->property("status").toInt()!=1);
+        QVERIFY(retained());
+        QVERIFY(f.shell->appBridge()->navigate(0));
+        QTRY_COMPARE(rowArt->property("status").toInt(),1);
+        QCOMPARE(rowArt->property("displayedUrl").toUrl(),rowUrl);
+        QCOMPARE(media->source(),source); QCOMPARE(sourceChanges.size(),0); QCOMPARE(attempts.size(),0);
+        QCOMPARE(invalidations.size(),0);
+        QVERIFY(f.shell->facade()->playing());
+        QCOMPARE(f.shell->facade()->current().id,track); QCOMPARE(f.shell->facade()->queue().items,queue);
         qInfo().noquote()<<"BACKGROUND_RESOURCE_EVIDENCE"<<QJsonDocument(evidence).toJson(QJsonDocument::Compact);
-        QTest::qWait(300); // Allow the restored Canvas image to reach a rendered frame.
         shot(w,"background-restored");
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
@@ -347,7 +401,7 @@ private slots:
         }
         QVERIFY(QMetaObject::invokeMethod(visual(root,"lyricsWorkspace"),"close")); QTest::qWait(300);
         QVERIFY(click(w,visual(root,"navigation3"))); QTRY_COMPARE(f.shell->appBridge()->page(),3); QTest::qWait(280);
-        w->resize(540,790);QTest::qWait(420);QVERIFY(exercisePopup(visual(root,"qmlThemeSetting"),"theme-dropdown"));w->resize(1240,790);QTest::qWait(420);
+        QVERIFY(f.shell->settingsBridge()->setPreference("fontSize",20));w->resize(414,790);QTest::qWait(420);QTRY_VERIFY(visual(root,"qmlThemeSetting")->isVisible());QVERIFY(exercisePopup(visual(root,"qmlThemeSetting"),"theme-dropdown"));QVERIFY(f.shell->settingsBridge()->setPreference("fontSize",15));w->resize(1240,790);QTest::qWait(420);
         QVERIFY(click(w,visual(root,"openAiServiceSettings"))); QTest::qWait(300);
         QVERIFY(exercisePopup(visual(root,"aiProviderSelection"),"api-provider-dropdown"));
         auto *scroll=visual(root,"aiSettingsScroll"); auto *flick=qvariant_cast<QQuickItem *>(scroll->property("contentItem")); QVERIFY(flick);

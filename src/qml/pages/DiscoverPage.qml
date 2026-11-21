@@ -7,6 +7,7 @@ import "../theme"
 
 Item {
     id:page;objectName:"discoverPage"
+    readonly property bool presentationActive:visible&&(!Window.window||(Window.window.visible&&Window.window.visibility!==Window.Minimized))
     property int sourceIndex:0
     readonly property bool qqSelected: sourceIndex === 1
     readonly property bool videoSource:sourceIndex===4
@@ -265,7 +266,7 @@ Item {
         }
         RowLayout {
             objectName:"onlinePlaylistHeading";Layout.fillWidth:true;visible:!page.showPlaylists&&!!page.musicSource.currentPlaylist.id;spacing:10
-            Artwork {Layout.preferredWidth:page.videoSource&&page.musicSource.currentPlaylist.kind!=="user"?56*4/3:56;Layout.preferredHeight:56;videoCover:page.videoSource&&page.musicSource.currentPlaylist.kind!=="user";animated:false;radius:8;file:page.musicSource.currentPlaylist.cover||"";seed:page.musicSource.currentPlaylist.name||"歌单";imageUrl:String(file).length?file:"image://relaxer/artwork?seed="+encodeURIComponent(seed)+"&resolution=128"}
+            Artwork {Layout.preferredWidth:page.videoSource&&page.musicSource.currentPlaylist.kind!=="user"?56*4/3:56;Layout.preferredHeight:56;videoCover:page.videoSource&&page.musicSource.currentPlaylist.kind!=="user";animated:false;contentKey:page.provider+":"+(page.musicSource.currentPlaylist.kind||"playlist")+":"+String(page.musicSource.currentPlaylist.id||"");resolution:128;file:page.musicSource.currentPlaylist.cover||"";seed:page.musicSource.currentPlaylist.name||"歌单";imageUrl:String(file).length?file:"image://relaxer/artwork?seed="+encodeURIComponent(seed)+"&resolution=128&radiusRatio=0"}
             ColumnLayout {
                 Layout.fillWidth:true
                 UiText {Layout.fillWidth:true;text:page.musicSource.currentPlaylist.name||"歌单";basePixelSize:18;font.weight:Font.DemiBold;elide:Text.ElideRight;textFormat:Text.PlainText}
@@ -287,7 +288,7 @@ Item {
         RowLayout {
             objectName:"onlineCatalogStatus";Layout.fillWidth:true;Layout.minimumHeight:20;spacing:8
             visible:page.batchStatus.length>0||page.pageStatus.length>0||page.showCatalogProgress
-            BusyIndicator {objectName:"onlineCatalogSpinner";Layout.preferredWidth:20;Layout.preferredHeight:20;running:page.showCatalogProgress;visible:running}
+            BusyIndicator {objectName:"onlineCatalogSpinner";Layout.preferredWidth:20;Layout.preferredHeight:20;running:page.showCatalogProgress&&page.presentationActive;visible:page.showCatalogProgress}
             UiText {text:page.batchStatus||page.pageStatus;Layout.fillWidth:true;basePixelSize:12;color:Theme.secondary;wrapMode:Text.Wrap}
         }
         ShellButton {objectName:"bilibiliVerification";visible:page.videoSource&&bilibili.needsVerification;text:"在 B站官网查看";onClicked:Qt.openUrlExternally("https://search.bilibili.com/all?keyword="+encodeURIComponent(page.searchQuery))}
@@ -305,7 +306,7 @@ Item {
                 objectName:"onlinePlaylist-"+modelData.id
                 HoverHandler {id:cardHover}
                 HighlightSurface {objectName:"onlinePlaylistBackground";width:parent.width-4;height:parent.height-8;radius:12;positionRevision:playlistGrid.contentY+card.x+card.y;hovered:cardHover.hovered}
-                Artwork {id:cardCover;x:5;y:5;width:parent.width-14;height:width*(page.videoSource&&!page.searchCards?.75:1);videoCover:page.videoSource&&!page.searchCards;radius:10;animated:false;seed:card.modelData.name;file:card.modelData.cover||"";imageUrl:String(file).length?file:"image://relaxer/artwork?seed="+encodeURIComponent(seed)+"&resolution=256"}
+                Artwork {id:cardCover;x:5;y:5;width:parent.width-14;height:width*(page.videoSource&&!page.searchCards?.75:1);videoCover:page.videoSource&&!page.searchCards;animated:false;contentKey:page.provider+":"+(card.modelData.kind||"playlist")+":"+String(card.modelData.id);resolution:320;seed:card.modelData.name;file:card.modelData.cover||"";imageUrl:String(file).length?file:"image://relaxer/artwork?seed="+encodeURIComponent(seed)+"&resolution=256&radiusRatio=0"}
                 UiText {x:5;y:cardCover.y+cardCover.height+5;width:parent.width-14;text:card.modelData.name;textFormat:Text.PlainText;basePixelSize:14;font.weight:Font.DemiBold;maximumLineCount:2;wrapMode:Text.Wrap;elide:Text.ElideRight}
                 MouseArea {
                     anchors.fill:parent;cursorShape:Qt.PointingHandCursor
@@ -353,8 +354,8 @@ Item {
                         onClicked:if(row.current)playbackBridge.toggle();else page.musicSource.playSong(row.modelData.id)
                     }
                     Artwork {
-                        objectName:"onlineCover-"+row.modelData.id
-                        Layout.preferredWidth:page.videoSource?40*4/3:40;Layout.preferredHeight:40;videoCover:page.videoSource;radius:6;resolution:128;animated:false
+                        objectName:"onlineCover-"+row.modelData.id;contentKey:row.songKey
+                        Layout.preferredWidth:page.videoSource?40*4/3:40;Layout.preferredHeight:40;videoCover:page.videoSource;resolution:128;animated:false
                         file:row.modelData.thumbnail||row.modelData.cover||"";seed:row.modelData.title
                         imageUrl:String(file).length?file:"image://relaxer/artwork?seed="+encodeURIComponent(seed)+"&resolution=128&radiusRatio=0"
                     }

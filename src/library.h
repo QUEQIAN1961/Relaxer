@@ -1,4 +1,5 @@
 #pragma once
+#include <QCache>
 #include "model.h"
 #include <QJsonValue>
 #include <QJsonArray>
@@ -42,6 +43,7 @@ class Library : public QObject {
     QVector<Track> tracks(qint64 playlist = 0, const QString &filter = {}) const;
     QVector<Track> recent() const;
     Track track(qint64 id) const;
+    QVector<Track> matchingTracks() const;
     // Unique existing rows only; callers retain their own order/duplicates.
     QHash<qint64, Track> tracksByIds(const QVector<qint64> &ids) const;
     // One synchronous operation snapshot, bounded to 256 IDs per SELECT.
@@ -109,6 +111,10 @@ class Library : public QObject {
     bool artworkMetadataMatches(const ArtworkResult &result) const;
     friend class LibraryDiagnostics;
     mutable LyricsSaveMetrics m_lyricsSaveMetrics;
+    mutable QCache<qint64,Session> m_sessionCache{8},m_onlineSessionCache{8};
+    mutable bool m_totalsValid=false;
+    mutable qint64 m_totalHeard=0,m_totalPlays=0;
+    void refreshTotals()const;
     QString m_root, m_connection;
     bool writeLyrics(qint64 id,const QByteArray &data,const LyricsSaveSnapshot *snapshot=nullptr);
     mutable QString m_error;

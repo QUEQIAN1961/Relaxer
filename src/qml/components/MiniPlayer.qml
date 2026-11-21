@@ -124,8 +124,8 @@ Rectangle {
         objectName:"miniDragArea";anchors.fill:parent
     }
     Artwork {
-        id:cover;objectName:"miniCover";x:8;y:(mini.height-height)/2;width:playbackBridge.video?56:42;height:42;videoCover:playbackBridge.video;radius:8;resolution:96;animated:false
-        file:playbackBridge.coverUrl;revision:playbackBridge.artworkRevision;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer"
+        id:cover;objectName:"miniCover";x:8;y:(mini.height-height)/2;width:playbackBridge.video?56:42;height:42;videoCover:playbackBridge.video;resolution:96;animated:false
+        file:playbackBridge.coverUrl;contentKey:playbackBridge.trackId;revision:playbackBridge.artworkRevision;seed:playbackBridge.hasTrack?playbackBridge.title:"Relaxer"
         WindowDragArea {objectName:"miniCoverDrag";anchors.fill:parent}
     }
     Item {
