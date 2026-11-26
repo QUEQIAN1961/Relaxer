@@ -13,7 +13,8 @@ Item {
     property bool firstFramePresented:false
     Connections {
         target:page.Window.window
-        function onFrameSwapped(){if(page.visible)page.firstFramePresented=true}
+        enabled:page.visible&&!page.firstFramePresented
+        function onFrameSwapped(){page.firstFramePresented=true}
     }
     signal lyricsRequested(var keys)
     signal bulkChanged(bool active, var keys)
@@ -140,6 +141,7 @@ Item {
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 80
             trackModel: libraryModel; selectedKey: libraryModel.selectedId; currentKey: playbackBridge.trackId
             statisticsMode: true
+            showFavoriteColumn:(settingsBridge.values.favoriteDisplayScopes&1)!==0
             emptyHeading: libraryBridge.playlistId === "-3" ? "还没有累计播放时长记录" : "还没有最近播放记录"
             emptyDescription: "从本地音乐或歌单开始播放，听过的歌曲会出现在这里。"
             onScrollYChanged:if(!trackList.atScrollStart)page.statisticsExpanded=false

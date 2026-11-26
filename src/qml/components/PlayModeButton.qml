@@ -34,7 +34,6 @@ Rectangle {
     }
     RoundMenu {
         id:modes;objectName:"listPlayModes";width:control.width;enabled:control.enabled
-        closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutsideParent
         onAboutToShow:control.arrowHalfTurns+=1
         onAboutToHide:control.arrowHalfTurns+=1
         onEnabledChanged:if(!enabled)close()

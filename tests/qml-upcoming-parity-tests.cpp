@@ -1,5 +1,6 @@
 #include "ui-bridge/playback-bridge.h"
 #include "ui-bridge/upcoming-model.h"
+#include "ui-bridge/library-bridge.h"
 #include <QAbstractItemModelTester>
 #include <QDataStream>
 #include <QFile>
@@ -168,6 +169,91 @@ class UpcomingParityTests : public QObject {
         QVERIFY(!model.activate(0)); bridge.next(); bridge.previous(); bridge.playUpcoming(0); bridge.toggleFavorite();
         library.reset(); QCOMPARE(model.count(), 0); QVERIFY(bridge.coverUrl().isEmpty()); QVERIFY(!bridge.currentFavorite());
     }
+    void editPendingKeepsAudioAndPersistsEmptyState() {
+        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto ids=seed(library,4);QCOMPARE(ids.size(),4);
+        {
+            PlaybackFacade facade(&library,nullptr,true);UpcomingModel model(&library,&facade);
+            facade.play(ids,ids[0]);QTRY_VERIFY(facade.playing());QTRY_VERIFY(facade.seekable());QTRY_COMPARE(model.count(),4);
+            auto *media=facade.backend()->media();const auto source=media->source();const auto before=facade.position();
+            QSignalSpy sources(media,&QMediaPlayer::sourceChanged),attempts(&facade,&PlaybackFacade::playbackAttemptStarted);
+            QVERIFY(model.moveTrack(QString::number(ids[2]),-1));QCOMPARE(model.ids(),(QVector<qint64>{ids[2],ids[1],ids[3]}));
+            QVERIFY(!model.moveTrack(QString::number(ids[2]),-1));
+            QVERIFY(!model.removeTracks({QString::number(ids[0])}));
+            QVERIFY(model.removeTracks({QString::number(ids[2]),QString::number(ids[3])}));QCOMPARE(model.ids(),(QVector<qint64>{ids[1]}));
+            QCOMPARE(facade.current().id,ids[0]);QCOMPARE(facade.mode(),Mode::ListLoop);QVERIFY(facade.playing());
+            QTRY_VERIFY(facade.position()>before+300);
+            const auto position=facade.position();
+            QVERIFY(model.clearPending());QCOMPARE(model.count(),0);QCOMPARE(facade.queue().items,(QVector<qint64>{ids[0]}));
+            QTRY_COMPARE(media->playbackState(),QMediaPlayer::PausedState);
+            for(auto mode:{Mode::Sequential,Mode::SingleLoop,Mode::Shuffle,Mode::ListLoop}){facade.setMode(mode);QTRY_COMPARE(model.count(),0);}
+            QCOMPARE(facade.current().id,ids[0]);QVERIFY(!facade.playing());QCOMPARE(media->source(),source);QCOMPARE(sources.size(),0);QCOMPARE(attempts.size(),0);
+            QVERIFY(facade.position()>=position);
+            QVERIFY(!model.clearPending());QVERIFY(!facade.playing());
+            QVERIFY(facade.save());QVERIFY(facade.shutdown());
+        }
+        PlaybackFacade restored(&library,nullptr,true);UpcomingModel projection(&library,&restored);restored.restore();
+        QTRY_COMPARE(restored.current().id,ids[0]);QTRY_COMPARE(projection.count(),0);QVERIFY(!restored.playing());QVERIFY(restored.shutdown());
+    }
+    void editedMixedQueuePersistsAndKeepsOnlineAudioRunning() {
+        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto ids=seed(library,3);QCOMPARE(ids.size(),3);
+        Track online;online.id=5000000000432LL;online.hash="bilibili:BVeditedQueue";online.title="Online current";online.duration=10000;
+        online.onlineMetadata["queueOrigin"]=QJsonObject{{"provider","bilibili"},{"kind","playlist"},{"id","432"}};
+        const auto audio=QUrl::fromLocalFile(library.absolute(library.track(ids[0]).file));
+        {
+            PlaybackFacade facade(&library,nullptr,true);UpcomingModel model(&library,&facade);
+            connect(&facade,&PlaybackFacade::onlineSourceRequested,&facade,[&](qint64 key){facade.setOnlineSource(key,audio);});
+            facade.playOnline({online,library.track(ids[1]),library.track(ids[2])},online.id);QTRY_VERIFY(facade.playing());QTRY_COMPARE(model.count(),3);
+            QMediaPlayer *player=nullptr;for(auto *p:facade.findChildren<QMediaPlayer *>())if(p!=facade.backend()->media())player=p;QVERIFY(player);
+            QSignalSpy sources(player,&QMediaPlayer::sourceChanged),attempts(&facade,&PlaybackFacade::playbackAttemptStarted);
+            const auto position=facade.position();QVERIFY(model.moveTrack(QString::number(ids[2]),-1));QCOMPARE(model.ids(),(QVector<qint64>{ids[2],ids[1]}));
+            QCOMPARE(facade.current().id,online.id);QVERIFY(facade.playing());QCOMPARE(sources.size(),0);QCOMPARE(attempts.size(),0);QTRY_VERIFY(facade.position()>position+200);
+            QVERIFY(facade.save());QVERIFY(facade.shutdown());
+        }
+        {
+            PlaybackFacade restored(&library,nullptr,true);UpcomingModel model(&library,&restored);restored.restore(true);QTRY_COMPARE(model.ids(),(QVector<qint64>{ids[2],ids[1]}));
+            QCOMPARE(restored.current().id,online.id);QVERIFY(!restored.playing());QCOMPARE(restored.queueOrigin(online.id).value("id").toString(),QString("432"));
+            connect(&restored,&PlaybackFacade::onlineSourceRequested,&restored,[&](qint64 key){restored.setOnlineSource(key,audio);});restored.toggle();QTRY_VERIFY(restored.playing());
+            QMediaPlayer *player=nullptr;for(auto *p:restored.findChildren<QMediaPlayer *>())if(p!=restored.backend()->media())player=p;QVERIFY(player);
+            QSignalSpy sources(player,&QMediaPlayer::sourceChanged),attempts(&restored,&PlaybackFacade::playbackAttemptStarted);
+            const auto start=restored.position();QTRY_VERIFY(restored.position()>start+200);
+            const auto position=restored.position();
+            QVERIFY(model.clearPending());QCOMPARE(model.count(),0);QCOMPARE(restored.queue().items,(QVector<qint64>{online.id}));
+            QTRY_COMPARE(player->playbackState(),QMediaPlayer::PausedState);QVERIFY(!restored.playing());
+            QCOMPARE(restored.current().id,online.id);QCOMPARE(sources.size(),0);QCOMPARE(attempts.size(),0);
+            QVERIFY(restored.position()>=position);
+            QVERIFY(restored.save());QVERIFY(restored.shutdown());
+        }
+        PlaybackFacade empty(&library,nullptr,true);UpcomingModel model(&library,&empty);empty.restore(true);QTRY_COMPARE(empty.current().id,online.id);QTRY_COMPARE(model.count(),0);QVERIFY(!empty.playing());QVERIFY(empty.shutdown());
+    }
+    void queueSourceChoosesPinnedThenDiscoveryAndDeletedLocalFallsBack() {
+        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto ids=seed(library,3);
+        PlaybackFacade facade(&library,nullptr,true);TrackListModel source(&library);TrackFilterModel view(&source);PlaylistListModel lists(&library);
+        LibraryBridge bridge(&library,&facade,&source,&view,&lists);UpcomingModel model(&library,&facade);
+        const auto local=library.createPlaylist("Source playlist");QVERIFY(library.addToPlaylist(local,ids));
+        QVERIFY(bridge.openPlaylist(QString::number(local)));bridge.play(QString::number(ids[0]));
+        QCOMPARE(bridge.queueLocation(QString::number(ids[1])).value("localKey").toString(),QString::number(local));
+        Track remote;remote.id=5000000000009LL;remote.hash="bilibili:BVqueueOrigin";remote.title="Queued video";
+        remote.onlineMetadata["queueOrigin"]=QJsonObject{{"provider","bilibili"},{"kind","playlist"},{"id","8123"},{"name","Source folder"}};
+        QVERIFY(facade.enqueueTracks({remote},true));QTRY_COMPARE(model.firstTrackKey(),QString::number(remote.id));
+        const auto pinned=bridge.pinCloudPlaylist({{"provider","bilibili"},{"id","8123"},{"name","Pinned folder"}});QVERIFY(pinned!="0");
+        auto location=bridge.queueLocation(QString::number(remote.id));QCOMPARE(location.value("destination").toString(),QString("local"));QCOMPARE(location.value("localKey").toString(),pinned);
+        QVERIFY(bridge.deletePlaylist(pinned));location=bridge.queueLocation(QString::number(remote.id));QCOMPARE(location.value("destination").toString(),QString("discover"));QCOMPARE(location.value("id").toString(),QString("8123"));
+        QVERIFY(bridge.deletePlaylist(QString::number(local)));location=bridge.queueLocation(QString::number(ids[1]));QCOMPARE(location.value("localKey").toString(),QString("0"));QVERIFY(!location.value("notice").toString().isEmpty());
+        const auto playing=facade.current().id;auto *media=facade.backend()->media();QSignalSpy changed(media,&QMediaPlayer::sourceChanged);
+        QVERIFY(model.moveTrack(QString::number(remote.id),1));QCOMPARE(facade.current().id,playing);QCOMPARE(changed.size(),0);
+        QVERIFY(facade.shutdown());
+    }
+    void editedShuffleActivationUsesDisplayedIdentityAndRejectsStaleCommands() {
+        QTemporaryDir dir;Library library(dir.path());QVERIFY(library.open());const auto ids=seed(library,6);
+        PlaybackFacade facade(&library,nullptr,true);UpcomingModel model(&library,&facade);facade.play(ids,ids[0]);facade.setMode(Mode::Shuffle);
+        QTRY_COMPARE(model.ids(),facade.upcoming());const auto pending=facade.editableUpcoming();QCOMPARE(pending.size(),5);
+        QVERIFY(model.moveTrack(QString::number(pending[2]),-1));auto expected=pending;expected.swapItemsAt(2,1);QCOMPARE(model.ids(),expected);
+        QVERIFY(model.activate(1));QCOMPARE(facade.current().id,expected[1]);QCOMPARE(facade.mode(),Mode::Shuffle);
+        // Deliberately act before the queued refresh; never edit an unrelated row.
+        QVERIFY(!model.removeTracks({QString::number(expected[0])}));QCOMPARE(facade.current().id,expected[1]);
+        QTRY_COMPARE(model.ids(),facade.upcoming());QVERIFY(facade.shutdown());
+    }
+
 };
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv); app.setQuitOnLastWindowClosed(false);

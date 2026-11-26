@@ -83,6 +83,26 @@ void PlaybackFacade::playOnline(const QVector<Track> &tracks, qint64 start) {
     m_onlineQueue.mode=m_playback->mode();m_onlineQueue.set(ids,start);m_sharedQueueActive=!ids.isEmpty();m_onlineActive=m_sharedQueueActive;m_playback->setExternalQueue(m_sharedQueueActive);m_queueFailures.clear();
     if(m_onlineActive)requestOnlineCurrent();
 }
+void PlaybackFacade::playMixedPlaylist(const QVector<Track> &tracks,qint64 start,const QVariantMap &origin){
+    if(isShutdown()||tracks.isEmpty())return;
+    if(m_onlineActive)stopOnline();
+    else {m_playback->pauseForQueue();m_playback->save();}
+    m_onlineTracks.clear();
+    QVector<qint64> ids,localIds;
+    for(const auto &track:tracks){
+        ids.append(track.id);
+        if(isOnline(track))m_onlineTracks.insert(track.id,track);
+        else localIds.append(track.id);
+    }
+    ++m_onlineMetadataRevision;
+    m_onlineQueue.mode=m_playback->mode();
+    m_onlineQueue.set(ids,start);
+    m_sharedQueueActive=true;
+    m_playback->setExternalQueue(true);
+    m_queueFailures.clear();
+    rememberQueueOrigin(localIds,origin);
+    activateQueuedCurrent();
+}
 void PlaybackFacade::resetOnlineBuffer(){
     if(isShutdown()||!m_onlinePlayer)return;
     m_onlineDecoded.clear();
@@ -409,7 +429,10 @@ void PlaybackFacade::failOnlineSource(qint64 id,const QString &message,bool tran
     }
     // A Qishui account/protocol/codec failure can affect every item in a list.
     // Keep the selected track and the actual failure instead of scanning it all.
-    if(current().hash.startsWith("qishui:")){stopUnavailableCurrent(message);return;}
+    const auto track=current();
+    if(track.hash.startsWith("qishui:")&&!track.onlineMetadata.value("queueOrigin").toObject().contains("customPlaylistKey")){
+        stopUnavailableCurrent(message);return;
+    }
     skipUnavailableCurrent(message);
 }
 void PlaybackFacade::stopOnline(){
@@ -458,7 +481,8 @@ void PlaybackFacade::finishOnlineSession(){
     sampleOnline(m_onlinePlayer&&m_onlinePlayer->mediaStatus()==QMediaPlayer::EndOfMedia,true);if(m_onlineHistoryHeard>0&&!m_library->recordPlaybackHistory(m_onlineHistoryTrack))emit saveFailed("播放历史未能保存");m_onlineHistoryHeard=0;m_onlineSession={};}
 bool PlaybackFacade::saveOnlineState(){
     const bool enabled=m_sharedQueueActive&&m_library->setting("rememberPosition",true).toBool();
-    const bool changed=m_savedOnlineRevision!=m_onlineMetadataRevision||m_savedOnlineIds!=m_onlineQueue.items||enabled!=m_savedOnlineEnabled;
+    QJsonArray priority;for(auto id:m_onlineQueue.pendingPriority())priority.append(QString::number(id));
+    const bool changed=m_savedOnline.value("edited").toBool()!=m_onlineQueue.pendingEdited||m_savedOnline.value("priority").toArray()!=priority||m_savedOnlineRevision!=m_onlineMetadataRevision||m_savedOnlineIds!=m_onlineQueue.items||enabled!=m_savedOnlineEnabled;
     auto saved=m_savedOnline;
     if(changed){
         saved={};
@@ -466,11 +490,11 @@ bool PlaybackFacade::saveOnlineState(){
             QJsonArray tracks;
             for(auto id:m_onlineQueue.items){
                 const auto track=this->track(id);QJsonObject metadata;
-                for(const auto &key:QStringList{"id","mid","mediaMid","songType","albumId","audioId","bvid","cid","page","videoTitle","partProgress","cover","thumbnail","provider","preview","previewStartMs","previewDurationMs","fullDurationMs"})
+                for(const auto &key:QStringList{"queueOrigin","id","mid","mediaMid","songType","albumId","audioId","bvid","cid","page","videoTitle","partProgress","cover","thumbnail","provider","preview","previewStartMs","previewDurationMs","fullDurationMs"})
                     if(track.onlineMetadata.contains(key))metadata[key]=track.onlineMetadata.value(key);
                 tracks.append(QJsonObject{{"id",QString::number(id)},{"hash",track.hash},{"title",track.title},{"artist",track.artist},{"album",track.album},{"duration",double(track.duration)},{"cover",track.cover},{"vip",track.requiresSubscription},{"metadata",metadata}});
             }
-            saved={{"tracks",tracks},{"current",QString::number(m_onlineQueue.current())},{"position",double(position())},{"revision",QUuid::createUuid().toString(QUuid::WithoutBraces)}};
+            saved={{"edited",m_onlineQueue.pendingEdited},{"priority",priority},{"tracks",tracks},{"current",QString::number(m_onlineQueue.current())},{"position",double(position())},{"revision",QUuid::createUuid().toString(QUuid::WithoutBraces)}};
         }
     }
     const QJsonObject progress=enabled?QJsonObject{{"revision",saved.value("revision")},{"current",QString::number(m_onlineQueue.current())},{"position",double(position())}}:QJsonObject{};

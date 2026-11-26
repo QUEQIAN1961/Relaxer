@@ -15,6 +15,7 @@ class LibraryBridge final : public QObject {
     Q_PROPERTY(QStringList playlistTags READ playlistTags CONSTANT)
     Q_PROPERTY(QVariantMap playlistMarkers READ playlistMarkers NOTIFY playlistMarkersChanged)
     Q_PROPERTY(QStringList playlistMarkerIcons READ playlistMarkerIcons CONSTANT)
+    Q_PROPERTY(int onlineFavoritesRevision READ onlineFavoritesRevision NOTIFY onlineFavoritesChanged)
   public:
     LibraryBridge(Library *library, PlaybackFacade *facade, TrackListModel *source,
                   TrackFilterModel *view, PlaylistListModel *playlists, QObject *parent = nullptr);
@@ -38,11 +39,15 @@ class LibraryBridge final : public QObject {
     Q_INVOKABLE bool appendQueue(const QStringList &keys);
     Q_INVOKABLE QStringList visibleTrackKeys() const;
     Q_INVOKABLE QVariantMap trackDetails(const QString &id) const;
+    Q_INVOKABLE QVariantMap queueLocation(const QString &id);
     Q_INVOKABLE bool saveProfile(const QString &nickname, const QString &description);
     Q_INVOKABLE bool setProfileAvatar(const QUrl &source);
     Q_INVOKABLE bool setTrackCover(const QString &id, const QUrl &source);
     Q_INVOKABLE bool openTrackFolder(const QString &id);
     Q_INVOKABLE bool toggleFavorite(const QString &id);
+    Q_INVOKABLE bool discoveryFavorite(const QString &provider,const QVariantMap &song) const;
+    Q_INVOKABLE bool toggleDiscoveryFavorite(const QString &provider,const QVariantMap &song,const QVariantMap &origin);
+    int onlineFavoritesRevision() const { return m_onlineFavoritesRevision; }
     Q_INVOKABLE bool removeTrack(const QString &id);
     Q_INVOKABLE QString createPlaylist(const QString &name);
     Q_INVOKABLE QString pinCloudPlaylist(const QVariantMap &playlist);
@@ -56,6 +61,13 @@ class LibraryBridge final : public QObject {
     Q_INVOKABLE bool moveInPlaylist(const QString &track, int direction);
     Q_INVOKABLE bool applyFavorite(const QStringList &tracks, bool favorite);
     Q_INVOKABLE bool addTracksToPlaylist(const QString &playlist, const QStringList &tracks);
+    Q_INVOKABLE bool createPlaylistWithTracks(const QString &name,const QStringList &tracks);
+    Q_INVOKABLE bool addDiscoveryTracks(const QString &playlist,const QString &provider,
+                                       const QVariantList &songs,const QVariantMap &origin);
+    Q_INVOKABLE bool createPlaylistWithDiscoveryTracks(const QString &name,const QString &provider,
+                                                      const QVariantList &songs,const QVariantMap &origin);
+    Q_INVOKABLE QString trackSourceLabel(const QString &key) const;
+    Q_INVOKABLE bool hasOnlineSelection(const QStringList &keys) const;
     Q_INVOKABLE bool removeTracksFromPlaylist(const QStringList &tracks);
     Q_INVOKABLE bool removeTracks(const QStringList &tracks, bool managed = false);
     Q_INVOKABLE bool moveTracksInPlaylist(const QStringList &tracks, int direction);
@@ -75,6 +87,7 @@ class LibraryBridge final : public QObject {
     void operationSucceeded();
     void statisticsChanged();
     void profileChanged();
+    void onlineFavoritesChanged();
   private:
     QPointer<Library> m_library;
     QPointer<PlaybackFacade> m_facade;
@@ -88,10 +101,14 @@ class LibraryBridge final : public QObject {
     QVariantMap m_statistics;
     QTimer m_statisticsTimer;
     bool m_restoringSort=false;
+    int m_onlineFavoritesRevision=0;
     void restoreSorting();
     void saveSorting();
     bool result(bool ok, const QString &fallback = {});
     bool hasPlaylist(qint64 id) const;
     QVector<qint64> checkedIds(const QStringList &keys) const;
+    QVector<Track> selectedPlaylistEntries(const QStringList &keys) const;
+    QString createPlaylistFromEntries(const QString &name,const QVector<Track> &entries);
+    bool enqueuePlaylistEntries(const QStringList &keys,bool next);
 };
 }

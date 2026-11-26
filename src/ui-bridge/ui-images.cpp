@@ -250,8 +250,13 @@ QImage UiImages::requestImage(const QString &id,QSize *resultSize,const QSize &r
     if(file.isLocalFile()) {
         const auto aspect=qBound(1.,query.queryItemValue("aspect").toDouble(),4.);
         const int height=qMax(1,qRound(size/aspect));
-        out=readArtworkImage(file.toLocalFile(),QSize(size,height),Qt::KeepAspectRatioByExpanding);
-        if(!out.isNull()){out=out.scaled(size,height,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation);out=out.copy((out.width()-size)/2,(out.height()-height)/2,size,height);}
+        const QSize target(size,height);
+        out=readArtworkImage(file.toLocalFile(),target,Qt::KeepAspectRatioByExpanding);
+        if(!out.isNull()&&out.size()!=target){
+            out=out.scaled(target,Qt::KeepAspectRatioByExpanding,Qt::SmoothTransformation);
+            if(out.size()!=target)
+                out=out.copy((out.width()-size)/2,(out.height()-height)/2,size,height);
+        }
     }
     if (out.isNull()) {
         auto h = QCryptographicHash::hash(seed.toUtf8(), QCryptographicHash::Sha256);

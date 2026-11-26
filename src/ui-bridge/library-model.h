@@ -25,6 +25,8 @@ class TrackListModel final : public QAbstractListModel {
     qint64 idAt(int row) const;
     int rowForId(qint64 id) const;
     QVector<qint64> ids() const;
+    bool hasOnlineEntries() const { return m_onlineCount>0; }
+    bool onlineFavorite(const QString &key) const { return m_onlineFavoriteKeys.contains(key); }
     Track trackAt(int row)const{return row>=0&&row<m_tracks.size()?m_tracks[row]:Track{};}
     bool matches(int row, const QString &text) const;
     qint64 playlist() const { return m_playlist; }
@@ -37,6 +39,8 @@ class TrackListModel final : public QAbstractListModel {
     QPointer<Library> m_library;
     QVector<Track> m_tracks;
     QVector<Track> m_cloudTracks;
+    QSet<QString> m_onlineFavoriteKeys;
+    qsizetype m_onlineCount=0;
     bool m_cloud=false;
     QHash<qint64, int> m_rows;
     QTimer m_refresh;

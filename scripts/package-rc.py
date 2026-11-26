@@ -64,7 +64,7 @@ def collect_qml_runtime(source, stage, prefix):
     return imports
 
 
-def assemble(source, build, baseline, destination, qt_prefix=None, release_revision=None, acceptance_status=None):
+def assemble(source, build, baseline, destination, qt_prefix=None, release_revision=None, acceptance_status=None, midi_runtime_dir=None):
     if destination.exists():
         raise ValueError('Use a new destination; existing archives are preserved')
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=source).strip():
@@ -109,18 +109,19 @@ def assemble(source, build, baseline, destination, qt_prefix=None, release_revis
     for binary, target in [('RelaxerPortable.exe', 'Relaxer.exe'), ('Relaxer.exe', 'runtime/Relaxer.exe'),
                            ('RelaxerQmlUi.dll', 'runtime/RelaxerQmlUi.dll')]:
         shutil.copy2(build / binary, stage / target)
-    midi_runtime = json.loads((build / 'runtime-midi.json').read_text(encoding='utf-8'))
+    midi_root = midi_runtime_dir or build
+    midi_runtime = json.loads((midi_root / 'runtime-midi.json').read_text(encoding='utf-8'))
     for name, expected in midi_runtime['files'].items():
         relative = PurePosixPath(name)
         if relative.is_absolute() or '..' in relative.parts or '\\' in name or ':' in name:
             raise ValueError('Unsafe MIDI runtime path')
-        path = build / name
+        path = midi_root / name
         if digest(path) != expected:
             raise ValueError('MIDI runtime differs from its staged manifest: ' + name)
         target = stage / 'runtime' / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
-    shutil.copy2(build / 'runtime-midi.json', stage / 'runtime/runtime-midi.json')
+    shutil.copy2(midi_root / 'runtime-midi.json', stage / 'runtime/runtime-midi.json')
     ffmpeg = json.loads((build / 'runtime-ffmpeg.json').read_text(encoding='utf-8'))
     if digest(build / 'avformat-63.dll') != ffmpeg['binarySHA256']:
         raise ValueError('Patched FFmpeg differs from its build manifest')
@@ -129,6 +130,19 @@ def assemble(source, build, baseline, destination, qt_prefix=None, release_revis
     shutil.copytree(build / 'licenses/ffmpeg', stage / 'licenses/ffmpeg', dirs_exist_ok=True)
     if qt_prefix is None:
         raise ValueError('Provide the matching --qt-prefix for QML multimedia collection')
+    peq = json.loads((build / 'runtime-peq.json').read_text(encoding='utf-8'))
+    if peq['sourceFingerprint'] != fingerprint:
+        raise ValueError('PEQ runtime differs from configured source')
+    for name, expected in peq['files'].items():
+        relative = PurePosixPath(name)
+        if relative.is_absolute() or '..' in relative.parts or ':' in name or '\\' in name:
+            raise ValueError('Unsafe PEQ runtime path')
+        if digest(build / name) != expected:
+            raise ValueError('PEQ runtime identity mismatch: ' + name)
+        target = stage / 'runtime' / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(build / name, target)
+    shutil.copy2(build / 'runtime-peq.json', stage / 'runtime/runtime-peq.json')
     imports = collect_qml_runtime(source, stage, qt_prefix)
     shutil.copy2(source / 'docs/MIDI-BASS.md', stage / 'MIDI-BASS.md')
     for name in ('LICENSE', 'LICENSE-NOTICE.txt', 'THIRD_PARTY_NOTICES.md'):
@@ -136,7 +150,7 @@ def assemble(source, build, baseline, destination, qt_prefix=None, release_revis
     shutil.copy2(source / 'REFERENCES.md', stage / 'REFERENCES.md')
     # Runtime notices stay with the application. Reproduction-only scripts and
     # historical dependency evidence remain available in the matching Source.zip.
-    for component in ('ffmpeg', 'morphicons', 'music-platforms', 'OpenCC', 'wiliwili'):
+    for component in ('ffmpeg', 'morphicons', 'music-platforms', 'OpenCC', 'wiliwili', 'qt-peq'):
         original = source / 'docs/third-party' / component
         def source_only(directory, names):
             if Path(directory) == source / 'docs/third-party/OpenCC':
@@ -161,7 +175,7 @@ def assemble(source, build, baseline, destination, qt_prefix=None, release_revis
         '默认资料位于同级 data/，也可用 --data 指定独立目录。升级前退出旧程序并备份资料，先用副本验证。\n'
         + ('正式版更新与验证范围见 RELEASE-NOTES.md。\n' if channel == 'GA' else '这是候选预发行版。更新与验证范围见 RELEASE-NOTES.md。\n') +
         'MIDI 使用开源 FluidSynth 与 GeneralUser GS；运行库、音色许可及对应源码资料见 MIDI-BASS.md。\n'
-        '应用源码附件：Relaxer-' + display + '-Source.zip；基础第三方源码沿用 V0.2.2-GA 附件；MIDI 与修改版 FFmpeg 源码见同版 MIDI-Source.zip、FFmpeg-Source.zip。\n', encoding='utf-8')
+        '应用源码、MIDI、FFmpeg 及 Qt 多媒体处理模块的对应源码见发行附件。基础第三方源码沿用 V0.2.2-GA。\n', encoding='utf-8')
 
     layout = share_runtime_libraries(stage, qt_prefix)
     write_json(stage / 'runtime/runtime-layout.json', layout)
@@ -175,6 +189,7 @@ def assemble(source, build, baseline, destination, qt_prefix=None, release_revis
     if release_revision:
         metadata.update(applicationVersion='V' + version, releaseRevision=release_revision)
     metadata['ffmpegDependencies'] = ffmpeg
+    metadata['peqDependencies'] = peq
     metadata['qmlModules'] = sorted({entry['name'] for entry in imports if entry.get('type') == 'module'})
     metadata['coreBinarySHA256'] = {'Relaxer.exe': core['RelaxerPortable.exe'],
                                    'runtime/Relaxer.exe': core['Relaxer.exe'],
@@ -194,18 +209,27 @@ def assemble(source, build, baseline, destination, qt_prefix=None, release_revis
     components['sourceMaterials'] += '; Relaxer-' + display + '-MIDI-Source.zip'
     components['sourceMaterials'] += '; Relaxer-' + display + '-FFmpeg-Source.zip'
     components['ffmpegPatch'] = ffmpeg
+    components['peqRuntime'] = peq
     components['packages'].extend([
         dict(name='wiliwili references', version=['88e5876bea9502d06f46a8656e3530684d3aaf7d'], licenses=['GPL-3.0-only'], upstream=['https://github.com/xfangfang/wiliwili']),
         dict(name='KuGouMusicApi', version=['1.6.0'], licenses=['MIT'], upstream=['https://github.com/MakcRe/KuGouMusicApi']),
         dict(name='qishui-music-api', version=['0.2.2'], licenses=['MIT'], upstream=['https://github.com/GSQZ/qishui-music-api']),
         dict(name='Morphicons / Lucide resources', version=['see REFERENCES.md'], licenses=['MIT', 'ISC'], upstream=['https://www.morphicons.com/'])])
     components['midiDistributionScope'] = midi_runtime['distribution']
+    components['midiMSYS2Packages'] = midi_runtime.get('msys2Packages', {})
     for key, name, license_name in [('fluidsynth', 'FluidSynth', 'LGPL-2.1-or-later'),
-                                     ('soundfont', 'GeneralUser GS', 'LicenseRef-GeneralUser-GS')]:
+                                     ('soundfont', 'GeneralUser GS', 'LicenseRef-GeneralUser-GS'),
+                                     ('sndfile', 'libsndfile', 'LGPL-2.1-or-later')]:
         components['packages'].append(dict(name=name, version=[midi_runtime[key]['version']],
                                           licenses=[license_name], upstream=[midi_runtime[key]['url']]))
-    for name, component in [('libfluidsynth-3.dll', 'FluidSynth')]:
+    for name, component in [('libfluidsynth-3.dll', 'FluidSynth'), ('sndfile.dll', 'libsndfile upstream Windows SDK')]:
         components['binaries'].append(dict(path='runtime/' + name, component=component))
+    for component, package in midi_runtime.get('msys2Packages', {}).items():
+        path = 'runtime/' + package['runtime']
+        components['binaries'] = [entry for entry in components['binaries'] if entry['path'] != path]
+        components['binaries'].append(dict(path=path, component=component))
+        if component != 'libsndfile':
+            components['packages'].append(dict(name=component, version=[package['version']], source=package['source']))
     # The published dependency baseline recorded DLLs that are now shared.
     components['binaries'] = [binary for binary in components['binaries']
                               if (stage / binary['path']).is_file()]
@@ -248,7 +272,8 @@ if __name__ == '__main__':
     for name in ('source', 'build', 'baseline', 'destination'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--qt-prefix', type=Path, required=True)
+    parser.add_argument('--midi-runtime', type=Path, help='Prepared distribution MIDI runtime directory')
     parser.add_argument('--release-revision', help='Packaging revision; keeps the accepted application version and source fingerprint')
     parser.add_argument('--acceptance-status', choices=['user-confirmed-manual-acceptance', 'independent-harness-pass-with-environment-note', 'rc-targeted-checks-complete'])
     args = parser.parse_args()
-    print(json.dumps(assemble(*(getattr(args, name).resolve() for name in ('source', 'build', 'baseline', 'destination')), qt_prefix=args.qt_prefix.resolve(), release_revision=args.release_revision, acceptance_status=args.acceptance_status), ensure_ascii=False))
+    print(json.dumps(assemble(*(getattr(args, name).resolve() for name in ('source', 'build', 'baseline', 'destination')), qt_prefix=args.qt_prefix.resolve(), release_revision=args.release_revision, acceptance_status=args.acceptance_status, midi_runtime_dir=args.midi_runtime), ensure_ascii=False))

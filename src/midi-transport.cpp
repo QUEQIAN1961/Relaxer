@@ -36,12 +36,13 @@ QString shortPath(const QString &path) {
     return QDir::toNativeSeparators(path);
 }
 } // namespace
-MidiTransport::MidiTransport(QString root, Sender sender, PathResolver resolver, bool decodeOnly)
+MidiTransport::MidiTransport(QString root, Sender sender, PathResolver resolver, bool decodeOnly, QString soundFontPath, QJsonObject synthesis)
     : m_root(std::move(root)), m_alias("rm" + QUuid::createUuid().toString(QUuid::Id128)),
       m_sender(std::move(sender)), m_decodeOnly(decodeOnly),
       m_resolver(resolver ? std::move(resolver) : shortPath) {
-    if (!m_sender) m_fluid = std::make_unique<FluidMidiBackend>();
+    if (!m_sender) m_fluid = std::make_unique<FluidMidiBackend>(std::move(soundFontPath),std::move(synthesis));
 }
+QString MidiTransport::soundFontWarning() const {return m_fluid?m_fluid->soundFontWarning():QString();}
 MidiTransport::~MidiTransport() {
     if(!close())qWarning().noquote()<<"MIDI cleanup incomplete:"<<m_error<<"ownedCopy="<<m_temporaryPath;
 }
@@ -127,7 +128,7 @@ bool MidiTransport::open(const QString &path) {
         m_path = m_original; m_duration = m_fluid->duration(); m_open = true; m_position = 0;
         diagnostic(m_root, {{"operation", "open"}, {"originalPath", m_original}, {"openedPath", m_path},
                             {"durationMs", double(m_duration)}, {"prepareMs", double(timer.elapsed())},
-                            {"soundfont", "GeneralUser GS 2.0.3"}});
+                            {"soundfont", m_fluid->soundFontPath()}, {"soundfontWarning",m_fluid->soundFontWarning()}});
         return true;
     }
     m_path = m_resolver(m_original);

@@ -93,6 +93,7 @@ RoundedMenu *RoundedMenu::addMenu(const QIcon &icon, const QString &title) {
     return menu;
 }
 void RoundedComboBox::resizeEvent(QResizeEvent *e){QComboBox::resizeEvent(e);roundedMask(this,8);}
+void RoundedMenu::mousePressEvent(QMouseEvent *event){setAttribute(Qt::WA_NoMouseReplay);QMenu::mousePressEvent(event);}
 void RoundedMenu::showEvent(QShowEvent *e){QMenu::showEvent(e);roundedMask(this,10);}
 void RoundedMenu::resizeEvent(QResizeEvent *e){QMenu::resizeEvent(e);roundedMask(this,10);}
 void RoundedMenu::paintEvent(QPaintEvent *event){QPainter p(this);p.setRenderHint(QPainter::Antialiasing);p.setPen(QPen(qApp->palette().color(QPalette::Mid),1));p.setBrush(qApp->palette().color(QPalette::Button));p.drawRoundedRect(QRectF(rect()).adjusted(.5,.5,-.5,-.5),10,10);p.end();QMenu::paintEvent(event);}

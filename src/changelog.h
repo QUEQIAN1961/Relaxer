@@ -1,6 +1,8 @@
 #pragma once
 #include <QJsonArray>
 #include <QWidget>
+class QHBoxLayout;
+class QPushButton;
 class QVBoxLayout;
 namespace relaxer {
 class ChangeLog : public QWidget {
@@ -13,7 +15,11 @@ class ChangeLog : public QWidget {
   private:
     QJsonArray m_entries;
     QVBoxLayout *m_layout;
+    QHBoxLayout *m_actions;
+    QPushButton *m_expand = nullptr;
+    QPushButton *m_collapse = nullptr;
     int m_count = 3;
+    int m_renderedEntries = 0;
     void rebuild();
 };
 } // namespace relaxer

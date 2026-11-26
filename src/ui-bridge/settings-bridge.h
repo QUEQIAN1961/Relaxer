@@ -8,6 +8,7 @@
 #include <QVariantList>
 #include <QUrl>
 #include <QPointer>
+#include <QThreadPool>
 #include <functional>
 #include <optional>
 
@@ -20,6 +21,12 @@ class SettingsBridge final : public QObject {
     Q_PROPERTY(QVariantMap values READ values NOTIFY settingsChanged)
     Q_PROPERTY(bool gpuAccelerationRestartRequired READ gpuAccelerationRestartRequired NOTIFY settingsChanged)
     Q_PROPERTY(bool gpuAccelerationAtStartup READ gpuAccelerationAtStartup CONSTANT)
+    Q_PROPERTY(QVariantList midiSoundFonts READ midiSoundFonts NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantMap midiSynthesis READ midiSynthesis NOTIFY settingsChanged)
+    Q_PROPERTY(bool midiSynthesisRestartRequired READ midiSynthesisRestartRequired NOTIFY settingsChanged)
+    Q_PROPERTY(bool midiSoundFontBusy READ midiSoundFontBusy NOTIFY midiSoundFontChanged)
+    Q_PROPERTY(QString midiSoundFontStatus READ midiSoundFontStatus NOTIFY midiSoundFontChanged)
+    Q_PROPERTY(bool midiSoundFontRestartRequired READ midiSoundFontRestartRequired NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap draft READ draft NOTIFY draftChanged)
     Q_PROPERTY(QVariantMap palette READ palette NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList appearances READ appearances NOTIFY settingsChanged)
@@ -46,6 +53,18 @@ public:
     QVariantMap values() const;
     bool gpuAccelerationRestartRequired() const { return values().value("uiGpuAcceleration").toBool()!=m_gpuAccelerationAtStartup; }
     bool gpuAccelerationAtStartup() const { return m_gpuAccelerationAtStartup; }
+    bool midiSoundFontBusy() const { return m_midiSoundFontBusy; }
+    QString midiSoundFontStatus() const { return m_midiSoundFontStatus; }
+    bool midiSoundFontRestartRequired() const { return values().value("midiSoundFont").toString()!=m_midiSoundFontAtStartup; }
+    QVariantList midiSoundFonts() const;
+    QVariantMap midiSynthesis() const;
+    bool midiSynthesisRestartRequired() const;
+    Q_INVOKABLE bool setMidiSynthesis(const QString &key,const QVariant &value);
+    Q_INVOKABLE bool resetMidiSynthesis();
+    Q_INVOKABLE bool useMidiSoundFont(const QString &id);
+    Q_INVOKABLE bool removeMidiSoundFont(const QString &id);
+    Q_INVOKABLE bool selectMidiSoundFont(const QUrl &source);
+    Q_INVOKABLE bool resetMidiSoundFont();
     QVariantMap windowBounds() const { return values().value("windowBounds").toMap(); }
     QVariantMap draft() const { return m_draft.toVariantMap(); }
     QVariantMap palette() const;
@@ -95,6 +114,7 @@ public:
     Q_INVOKABLE bool removeAppearance(const QString &id);
     Q_INVOKABLE bool savePalette(const QString &name, const QString &background, const QString &panel, const QString &accent);
 signals:
+    void midiSoundFontChanged();
     void lyricColorChosen(const QString &color);
     void settingsChanged();
     void draftChanged();
@@ -107,6 +127,11 @@ private:
     AppearanceStore m_appearance;
     const SystemThemeReader m_systemTheme;
     const bool m_gpuAccelerationAtStartup;
+    const QString m_midiSoundFontAtStartup;
+    const QJsonObject m_midiSynthesisAtStartup;
+    QThreadPool m_midiSoundFontPool;
+    bool m_midiSoundFontBusy=false;
+    QString m_midiSoundFontStatus;
     QJsonObject m_draft;
     QJsonObject m_appearanceDraft;
     QJsonObject m_preview;

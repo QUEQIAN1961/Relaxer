@@ -22,6 +22,7 @@ class Playback : public QObject {
     ~Playback() override;
     void play(const QVector<qint64> &ids, qint64 start = 0);
     void toggle();
+    void pause();
     void pauseForQueue();
     void stopForQueue();
     void restoreQueued(qint64 id,qint64 position);
@@ -29,6 +30,7 @@ class Playback : public QObject {
     void next();
     QVector<qint64> upcoming() {return m_queue.upcoming();}
     void playUpcoming(int index);
+    bool editUpcoming(const QVector<qint64> &order);
     void previous();
     void seek(qint64 position);
     void setMode(Mode mode);
@@ -55,10 +57,12 @@ class Playback : public QObject {
     QString roundStatus() const;
   signals:
     void trackChanged();
+    void audioSourceAboutToStart();
     void stateChanged();
     void positionChanged(qint64, qint64);
     void error(const QString &message);
     void saveFailed(const QString &message);
+    void midiSoundFontFallback(const QString &message);
     void advanceRequested(bool failed);
 
   private:

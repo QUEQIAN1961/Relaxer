@@ -1,5 +1,6 @@
 #pragma once
 #include "app-bridge.h"
+#include "equalizer-bridge.h"
 #include "feedback-bridge.h"
 #include "playback-bridge.h"
 #include "library-bridge.h"
@@ -41,6 +42,7 @@ class QmlShell final : public QObject {
     BilibiliBridge *bilibiliBridge() { return &m_bilibili; }
     FeedbackBridge *feedbackBridge() { return &m_feedback; }
     PlaybackFacade *facade() { return &m_facade; }
+    EqualizerBridge *equalizerBridge() { return &m_equalizer; }
     TrackFilterModel *libraryModel() { return &m_trackView; }
     LibraryBridge *libraryBridge() { return &m_libraryBridge; }
     PlaylistListModel *playlistModel() { return &m_playlists; }
@@ -70,6 +72,7 @@ class QmlShell final : public QObject {
     FeedbackBridge m_feedback;
     PlaybackFacade m_facade;
     AppBridge m_appBridge;
+    EqualizerBridge m_equalizer;
     PlaybackBridge m_playbackBridge;
     TrackListModel m_tracks;
     TrackFilterModel m_trackView;

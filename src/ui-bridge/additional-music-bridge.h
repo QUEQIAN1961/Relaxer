@@ -84,8 +84,7 @@ private:
     QString m_sodaClientToken;
     QUrl m_avatar;QJsonObject m_credential;
     QVariantList m_songs,m_playlists;QVariantMap m_currentPlaylist;
-    QHash<QString,QVariantMap> m_catalog;QHash<qint64,QString> m_internal;
-    QHash<QString,qint64> m_identifiers;qint64 m_nextInternal=1;
+    QHash<QString,QVariantMap> m_catalog;
     QHash<QString,QVariantMap> m_playlistCatalog;
     quint64 m_loginRevision=0,m_listRevision=0,m_playRevision=0;
     QString provider()const{return m_platform==Kugou?"kugou":"qishui";}

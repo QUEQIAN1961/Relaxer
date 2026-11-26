@@ -7,6 +7,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QHash>
+#include <QSet>
 namespace relaxer {
 enum class TranslationJudgment { Unknown, NeedsTranslation, NoTranslationNeeded };
 struct LyricsFilterState {
@@ -41,6 +42,9 @@ class Library : public QObject {
     bool open(QString *error = nullptr);
     qint64 trackCount() const;
     QVector<Track> tracks(qint64 playlist = 0, const QString &filter = {}) const;
+    QVector<Track> playlistEntries(qint64 playlist) const;
+    bool containsPlaylistEntry(qint64 playlist,qint64 track) const;
+    QVector<Track> searchEqualizerSongs(const QString &query,int limit=41,QString *error=nullptr) const;
     QVector<Track> recent() const;
     Track track(qint64 id) const;
     QVector<Track> matchingTracks() const;
@@ -51,7 +55,7 @@ class Library : public QObject {
     qint64 insert(const Track &t);
     qint64 insertImportedTrack(const Track &t,bool *added);
     QVector<Playlist> playlists() const;
-    qint64 createPlaylist(const QString &name);
+    qint64 createPlaylist(const QString &name,const QVector<Track> &entries = {});
     qint64 pinCloudPlaylist(const QString &provider,const QString &remoteId,const QString &name,const QString &cover,int count);
     bool renamePlaylist(qint64 id, const QString &name);
     bool deletePlaylist(qint64 id);
@@ -59,9 +63,14 @@ class Library : public QObject {
     bool playlistTags(qint64 id, const QStringList &tags);
     bool playlistDescription(qint64 id, const QString &description);
     bool addToPlaylist(qint64 playlist, const QVector<qint64> &ids);
+    bool addPlaylistEntries(qint64 playlist,const QVector<Track> &entries);
     bool removeFromPlaylist(qint64 playlist, const QVector<qint64> &ids);
-    bool reorder(qint64 playlist, const QVector<qint64> &ids);
+    bool reorder(qint64 playlist,const QVector<qint64> &ids,bool includeOnline=false);
     bool favorite(qint64 id, bool value);
+    bool onlineFavorite(const QString &providerKey) const;
+    QSet<QString> onlineFavoriteKeys(bool includeLocalDownloads=true) const;
+    bool setTrackFavorites(const QVector<Track> &tracks,bool value);
+    bool linkFavoriteDownload(const QString &providerKey,qint64 localTrack);
     bool remove(const QVector<qint64> &ids); // Remove references; retain managed files.
     bool removeManaged(const QVector<qint64> &ids);
     bool favorites(const QVector<qint64> &ids,bool value);
@@ -104,10 +113,14 @@ class Library : public QObject {
     void querySucceeded(const QString &query) const;
     void changed();
     void statsChanged();
+    void onlineFavoritesChanged();
     void playbackHistoryChanged();
     void settingsUpdated(const QStringList &keys);
 
   private:
+    bool appendPlaylistEntries(qint64 playlist,const QVector<Track> &entries);
+    qint64 downloadedFavoriteTrackId(const QString &providerKey) const;
+    bool finishPlaylistEdit(bool success);
     bool artworkMetadataMatches(const ArtworkResult &result) const;
     friend class LibraryDiagnostics;
     mutable LyricsSaveMetrics m_lyricsSaveMetrics;

@@ -62,29 +62,70 @@ double blurRadius(double percent) {
     const double x=qBound(0.,percent,50.)/50.;
     return 17.*std::expm1(3.*x)/std::expm1(3.);
 }
-QImage gaussianBlur(QImage image,double strength) {
-    if(image.isNull()||strength<=0)return image;
-    // Keep fine detail at low values. Fractional box radii avoid a jump at 0.1%.
-    image=image.convertToFormat(QImage::Format_ARGB32);
-    const double radius=blurRadius(strength)*qMax(image.width(),image.height())/640.;
-    const int lo=qFloor(radius),hi=lo+1;const double fraction=radius-lo;
-    for(int pass=0;pass<6;++pass){
-        QImage output(image.size(),image.format());const bool horizontal=pass%2==0;
-        const int lines=horizontal?image.height():image.width(),length=horizontal?image.width():image.height();
-        for(int line=0;line<lines;++line){
-            auto pixel=[&](int p){const int x=horizontal?qBound(0,p,image.width()-1):line,y=horizontal?line:qBound(0,p,image.height()-1);return reinterpret_cast<const QRgb *>(image.constScanLine(y))[x];};
+QImage gaussianBlur(QImage image, double strength) {
+    if (image.isNull() || strength <= 0)
+        return image;
+
+    image = image.convertToFormat(QImage::Format_ARGB32);
+    if (image.isNull())
+        return image;
+
+    const int width = image.width();
+    const int height = image.height();
+    const double radius = blurRadius(strength) * qMax(width, height) / 640.;
+    const int lo = qFloor(radius), hi = lo + 1;
+    const double fraction = radius - lo;
+    QImage output(image.size(), image.format());
+    for (int pass = 0; pass < 6; ++pass) {
+        if (output.isNull())
+            return image;
+
+        const bool horizontal = pass % 2 == 0;
+        const int lines = horizontal ? height : width;
+        const int length = horizontal ? width : height;
+        const auto inputStride = image.bytesPerLine() / qsizetype(sizeof(QRgb));
+        const auto outputStride = output.bytesPerLine() / qsizetype(sizeof(QRgb));
+        const auto inputStep = horizontal ? 1 : inputStride;
+        const auto outputStep = horizontal ? 1 : outputStride;
+        const auto *inputBits = reinterpret_cast<const QRgb *>(image.constBits());
+        auto *outputBits = reinterpret_cast<QRgb *>(output.bits());
+        for (int line = 0; line < lines; ++line) {
+            const auto *input = inputBits + line * (horizontal ? inputStride : 1);
+            auto *dest = outputBits + line * (horizontal ? outputStride : 1);
+            const auto pixel = [&](int position) {
+                return input[qBound(0, position, length - 1) * inputStep];
+            };
             int sums[2][4]{};
-            auto add=[](int *sum,QRgb c,int sign){sum[0]+=sign*qRed(c);sum[1]+=sign*qGreen(c);sum[2]+=sign*qBlue(c);sum[3]+=sign*qAlpha(c);};
-            for(int j=-hi;j<=hi;++j){const auto c=pixel(j);add(sums[1],c,1);if(j>=-lo&&j<=lo)add(sums[0],c,1);}
-            for(int j=0;j<length;++j){
-                int c[4];for(int k=0;k<4;++k)c[k]=qBound(0,qRound((1-fraction)*sums[0][k]/(2*lo+1)+fraction*sums[1][k]/(2*hi+1)),255);
-                const int x=horizontal?j:line,y=horizontal?line:j;
-                reinterpret_cast<QRgb *>(output.scanLine(y))[x]=qRgba(c[0],c[1],c[2],c[3]);
-                add(sums[0],pixel(j-lo),-1);add(sums[0],pixel(j+lo+1),1);
-                add(sums[1],pixel(j-hi),-1);add(sums[1],pixel(j+hi+1),1);
+            const auto add = [](int *sum, QRgb color, int sign) {
+                sum[0] += sign * qRed(color);
+                sum[1] += sign * qGreen(color);
+                sum[2] += sign * qBlue(color);
+                sum[3] += sign * qAlpha(color);
+            };
+            for (int index = -hi; index <= hi; ++index) {
+                const auto color = pixel(index);
+                add(sums[1], color, 1);
+                if (index >= -lo && index <= lo)
+                    add(sums[0], color, 1);
+            }
+            for (int index = 0; index < length; ++index) {
+                int color[4];
+                for (int channel = 0; channel < 4; ++channel)
+                    color[channel] = qBound(0, qRound((1 - fraction) * sums[0][channel] / (2 * lo + 1)
+                                                 + fraction * sums[1][channel] / (2 * hi + 1)), 255);
+                dest[index * outputStep] = qRgba(color[0], color[1], color[2], color[3]);
+                add(sums[0], pixel(index - lo), -1);
+                add(sums[0], pixel(index + lo + 1), 1);
+                add(sums[1], pixel(index - hi), -1);
+                add(sums[1], pixel(index + hi + 1), 1);
             }
         }
-        image=std::move(output);
+
+        image.swap(output);
+        // Release the supplied buffer, which may share storage with the caller.
+        // The remaining passes alternate between two private buffers.
+        if (pass == 0)
+            output = QImage(image.size(), image.format());
     }
     return image;
 }

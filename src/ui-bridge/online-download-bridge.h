@@ -13,6 +13,7 @@
 #include <QThreadPool>
 #include "online-track-matcher.h"
 namespace relaxer {
+class ImportCoordinator;
 class OnlineDownloadBridge final:public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
@@ -45,6 +46,7 @@ public:
     void chooseDestination(const QVariantMap &song,const QUrl &url,const QString &extension);
     bool downloadTo(const QVariantMap &song,const QUrl &url,const QString &extension,const QString &path);
     void resolutionFailed(const QVariantMap &song,const QString &error);
+    void attachFavoriteImporter(ImportCoordinator *coordinator);
 signals:
     void changed();
     void downloadsChanged();
@@ -53,6 +55,7 @@ signals:
     void taskUpdated(const QString &key,const QVariantMap &task);
     void resolveRequested(const QVariantMap &song,const QString &quality);
     void downloaded(const QString &path);
+    void favoriteImportFailed(const QString &message);
 private:
     Library *m_library;QNetworkAccessManager m_network;QPointer<QNetworkReply> m_reply;QPointer<QThread> m_worker;
     std::unique_ptr<QSaveFile> m_file;QString m_partial,m_requested,m_status,m_key;QByteArray m_prefix;
@@ -66,6 +69,13 @@ private:
     QHash<QString,int> m_taskRows;QHash<int,int> m_taskIds;
     QTimer m_progressTimer,m_detectTimer;QThreadPool m_detectPool;bool m_detecting=false;quint64 m_detectRevision=0;
     QHash<QString,QVariantMap> m_detectQueue;std::shared_ptr<const OnlineTrackIndex> m_downloadIndex;
+    QPointer<ImportCoordinator> m_favoriteImporter;
+    QTimer m_favoriteImportTimer;
+    QHash<QString,QString> m_favoriteImportAttempts;
+    quint64 m_favoriteImportTask=0;
+    qint64 m_favoriteImportTrack=0;
+    QString m_favoriteImportKey;
+    void importNextFavoriteDownload();
     void detectPending();void rebuildTaskIndex();void pruneTasks();void publishTask(bool structural);
     bool downloadedNow(const QString &provider,const QVariantMap &song);
     std::shared_ptr<const OnlineTrackIndex> downloadIndex();

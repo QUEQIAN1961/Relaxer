@@ -403,7 +403,7 @@ void OnlineMusicBridge::playSong(const QString &id){
 QVector<Track> OnlineMusicBridge::tracksFor(const QStringList &ids){
     QVector<Track> tracks;
     for(const auto &id:ids){const auto row=m_catalog.value(id.toLongLong());if(row.isEmpty())continue;Track track;track.id=TrackBase+row.value("id").toLongLong();track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.requiresSubscription=row.value("requiresSubscription").toBool();track.album=row.value("album").toString();track.duration=row.value("duration").toLongLong();track.hash="netease:"+row.value("id").toString();track.onlineMetadata=QJsonObject::fromVariantMap(row);
-        const auto cover=row.value("cover").toString();m_artwork->prepare(track,QUrl(artworkUrl(cover,128)),QUrl(artworkUrl(cover,1024)),QDir(DiskCache::online(m_library)).filePath(QString("cover-%1.png").arg(row.value("id").toString())));tracks.append(track);}
+        const auto cover=row.value("cover").toString();m_artwork->prepare(track,QUrl(artworkUrl(cover,128)),QUrl(artworkUrl(cover,1024)),QDir(DiskCache::online(m_library)).filePath(QString("cover-%1.png").arg(row.value("id").toString())));if(!m_currentPlaylist.value("id").toString().isEmpty())track.onlineMetadata["queueOrigin"]=QJsonObject{{"provider","netease"},{"kind",m_currentPlaylist.value("kind","playlist").toString()},{"id",m_currentPlaylist.value("id").toString()},{"name",m_currentPlaylist.value("name").toString()}};tracks.append(track);}
     return tracks;
 }
 void OnlineMusicBridge::playSongs(const QStringList &ids,const QString &start){

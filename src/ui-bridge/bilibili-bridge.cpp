@@ -33,7 +33,7 @@ qint64 videoDuration(const QJsonValue &value){
     if(value.isDouble())return qRound64(value.toDouble()*1000);
     qint64 seconds=0;for(const auto &part:value.toString().split(':'))seconds=seconds*60+part.toLongLong();return seconds*1000;
 }
-qint64 internalId(const QString &bvid){const auto bytes=QCryptographicHash::hash(bvid.toUtf8(),QCryptographicHash::Sha256);quint64 id=0;for(int i=0;i<6;++i)id=(id<<8)|quint8(bytes[i]);return 5000000000000LL+qint64(id);}
+qint64 internalId(const QString &bvid){return bilibiliTrackId(bvid);}
 QString qrData(const QString &text){
     const auto qr=qrcodegen::QrCode::encodeText(text.toUtf8().constData(),qrcodegen::QrCode::Ecc::MEDIUM);
     const int cell=5,border=4;QImage image((qr.getSize()+border*2)*cell,(qr.getSize()+border*2)*cell,QImage::Format_RGB32);image.fill(Qt::white);QPainter painter(&image);
@@ -256,7 +256,7 @@ void BilibiliBridge::registerVideos(QVariantList rows,bool append){
 }
 QVector<Track> BilibiliBridge::tracksFor(const QStringList &ids){
     QVector<Track> tracks;for(const auto &id:ids){if(!m_catalog.contains(id))continue;const auto row=m_catalog.value(id);Track track;track.id=internalId(id);track.hash="bilibili:"+id;track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.album="B站视频";track.duration=row.value("duration").toLongLong();track.cover=row.value("cover").toString();track.onlineMetadata=QJsonObject::fromVariantMap(row);
-        if(m_artwork)m_artwork->prepare(track,QUrl(row.value("thumbnail").toString()),QUrl(track.cover),QDir(DiskCache::online(m_library)).filePath("bilibili-cover-"+id+".png"));tracks.append(track);
+        if(m_artwork)m_artwork->prepare(track,QUrl(row.value("thumbnail").toString()),QUrl(track.cover),QDir(DiskCache::online(m_library)).filePath("bilibili-cover-"+id+".png"));if(!m_currentPlaylist.value("id").toString().isEmpty())track.onlineMetadata["queueOrigin"]=QJsonObject{{"provider","bilibili"},{"kind",m_kind},{"id",m_currentPlaylist.value("id").toString()},{"name",m_currentPlaylist.value("name").toString()}};tracks.append(track);
     }return tracks;
 }
 void BilibiliBridge::playSong(const QString &id){QStringList ids;for(const auto &row:m_songs)ids.append(row.toMap().value("id").toString());playSongs(ids,id);}

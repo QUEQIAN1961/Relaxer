@@ -17,6 +17,11 @@ class Queue {
     qint64 previous();
     void setMode(Mode m);
     QVector<qint64> upcoming(int count=-1);
+    // Edits pending entries only. The playing item and playback mode survive.
+    bool editUpcoming(const QVector<qint64> &order);
+    bool pendingEdited = false;
+    QVector<qint64> pendingPriority() const { return m_priority; }
+    void restoreUpcomingState(bool edited, const QVector<qint64> &priority);
 
   private:
     QVector<qint64> bag, history;

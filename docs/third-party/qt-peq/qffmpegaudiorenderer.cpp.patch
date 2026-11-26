@@ -1,0 +1,66 @@
+--- upstream/qffmpegaudiorenderer.cpp
++++ relaxer/qffmpegaudiorenderer.cpp
+@@ -1,7 +1,7 @@
+ // Copyright (C) 2021 The Qt Company Ltd.
+ // SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+ 
+-#include "playbackengine/qffmpegaudiorenderer_p.h"
++#include <QtFFmpegMediaPluginImpl/private/qffmpegaudiorenderer_p.h>
+ 
+ #include <QtMultimedia/qaudiosink.h>
+ #include <QtMultimedia/qaudiooutput.h>
+@@ -10,10 +10,12 @@
+ #include <QtMultimedia/private/qplatformaudiooutput_p.h>
+ 
+ #include <QtCore/qloggingcategory.h>
+-
+-#include "qffmpegaudioframeconverter_p.h"
+-#include "qffmpegmediaformatinfo_p.h"
+-#include "qffmpegresampler_p.h"
++#include "audio/peq-api.h"
++#include <QVariant>
++
++#include <QtFFmpegMediaPluginImpl/private/qffmpegaudioframeconverter_p.h>
++#include <QtFFmpegMediaPluginImpl/private/qffmpegmediaformatinfo_p.h>
++#include <QtFFmpegMediaPluginImpl/private/qffmpegresampler_p.h>
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -52,6 +54,7 @@
+       m_bufferOutput(bufferOutput),
+       m_pitchCompensation(pitchCompensation)
+ {
++    setProperty("relaxerPeq",QVariant::fromValue<quintptr>(reinterpret_cast<quintptr>(relaxer::audio::relaxer_peq_create())));
+     if (output) {
+         // TODO: implement the signals in QPlatformAudioOutput and connect to them, QTBUG-112294
+         connect(output, &QAudioOutput::deviceChanged, this, &AudioRenderer::onDeviceChanged);
+@@ -84,6 +87,7 @@
+ 
+ AudioRenderer::~AudioRenderer()
+ {
++    relaxer::audio::relaxer_peq_destroy(reinterpret_cast<void *>(property("relaxerPeq").value<quintptr>()));
+     freeOutput();
+ }
+ 
+@@ -100,6 +104,7 @@
+ 
+ void AudioRenderer::seekInternal()
+ {
++    relaxer::audio::relaxer_peq_reset(reinterpret_cast<void *>(property("relaxerPeq").value<quintptr>()));
+     // TODO: play with what to clean: we may find better config.
+     // If we reset sink and converters, move m_ioDevice, m_ioDevice,
+     // m_audioFrameConverter, m_bufferOutputResampler to m_sessionCtx.
+@@ -168,6 +173,13 @@
+         m_sessionCtx.bufferedData = {
+             m_audioFrameConverter->convert(frame.avFrame()),
+         };
++        // Process each converted buffer once. Partial sink writes keep this
++        // processed buffer and offset, with the original Qt clock and sink.
++        auto &pcm=m_sessionCtx.bufferedData.buffer;
++        if(pcm.isValid())relaxer::audio::relaxer_peq_process(
++            reinterpret_cast<void *>(property("relaxerPeq").value<quintptr>()),
++            pcm.data<char>(),pcm.frameCount(),pcm.format().channelCount(),
++            pcm.format().sampleRate(),int(pcm.format().sampleFormat()));
+     }
+ 
+     if (m_sessionCtx.bufferedData.isValid()) {

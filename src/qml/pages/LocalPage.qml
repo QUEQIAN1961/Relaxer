@@ -13,6 +13,28 @@ Item {
     signal importRequested(var anchor)
     signal bulkChanged(bool active, var keys)
     signal editRequested(string key, string name)
+    signal queueLocateFailed(string message)
+    property string queueLocateKey:""
+    property string queueLocatePlaylist:""
+    property int queueLocateTicks:0
+    function locateQueueTrack(key){
+        queueLocateKey=key;queueLocatePlaylist=libraryBridge.playlistId;queueLocateTicks=0
+        search.close();libraryModel.clearFilters();queueLocateTimer.restart()
+    }
+    Timer {
+        id:queueLocateTimer;interval:80;repeat:true
+        onTriggered:{
+            if(!page.visible||libraryBridge.playlistId!==page.queueLocatePlaylist){stop();page.queueLocateKey="";return}
+            if(trackList.scrollToKey(page.queueLocateKey)){libraryModel.selectedId=page.queueLocateKey;page.queueLocateKey="";stop();return}
+            page.queueLocateTicks++
+            if(page.isCloud&&page.cloudSource.catalogLoading&&page.queueLocateTicks<250)return
+            if(page.isCloud&&page.details.provider==="bilibili"&&bilibili.hasMore&&page.queueLocateTicks<250){bilibili.loadMore();return}
+            const status=page.isCloud?page.cloudSource.status:""
+            const detail=/失败|权限|登录|不可|删除|403|404/.test(status)?"："+status:""
+            page.queueLocateFailed((page.isCloud?"无法在来源歌单中找到该歌曲，可能已被移除或无法访问":"该歌曲已不在来源歌单中")+detail)
+            page.queueLocateKey="";stop()
+        }
+    }
     property bool optionsExpanded:false
     readonly property bool isFavorites:libraryBridge.playlistId==="-1"
     property real optionsReveal:optionsExpanded?1:0
@@ -141,6 +163,10 @@ Item {
             onDownloadRequested:key=>{const song=page.cloudSong(key);if(song.id)page.cloudSource.downloadSong(String(song.id))}
             onEndReached:Qt.callLater(function(){if(page.visible&&page.isCloud&&page.details.provider==="bilibili")bilibili.loadMore()})
             statisticsMode:page.isPlaylist
+            sourceColumn:page.isFavorites
+            showFavoriteColumn:page.isPlaylist
+                ?(settingsBridge.values.favoriteDisplayScopes&2)!==0
+                :libraryBridge.playlistId==="0"&&(settingsBridge.values.favoriteDisplayScopes&1)!==0
             emptyHeading:page.isCloud?"没有找到歌曲":appBridge.trackCount===0?"音乐，从这里开始":"没有找到歌曲"
             emptyDescription:page.isCloud?"可调整筛选，或稍后重新打开歌单。":"导入你喜欢的音乐，开始慢慢听。"
             onSelected:key=>libraryModel.selectedId=key
@@ -158,6 +184,7 @@ Item {
     }
     RoundMenu {
         id:playlistOptions;objectName:"playlistOptionsMenu";parent:page.Overlay.overlay;width:Math.min(244,page.width-24)
+        RoundMenuItem {objectName:"playlistEqualizerEntry";text:"歌单均衡器…";onTriggered:equalizerBridge.requestPlaylist(libraryBridge.playlistId)}
         RoundMenuItem {objectName:"playlistEditEntry";text:page.isCloud?"编辑备注/标记…":"编辑名称/图标/封面…";onTriggered:page.editRequested(libraryBridge.playlistId,libraryBridge.playlistName)}
         RoundMenuItem {objectName:"playlistMetadataEntry";text:"编辑标签/简介…";onTriggered:page.editMetadata()}
         RoundMenuItem {objectName:"playlistFilterEntry";text:"歌手/专辑查找";onTriggered:page.optionsExpanded=true}

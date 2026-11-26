@@ -1,7 +1,10 @@
 #include "fluid-midi-backend.h"
+#include "midi-synthesis-options.h"
+#include "audio/peq-api.h"
 #include <QAudioSink>
 #include <QCoreApplication>
 #include <QFile>
+#include <QFileInfo>
 #include <QLibrary>
 #include <QMediaDevices>
 #include <QMutex>
@@ -35,6 +38,7 @@ struct Api {
     API(write, int, void *, int, void *, int, int, void *, int, int);
     API(gain, void, void *, float);
     API(reset, int, void *);
+    API(interpolation, int, void *, int, int);
 #undef API
     bool load(QString &error) {
         library.setFileName(QCoreApplication::applicationDirPath() + "/libfluidsynth-3.dll");
@@ -46,7 +50,7 @@ struct Api {
         RESOLVE(newSynth, "new_fluid_synth"); RESOLVE(deleteSynth, "delete_fluid_synth"); RESOLVE(loadFont, "fluid_synth_sfload");
         RESOLVE(newPlayer, "new_fluid_player"); RESOLVE(deletePlayer, "delete_fluid_player"); RESOLVE(addMemory, "fluid_player_add_mem");
         RESOLVE(play, "fluid_player_play"); RESOLVE(stop, "fluid_player_stop"); RESOLVE(seek, "fluid_player_seek");
-        RESOLVE(write, "fluid_synth_write_float"); RESOLVE(gain, "fluid_synth_set_gain"); RESOLVE(reset, "fluid_synth_system_reset");
+        RESOLVE(write, "fluid_synth_write_float"); RESOLVE(gain, "fluid_synth_set_gain"); RESOLVE(reset, "fluid_synth_system_reset"); RESOLVE(interpolation,"fluid_synth_set_interp_method");
 #undef RESOLVE
         return true;
     }
@@ -130,6 +134,7 @@ public:
 }
 struct FluidMidiBackend::State {
     Api api;
+    void *peq=audio::relaxer_peq_create();
     void *settings=nullptr, *synth=nullptr, *player=nullptr;
     QByteArray midi, pendingPcm;
     Timing timing;
@@ -139,7 +144,7 @@ struct FluidMidiBackend::State {
     qint64 frames=0, totalFrames=0, transportMs=0, sinkStartUs=0;
     int volume=65;
     bool playing=false, decodeOnly=false;
-    QString error, stage;
+    QString error, stage, soundFontPath, soundFontWarning;
     bool fail(const QString &where,const QString &message) {stage=where;error=message;return false;}
     QByteArray render(int count) {
         QMutexLocker lock(&mutex);
@@ -149,6 +154,7 @@ struct FluidMidiBackend::State {
         if(cached){memcpy(pcm.data(),pendingPcm.constData(),cached);pendingPcm.remove(0,cached);}
         const int rest=count-int(cached/8);
         if (rest && api.write(synth,rest,pcm.data()+cached,0,2,pcm.data()+cached,1,2)!=0) {fail("render",QStringLiteral("FluidSynth 音频渲染失败"));return {};}
+        audio::relaxer_peq_process(peq,pcm.data(),count,2,Rate,4);
         frames+=count; return pcm;
     }
     ~State() {
@@ -156,9 +162,29 @@ struct FluidMidiBackend::State {
         if (player) api.deletePlayer(player);
         if (synth) api.deleteSynth(synth);
         if (settings) api.deleteSettings(settings);
+        audio::relaxer_peq_destroy(peq);
     }
 };
-FluidMidiBackend::FluidMidiBackend():m(std::make_unique<State>()) {}
+FluidMidiBackend::FluidMidiBackend(QString soundFontPath,QJsonObject synthesis):m(std::make_unique<State>()),m_soundFontPath(std::move(soundFontPath)),m_synthesis(normalizedMidiSynthesis(synthesis)) {}
+QString FluidMidiBackend::validateSoundFont(const QString &path) {
+    if(!QStringList{"sf2","sf3"}.contains(QFileInfo(path).suffix().toLower()))return QStringLiteral("请选择 SF2 或 SF3 音色库文件");
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))return QStringLiteral("无法读取音色库：")+file.errorString();
+    const auto header=file.read(12);file.close();
+    if(header.size()!=12||header.left(4)!="RIFF"||header.mid(8,4)!="sfbk")return QStringLiteral("文件不是有效的 SF2/SF3 音色库");
+    // Validate with an isolated synth and no audio sink; the active MIDI stream
+    // is never involved. Callers can run this expensive load on a worker.
+    Api api;QString error;
+    if(!api.load(error))return error;
+    void *settings=api.newSettings();
+    if(!settings)return QStringLiteral("无法创建音色库校验设置");
+    api.setNum(settings,"synth.sample-rate",Rate);
+    void *synth=api.newSynth(settings);
+    const bool loaded=synth&&api.loadFont(synth,path.toUtf8().constData(),0)>=0;
+    if(synth)api.deleteSynth(synth);
+    api.deleteSettings(settings);
+    return loaded?QString():QStringLiteral("FluidSynth 无法加载此音色库（不支持 SF2PACK 或 SFZ）");
+}
 FluidMidiBackend::~FluidMidiBackend()=default;
 bool FluidMidiBackend::open(const QString &path,bool decodeOnly) {
     close(); m->decodeOnly=decodeOnly;
@@ -172,12 +198,27 @@ bool FluidMidiBackend::open(const QString &path,bool decodeOnly) {
     if (!m->settings) return m->fail("initialize",QStringLiteral("无法创建 FluidSynth 设置"));
     m->api.setNum(m->settings,"synth.sample-rate",Rate);
     m->api.setNum(m->settings,"synth.gain",.5*m->volume/100.);
-    m->api.setInt(m->settings,"synth.polyphony",256);
+    m->api.setInt(m->settings,"synth.polyphony",m_synthesis.value("polyphony").toInt());
+    m->api.setInt(m->settings,"synth.reverb.active",m_synthesis.value("reverb").toBool());
+    m->api.setNum(m->settings,"synth.reverb.level",m_synthesis.value("reverbLevel").toInt()/100.);
+    m->api.setInt(m->settings,"synth.chorus.active",m_synthesis.value("chorus").toBool());
+    m->api.setNum(m->settings,"synth.chorus.level",m_synthesis.value("chorusLevel").toInt()/100.);
     m->api.setString(m->settings,"player.timing-source","sample");
     m->synth=m->api.newSynth(m->settings);
     if (!m->synth) return m->fail("initialize",QStringLiteral("无法创建 FluidSynth 合成器"));
-    const auto font=(QCoreApplication::applicationDirPath()+"/midi/GeneralUser-GS.sf2").toUtf8();
-    if (m->api.loadFont(m->synth,font.constData(),1)<0) return m->fail("soundfont",QStringLiteral("无法加载 GeneralUser GS 音色库"));
+    const QString builtIn=QCoreApplication::applicationDirPath()+"/midi/GeneralUser-GS.sf2";
+    m->soundFontPath=m_soundFontPath.isEmpty()?builtIn:m_soundFontPath;
+    if(m->api.loadFont(m->synth,m->soundFontPath.toUtf8().constData(),1)<0){
+        if(m_soundFontPath.isEmpty())return m->fail("soundfont",QStringLiteral("无法加载 GeneralUser GS 音色库"));
+        // Discard any partially loaded custom font before falling back.
+        m->api.deleteSynth(m->synth);m->synth=m->api.newSynth(m->settings);
+        if(!m->synth||m->api.loadFont(m->synth,builtIn.toUtf8().constData(),1)<0)
+            return m->fail("soundfont",QStringLiteral("自定义音色库及内置 GeneralUser GS 均无法加载"));
+        m->soundFontPath=builtIn;
+        m->soundFontWarning=QStringLiteral("自定义 MIDI 音色库无法加载，已使用内置音色库。请在设置 → 播放中重新选择。");
+    }
+    if(m->api.interpolation(m->synth,-1,m_synthesis.value("interpolation").toInt())!=0)
+        return m->fail("initialize",QStringLiteral("无法设置 MIDI 插值方式"));
     m->player=m->api.newPlayer(m->synth);
     if (!m->player || m->api.addMemory(m->player,m->midi.constData(),size_t(m->midi.size()))!=0 || m->api.play(m->player)!=0)
         return m->fail("open",QStringLiteral("FluidSynth 无法读取此 MIDI 文件"));
@@ -213,6 +254,7 @@ bool FluidMidiBackend::seek(qint64 milliseconds) {
     m->api.reset(m->synth);
     if (m->api.seek(m->player,m->timing.tickAt(milliseconds))!=0) return m->fail("seek",QStringLiteral("无法跳转 MIDI 进度"));
     m->pendingPcm.clear();
+    audio::relaxer_peq_reset(m->peq);
     m->frames=qRound64(milliseconds*Rate/1000.);m->transportMs=milliseconds;m->playing=false;
     lock.unlock();if (resume)return play();return true;
 }
@@ -240,6 +282,8 @@ qint64 FluidMidiBackend::position() const {
 }
 qint64 FluidMidiBackend::duration() const {return qRound64(m->totalFrames*1000./Rate);}
 QByteArray FluidMidiBackend::readPcm(int frames) {return m->player&&m->decodeOnly&&frames>0&&frames<=Rate?m->render(frames):QByteArray();}
+QString FluidMidiBackend::soundFontPath() const {return m->soundFontPath;}
+QString FluidMidiBackend::soundFontWarning() const {return m->soundFontWarning;}
 QString FluidMidiBackend::error() const {return m->error;}
 QString FluidMidiBackend::errorStage() const {return m->stage;}
 }

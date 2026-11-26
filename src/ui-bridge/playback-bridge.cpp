@@ -30,6 +30,7 @@ PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent, Library 
     if (library) {
         Q_ASSERT(library->thread() == thread());
         connect(library, &Library::changed, this, &PlaybackBridge::refreshMetadata);
+        connect(library,&Library::onlineFavoritesChanged,this,&PlaybackBridge::refreshMetadata);
         connect(library, &QObject::destroyed, this, [this] { m_library = nullptr; refreshMetadata(); });
     }
     const auto invalidate = [this] { m_facade = nullptr; refresh(); };
@@ -41,7 +42,7 @@ PlaybackBridge::PlaybackBridge(PlaybackFacade *facade, QObject *parent, Library 
 }
 void PlaybackBridge::playHistory(const QVariantMap &row){
     if(!m_facade)return;
-    if(!row.value("cloud").toBool()){m_facade->play({row.value("trackId").toString().toLongLong()});return;}
+    if(!row.value("cloud").toBool()){m_facade->play({row.value("trackId").toString().toLongLong()},0,{{"provider","local"},{"localKey","0"}});return;}
     Track track;track.id=row.value("trackId").toString().toLongLong();track.hash=row.value("hash").toString();track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.album=row.value("album").toString();track.cover=row.value("cover").toString();track.duration=row.value("duration").toLongLong();track.onlineMetadata=QJsonObject::fromVariantMap(row.value("metadata").toMap());
     if(track.id>0)m_facade->playOnline({track},track.id);
 }
@@ -62,7 +63,7 @@ void PlaybackBridge::applySnapshot(const PlaybackSnapshot &next) {
     const bool wasAvailable = m_available;
     const bool wasPlayable = m_canPlay;
     m_state = next;
-    if (previous.track.id != next.track.id || previous.track.title != next.track.title ||
+    if (previous.track.id != next.track.id || previous.track.hash != next.track.hash || previous.track.title != next.track.title ||
         previous.track.artist != next.track.artist || previous.track.cover != next.track.cover || previous.track.favorite != next.track.favorite)
         readMetadata();
     m_available = available();
@@ -118,15 +119,13 @@ void PlaybackBridge::playUpcoming(int index) {
     beginTransition(0); m_facade->playUpcoming(index); refresh();
 }
 void PlaybackBridge::toggleFavorite() {
-    if (!available() || !m_library || !hasTrack()) return;
-    if(m_facade->onlineActive()){
-        if(m_state.track.hash.startsWith("kugou:")||m_state.track.hash.startsWith("qishui:")||m_state.track.hash.startsWith("bilibili:")){
-            setError("该平台当前接入暂不支持修改账号收藏");return;
-        }
-        emit onlineFavoriteRequested(m_state.track.id);return;
-    }
-    const auto track = m_library->track(m_state.track.id);
-    if (track.id && !m_library->favorite(track.id, !track.favorite)) emit persistenceFailure(m_library->lastError());
+    if(!available()||!m_library)return;
+    const auto track=m_facade->current();
+    if(!track.id)return;
+    const bool saved=isOnlineTrack(track)?m_library->setTrackFavorites({track},!m_library->onlineFavorite(track.hash)):
+        m_library->favorite(track.id,!track.favorite);
+    if(!saved)emit persistenceFailure(m_library->lastError());
+    else refresh();
 }
 void PlaybackBridge::beginTransition(int direction) {
     if (m_transitionDirection != direction) { m_transitionDirection = direction; emit transitionDirectionChanged(); }
@@ -144,7 +143,9 @@ void PlaybackBridge::refreshMetadata() {
     if (previousTitle != title() || previousArtist != artist()) emit trackChanged();
 }
 void PlaybackBridge::readMetadata() {
-    m_metadata = m_library && m_state.track.id && !m_facade->onlineActive() ? m_library->track(m_state.track.id) : m_state.track;
+    const bool online=isOnlineTrack(m_state.track);
+    m_metadata=m_library&&m_state.track.id&&!online?m_library->track(m_state.track.id):m_state.track;
+    if(m_library&&online)m_metadata.favorite=m_library->onlineFavorite(m_metadata.hash);
     if (!m_library) { m_metadata.cover.clear(); m_metadata.favorite = false; }
     const QUrl source(m_metadata.cover);
     m_coverUrl = source.scheme()=="https"||source.scheme()=="http" ? source : m_library && !m_metadata.cover.isEmpty() ? QUrl::fromLocalFile(m_library->absolute(m_metadata.cover)) : QUrl();

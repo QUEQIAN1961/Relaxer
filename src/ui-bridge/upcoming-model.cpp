@@ -112,7 +112,7 @@ void UpcomingModel::refresh() {
             revisions.append(artworkRevision(track));
             tracks.append(std::move(track));
         }
-    } else if (alive) { tracks = m_tracks; revisions = m_artworkRevisions; }
+    } else if (alive && !orderChanged) { tracks = m_tracks; revisions = m_artworkRevisions; }
     m_forecastDirty = false; m_metadataDirty = false;
     if (orderChanged) {
         beginResetModel(); m_ids = std::move(ids); m_tracks = std::move(tracks); m_artworkRevisions = std::move(revisions); endResetModel();
@@ -130,6 +130,40 @@ void UpcomingModel::refresh() {
     if (previousCount != count()) emit countChanged();
     const Track first = m_tracks.isEmpty() ? Track{} : m_tracks.first();
     if (!sameMetadata(previousFirst, first) || previousArtwork != firstCoverUrl() || previousRevision != firstCoverRevision()) emit firstChanged();
+}
+QStringList UpcomingModel::selectableKeys() const {
+    QStringList keys;if(!m_facade)return keys;
+    for(auto id:m_ids)if(id!=m_facade->current().id&&!keys.contains(QString::number(id)))keys.append(QString::number(id));return keys;
+}
+bool UpcomingModel::canMove(const QString &key,int direction) const {
+    if(!m_facade||m_facade->isShutdown()||(direction!=-1&&direction!=1)||!m_ids.contains(key.toLongLong()))return false;
+    const auto order=m_facade->editableUpcoming();const int at=order.indexOf(key.toLongLong());return at>=0&&at+direction>=0&&at+direction<order.size();
+}
+bool UpcomingModel::moveTrack(const QString &key,int direction){
+    if(!m_facade||m_facade->upcoming()!=m_ids){schedule(true);emit operationFailed("待播列表已变化，请重新选择");return false;}
+    if(!canMove(key,direction))return false;
+    auto order=m_facade->editableUpcoming();const int at=order.indexOf(key.toLongLong());order.swapItemsAt(at,at+direction);
+    const bool ok=m_facade->editUpcoming(order);if(ok){schedule(true);refresh();}return ok;
+}
+bool UpcomingModel::removeTracks(const QStringList &keys){
+    if(!m_facade||m_facade->isShutdown()||keys.isEmpty())return false;
+    if(m_facade->upcoming()!=m_ids){schedule(true);emit operationFailed("待播列表已变化，请重新选择");return false;}
+    auto order=m_facade->editableUpcoming();QSet<qint64> selected;
+    for(const auto &key:keys){const auto id=key.toLongLong();if(!m_ids.contains(id)||id==m_facade->current().id)return false;selected.insert(id);}
+    for(auto id:selected)order.removeAll(id);
+    const bool ok=m_facade->editUpcoming(order);if(ok){schedule(true);refresh();}return ok;
+}
+bool UpcomingModel::clearPending(){
+    if(!m_facade||m_facade->isShutdown()||!count())return false;
+    if (!m_facade->editUpcoming({})) return false;
+    m_facade->pause();
+    schedule(true);
+    refresh();
+    return true;
+}
+bool UpcomingModel::locateTrack(const QString &key){
+    if(!m_facade||!m_ids.contains(key.toLongLong())||!m_facade->queue().items.contains(key.toLongLong()))return false;
+    emit locateRequested(key);return true;
 }
 bool UpcomingModel::activate(int row) {
     Q_ASSERT(QThread::currentThread() == thread());

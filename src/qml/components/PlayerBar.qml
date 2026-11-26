@@ -6,6 +6,8 @@ Rectangle {
     id: bar
     objectName: "playerBar"
     property bool expanded: false
+    readonly property bool hasUpcoming:upcomingModel.count>0
+    readonly property real wideControlsY:hasUpcoming?(height-74)/2+19*expansion:(height-36)/2
     readonly property bool presentationActive:visible&&(!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
     property bool artworkTravelling: false
     property bool miniControlsTravelling:false
@@ -28,7 +30,7 @@ Rectangle {
     readonly property real wideCenterWidth:Math.min(400,Math.max(240,wideLayoutWidth*.36))
     readonly property real wideCenterX:(wideLayoutWidth-wideCenterWidth)/2
     // Include the hover surface's 5px outset when leaving space before the timeline.
-    readonly property real wideMetadataWidth:Math.max(0,Math.min((height-2*coverMargin)*(playbackBridge.video?4/3:1)+12+Math.ceil(Math.max(titleNatural.implicitWidth,artistNatural.implicitWidth))+6,transportRow.x+favoriteButton.x-22-coverMargin+2))
+    readonly property real wideMetadataWidth:Math.max(0,Math.min((height-2*coverMargin)*(playbackBridge.video?4/3:1)+12+Math.ceil(Math.max(titleNatural.implicitWidth,artistNatural.implicitWidth))+6,Math.min(transportRow.x+favoriteButton.x-22,timeline.x-4)-coverMargin-5))
     readonly property real wideRightSpace:Math.min(356,Math.max(168,168+(wideLayoutWidth-548)*188/692))
     readonly property real wideVolumeX:Math.max(wideLayoutWidth-202,wideCenterX+wideCenterWidth+2*coverMargin)
     readonly property real wideVolumeIconX:wideVolumeX+9
@@ -40,12 +42,12 @@ Rectangle {
     readonly property real transportButtonWidth:blend(36,32)
     readonly property real transportButtonPadding:blend(7,5)
     readonly property real compactSpacing:6+4*Math.max(0,Math.min(1,(compactLayoutWidth-414)/132))
-    readonly property real compactControlsLeft:compactLayoutWidth-coverMargin-(7*32+playButton.implicitWidth+7*compactSpacing)
+    readonly property real compactControlsLeft:compactLayoutWidth-coverMargin-((hasUpcoming?7:6)*32+playButton.implicitWidth+(hasUpcoming?7:6)*compactSpacing)
     readonly property real compactTimelineStartWidth:Math.min(306,Math.max(0,compactLayoutWidth-coverMargin-Math.min(112,compactControlsLeft)))
     readonly property real compactTimelineEndWidth:Math.min(306,Math.max(0,compactLayoutWidth-2*coverMargin))
     readonly property real compactTimelineStartX:compactLayoutWidth-coverMargin-compactTimelineStartWidth
     readonly property real compactTimelineEndX:(compactLayoutWidth-compactTimelineEndWidth)/2
-    readonly property real compactMetadataWidth:Math.max((height-2*coverMargin)*(playbackBridge.video?4/3:1),compactControlsLeft-18-coverMargin)
+    readonly property real compactMetadataWidth:Math.max(0,Math.min(compactControlsLeft-18-coverMargin,compactTimelineStartX-coverMargin-12))
     signal expandRequested()
     signal narrowRequested()
     signal queueRequested(var anchor)
@@ -77,6 +79,7 @@ Rectangle {
     Item {
         id: metadata
         objectName: "playerMetadata"
+        visible:bar.hasUpcoming;enabled:visible
         x:bar.coverMargin;y:bar.coverMargin;width:bar.blend(bar.wideMetadataWidth,bar.compactMetadataWidth);height:bar.height-2*bar.coverMargin
         opacity:bar.artworkTravelling||bar.expanded?0:1
         HighlightSurface {
@@ -85,13 +88,13 @@ Rectangle {
         }
         Artwork {
             id: art; objectName: "bottomCover"
-            x: 0; anchors.verticalCenter: parent.verticalCenter; width:parent.height*(playbackBridge.video?4/3:1);height:parent.height;videoCover:playbackBridge.video;
+            x: 0; anchors.verticalCenter: parent.verticalCenter; width:height*(playbackBridge.video?4/3:1);height:Math.min(parent.height,parent.width/(playbackBridge.video?4/3:1));videoCover:playbackBridge.video;
             file: playbackBridge.coverUrl; contentKey:playbackBridge.trackId; seed: playbackBridge.hasTrack ? playbackBridge.title : "Relaxer"
             revision: playbackBridge.artworkRevision; resolution: 160; animated: false
         }
         Item {
             id:metadataText;clip:true
-            x:art.width+12;width:Math.max(0,parent.width-x-bar.blend(2,0)); anchors.verticalCenter: parent.verticalCenter
+            x:art.width+8;width:Math.max(0,parent.width-x-bar.blend(2,0)); anchors.verticalCenter: parent.verticalCenter
             // Keep distinct landing rows even when the available width hides both labels.
             height:title.implicitHeight+4+artist.implicitHeight
             UiText { fontRegion: "footer";
@@ -112,7 +115,7 @@ Rectangle {
         TextMetrics {id:titleMetrics;text:title.text;font:title.font;elide:Qt.ElideRight;elideWidth:title.width}
         TextMetrics {id:artistMetrics;text:artist.text;font:artist.font;elide:Qt.ElideRight;elideWidth:artist.width}
         MouseArea {
-            id:metadataMouse;anchors.fill: parent; enabled: !bar.expanded && !bar.artworkTravelling;hoverEnabled:true
+            id:metadataMouse;anchors.fill: parent; enabled: bar.hasUpcoming && !bar.expanded && !bar.artworkTravelling;hoverEnabled:true
             cursorShape: Qt.PointingHandCursor
             onClicked: {metadata.forceActiveFocus();bar.expandRequested()}
         }
@@ -132,7 +135,7 @@ Rectangle {
             height:42;spacing:bar.blend(bar.wideLayoutWidth<700?8:12,bar.compactSpacing)
             IconButton {
                 id:queueButton;objectName:"compactQueueButton";anchors.verticalCenter:parent.verticalCenter
-                visible:bar.compactProgress>0;opacity:bar.compactProgress;scale:bar.compactProgress;width:bar.transportButtonWidth*bar.compactProgress;padding:bar.transportButtonPadding
+                visible:bar.hasUpcoming&&bar.compactProgress>0;opacity:bar.compactProgress;scale:bar.compactProgress;width:bar.hasUpcoming?bar.transportButtonWidth*bar.compactProgress:0;padding:bar.transportButtonPadding
                 text:"下一首列表";showTooltip:true
                 contentItem:Item {
                     id:queueGlyph
@@ -225,7 +228,7 @@ Rectangle {
         x: bar.wideLayoutWidth - 342; y:(bar.height-height)/2; width: 320; height: 74
         Item {
             id: volumeHost; objectName: "volumeControls"; width: 320; height: 36
-            y:19*bar.expansion
+            y:bar.hasUpcoming?19*bar.expansion:19
             PlaybackSlider {
                 objectName:"volumeSlider";visible:bar.wideVolumeSlider
                 x:bar.wideVolumeX+46-(bar.wideLayoutWidth-342);anchors.verticalCenter:parent.verticalCenter;width:bar.wideVolumeSliderWidth
@@ -239,7 +242,7 @@ Rectangle {
         id:widthButton;objectName:"playbackWidthButton";width:bar.transportButtonWidth;height:36;padding:bar.transportButtonPadding
         visible:!bar.miniControlsTravelling
         x:bar.blend(bar.wideLayoutWidth,bar.compactLayoutWidth)-bar.coverMargin-width
-        y:bar.blend((bar.height-74)/2+19*bar.expansion,transportRow.y+(transportRow.height-height)/2)
+        y:bar.blend(bar.wideControlsY,transportRow.y+(transportRow.height-height)/2)
         symbol:Theme.compact?"expand":"contract";text:Theme.compact?"恢复宽窗口":"收窄窗口";showTooltip:true
         onClicked:{compactVolume.closePopup();bar.narrowRequested()}
     }
@@ -251,7 +254,7 @@ Rectangle {
         leftPadding:bar.transportButtonPadding+2;rightPadding:bar.transportButtonPadding+2
         visible:!bar.miniControlsTravelling
         x:bar.blend(bar.wideVolumeX,transportRow.x+compactVolumeSlot.x)
-        y:bar.blend((bar.height-74)/2+19*bar.expansion,transportRow.y+compactVolumeSlot.y)
+        y:bar.blend(bar.wideControlsY,transportRow.y+compactVolumeSlot.y)
     }
     onExpandedChanged:compactVolume.closePopup()
 }

@@ -27,6 +27,11 @@ inline bool playlistReportedMissing(const QJsonObject &response){
 class OnlinePageCache {
 public:
     enum Action { Cached, Fetch, Validate, Pending };
+    // Metadata-only lookup path, without activating a page or creating directories.
+    static QString pinnedSnapshotPath(const Library *library,const QString &provider,const QString &id){
+        const auto token=QCryptographicHash::hash(("playlist:"+id).toUtf8(),QCryptographicHash::Sha256).toHex();
+        return QDir(DiskCache::root(library)).filePath("online/catalog-"+provider+"-"+token+".json");
+    }
     OnlinePageCache(Library *library,const QString &provider)
         :m_library(library),m_provider(provider),m_session(std::make_shared<QTemporaryDir>(QDir(DiskCache::online(library)).filePath("session-"+provider+"-XXXXXX"))){}
     ~OnlinePageCache(){savePinned();m_store.drain();}

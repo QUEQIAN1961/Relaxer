@@ -370,9 +370,14 @@ class V11Tests : public QObject {
         QTest::qWait(30);
         QCOMPARE(log->findChildren<QLabel *>("versionLogTitle").size(), 8);
         QCOMPARE(scroll.verticalScrollBar()->value(), position);
+        scroll.verticalScrollBar()->setValue(scroll.verticalScrollBar()->maximum());
+        position = scroll.verticalScrollBar()->value();
+        QSignalSpy scrollChanges(scroll.verticalScrollBar(), &QScrollBar::valueChanged);
         QTest::mouseClick(log->findChild<QPushButton *>("versionLogExpand"), Qt::LeftButton);
         QTest::qWait(30);
         QCOMPARE(log->findChildren<QLabel *>("versionLogTitle").size(), 10);
+        QCOMPARE(scroll.verticalScrollBar()->value(), position);
+        QCOMPARE(scrollChanges.count(), 0);
         QVERIFY(!log->findChild<QPushButton *>("versionLogExpand"));
         scroll.verticalScrollBar()->setValue(scroll.verticalScrollBar()->maximum());
         QTest::mouseClick(log->findChild<QPushButton *>("versionLogCollapse"), Qt::LeftButton);

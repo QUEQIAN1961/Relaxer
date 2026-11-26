@@ -186,8 +186,14 @@ void PlaybackFacade::beginAttempt(qint64 requested) {
     ++m_operation; m_requestedTrack = requested; m_reportedFailures.clear();
     emit playbackAttemptStarted(m_operation);
 }
-void PlaybackFacade::play(const QVector<qint64> &ids, qint64 start) {
+void PlaybackFacade::play(const QVector<qint64> &ids, qint64 start,const QVariantMap &origin) {
     if (!isShutdown()) {
+        // Install the source context before local/MIDI can render its first buffer.
+        if(!origin.isEmpty()){
+            if(m_queueOrigins.isEmpty())m_queueOrigins=m_library->setting("queueOrigins").toObject().toVariantMap();
+            for(auto id:ids)m_queueOrigins[QString::number(id)]=origin;
+            m_library->setSetting("queueOrigins",QJsonObject::fromVariantMap(m_queueOrigins));
+        }
         if(m_sharedQueueActive&&std::any_of(ids.cbegin(),ids.cend(),[this](qint64 id){return isOnline(track(id));})){m_queueFailures.clear();m_onlineQueue.set(ids,start);activateQueuedCurrent();return;}
         stopOnline();
         m_sharedQueueActive=false;pruneOnlineTracks();m_playback->setExternalQueue(false);m_queueFailures.clear();
@@ -203,7 +209,7 @@ void PlaybackFacade::toggle() {
         if(m_onlineActive){
             if(m_onlineSeekWaiting){m_onlineSeekAutoplay=!m_onlineSeekAutoplay;m_onlineAutoPlay=m_onlineSeekAutoplay;publish();return;}
             if(m_onlinePending||m_onlineFailed||m_onlinePlayer->source().isEmpty()||m_onlinePlayer->mediaStatus()==QMediaPlayer::EndOfMedia||m_onlinePlayer->mediaStatus()==QMediaPlayer::InvalidMedia)requestOnlineCurrent(m_onlineResumePosition>=0);
-            else if(playing()&&!m_onlineFader.pausing())m_onlineFader.to(0,m_library->setting("playbackFade",false).toBool(),[this]{m_onlinePlayer->pause();});
+            else if(playing()&&!m_onlineFader.pausing()){pause();return;}
             else{if(!playing())m_onlineFader.reset(m_library->setting("playbackFade",false).toBool()?0:1);else m_onlineFader.to(1,m_library->setting("playbackFade",false).toBool());m_onlinePlayer->play();}
             publish();return;
         }
@@ -211,11 +217,27 @@ void PlaybackFacade::toggle() {
         if (!playing()) beginAttempt(current().id);
         // An explicit retry uses the existing play command, which resets the engine's
         // failed-track guard. No change to automatic skip or transport algorithms.
-        if (retry) m_playback->play(queue().items, current().id);
+        if (retry) m_playback->play(m_sharedQueueActive?QVector<qint64>{current().id}:queue().items, current().id);
         else m_playback->toggle();
         m_requestedTrack = 0;
         publish();
     }
+}
+void PlaybackFacade::pause() {
+    if (isShutdown()) return;
+    if (!m_onlineActive) {
+        m_playback->pause();
+    } else if (m_onlineSeekWaiting) {
+        m_onlineSeekAutoplay = false;
+        m_onlineAutoPlay = false;
+    } else if (m_onlinePending) {
+        m_onlineAutoPlay = false;
+    } else if (playing() && !m_onlineFader.pausing()) {
+        m_onlineFader.to(0, m_library->setting("playbackFade", false).toBool(), [this] { m_onlinePlayer->pause(); });
+    } else {
+        return;
+    }
+    publish();
 }
 void PlaybackFacade::next() {
     if (!isShutdown()) {
@@ -235,11 +257,40 @@ void PlaybackFacade::previous() {
 }
 void PlaybackFacade::playUpcoming(int index) {
     if (!isShutdown()) {
-        if(m_sharedQueueActive){const auto list=m_onlineQueue.upcoming();if(index<0||index>=list.size())return;m_queueFailures.clear();for(int i=0;i<=index;++i)m_onlineQueue.next(true);activateQueuedCurrent();return;}
+        if(m_sharedQueueActive){const auto list=m_onlineQueue.upcoming();if(index<0||index>=list.size())return;m_queueFailures.clear();if(m_onlineQueue.pendingEdited){for(int i=0;i<m_onlineQueue.items.size()*2;++i){const auto id=m_onlineQueue.next(true);if(!id||id==list[index])break;}}else for(int i=0;i<=index;++i)m_onlineQueue.next(true);activateQueuedCurrent();return;}
         beginAttempt();
         m_playback->playUpcoming(index);
         publish();
     }
+}
+QVector<qint64> PlaybackFacade::editableUpcoming() const {
+    Queue preview=queue();QVector<qint64> order;QSet<qint64> seen;const auto playing=preview.current();
+    for(int i=0;i<preview.items.size()*2;++i){const auto id=preview.next(true);if(!id)break;if(id!=playing&&!seen.contains(id)){seen.insert(id);order.append(id);}}
+    return order;
+}
+bool PlaybackFacade::editUpcoming(const QVector<qint64> &order){
+    if(isShutdown())return false;
+    if(!m_sharedQueueActive)return m_playback->editUpcoming(order);
+    if(!m_onlineQueue.editUpcoming(order))return false;
+    ++m_onlineMetadataRevision;pruneOnlineTracks();emit stateChanged();publish();saveOnlineState();return true;
+}
+void PlaybackFacade::rememberQueueOrigin(const QVector<qint64> &ids,const QVariantMap &origin){
+    if(isShutdown())return;
+    if(m_queueOrigins.isEmpty())m_queueOrigins=m_library->setting("queueOrigins").toObject().toVariantMap();
+    QVariantMap kept;for(auto id:queue().items){const auto key=QString::number(id);if(m_queueOrigins.contains(key))kept[key]=m_queueOrigins.value(key);}
+    for(auto id:ids)if(queue().items.contains(id))kept[QString::number(id)]=origin;
+    if(kept!=m_queueOrigins){m_queueOrigins=kept;m_library->setSetting("queueOrigins",QJsonObject::fromVariantMap(kept));}
+}
+QVariantMap PlaybackFacade::queueOrigin(qint64 id) const {
+    const auto item=track(id);const auto online=item.onlineMetadata.value("queueOrigin").toObject();
+    if(!online.isEmpty())return online.toVariantMap();
+    const auto origins=m_queueOrigins.isEmpty()?m_library->setting("queueOrigins").toObject().toVariantMap():m_queueOrigins;
+    auto origin=origins.value(QString::number(id)).toMap();
+    if(origin.isEmpty()){
+        const auto provider=item.hash.section(':',0,0);origin["provider"]=isOnline(item)?(provider=="qqmusic"?"qq":provider):"local";
+        origin["localKey"]="0";
+    }
+    return origin;
 }
 void PlaybackFacade::seek(qint64 pos) {
     if (!isShutdown()) {
@@ -339,14 +390,28 @@ void PlaybackFacade::restore(bool includeOnline) {
         }
         if(includeOnline&&m_library->setting("rememberPosition",true).toBool()&&!saved.isEmpty()){
             QVector<qint64> ids;
+            QHash<qint64,qint64> stableIds;
             for(const auto &entry:saved.value("tracks").toArray()){
                 const auto row=entry.toObject();Track track;track.id=row.value("id").toString().toLongLong();track.hash=row.value("hash").toString();
                 if(track.id<=0)continue;
                 if(!isOnline(track)){if(m_library->track(track.id).id)ids.append(track.id);continue;}
+                if(const auto stable=stableAdditionalTrackId(track.hash);stable&&stable!=track.id){
+                    stableIds.insert(track.id,stable);
+                    track.id=stable;
+                }
                 track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.album=row.value("album").toString();track.duration=qint64(row.value("duration").toDouble());track.cover=row.value("cover").toString();track.onlineMetadata=row.value("metadata").toObject();track.requiresSubscription=row.value("vip").toBool();m_onlineTracks.insert(track.id,track);ids.append(track.id);
             }
             if(!ids.isEmpty()){
-                m_onlineQueue.mode=m_playback->mode();m_onlineQueue.set(ids,saved.value("current").toString().toLongLong());m_sharedQueueActive=true;m_playback->setExternalQueue(true);
+                const auto savedCurrent=saved.value("current").toString().toLongLong();
+                m_onlineQueue.mode=m_playback->mode();
+                m_onlineQueue.set(ids,stableIds.value(savedCurrent,savedCurrent));
+                QVector<qint64> priority;
+                for(const auto &value:saved.value("priority").toArray()){
+                    const auto id=value.toString().toLongLong();
+                    priority.append(stableIds.value(id,id));
+                }
+                m_onlineQueue.restoreUpcomingState(saved.value("edited").toBool(),priority);
+                m_sharedQueueActive=true;m_playback->setExternalQueue(true);
                 const auto position=qMax<qint64>(0,qint64(saved.value("position").toDouble()));
                 m_onlineActive=isOnline(current());if(m_onlineActive){ensureOnlinePlayer();m_onlineResumePosition=position;}else m_playback->restoreQueued(current().id,position);
                 emit trackChanged();

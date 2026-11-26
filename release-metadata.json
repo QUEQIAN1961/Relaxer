@@ -1,10 +1,16 @@
 {
   "applicationName": "Relaxer",
-  "developmentVersion": "0.2.6-GA",
-  "developmentNotes": "docs/releases/v0.2.6-GA-r2/RELEASE-NOTES.md",
+  "developmentVersion": "0.2.7-RC",
+  "developmentNotes": "docs/releases/v0.2.7-RC/RELEASE-NOTES.md",
   "latestStableTag": "v0.2.6-GA-r2",
   "repository": "https://github.com/QUEQIAN1961/Relaxer",
   "releases": [
+    {
+      "tag": "v0.2.7-RC",
+      "status": "prerelease",
+      "url": "https://github.com/QUEQIAN1961/Relaxer/releases/tag/v0.2.7-RC",
+      "notes": "docs/releases/v0.2.7-RC/RELEASE-NOTES.md"
+    },
     {
       "tag": "v0.2.6-GA-r2",
       "status": "stable",
@@ -73,5 +79,5 @@
     }
   ],
   "midiLicenseCompatibility": "FluidSynth LGPL-2.1-or-later with GPL-3.0-only; separate GeneralUser GS license",
-  "latestPrereleaseTag": "v0.2.5-RC"
+  "latestPrereleaseTag": "v0.2.7-RC"
 }

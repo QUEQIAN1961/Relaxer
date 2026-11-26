@@ -8,6 +8,7 @@
 #include <QPlatformSurfaceEvent>
 #include <QScreen>
 #include <QMouseEvent>
+#include <QContextMenuEvent>
 #include "client-frame-windows.h"
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -17,6 +18,16 @@
 #include <dwmapi.h>
 #endif
 namespace relaxer {
+namespace {
+class DismissOnlyTrayMenu final:public QMenu {
+protected:
+    void mousePressEvent(QMouseEvent *event) override {
+        // QWidget clears this attribute for each new mouse event.
+        setAttribute(Qt::WA_NoMouseReplay);
+        QMenu::mousePressEvent(event);
+    }
+};
+}
 UiIntegration::UiIntegration(Library *library,PlaybackBridge *playback,QObject *parent):QObject(parent),m_library(library),m_playback(playback){static int base=0x5300;m_base=base;base+=8;QCoreApplication::instance()->installNativeEventFilter(this);QCoreApplication::instance()->installEventFilter(this);
     connect(library,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("qml.reduceMotion"))updateWindowShadow();});
 }
@@ -31,7 +42,7 @@ void UiIntegration::attach(QQuickWindow *window){
 #endif
     updateWindowShadow();
     if(qobject_cast<QApplication *>(QCoreApplication::instance())){
-        m_menu=std::make_unique<QMenu>();
+        m_menu=std::make_unique<DismissOnlyTrayMenu>();
         connect(m_menu->addAction("打开 Relaxer"),&QAction::triggered,this,[this]{if(m_window){m_window->show();m_window->raise();m_window->requestActivate();}});
         connect(m_menu->addAction("播放 / 暂停"),&QAction::triggered,this,[this]{dispatch(0);});
         connect(m_menu->addAction("上一首"),&QAction::triggered,this,[this]{dispatch(1);});
@@ -41,6 +52,82 @@ void UiIntegration::attach(QQuickWindow *window){
         connect(m_tray.get(),&QSystemTrayIcon::activated,this,[this](auto reason){if(reason==QSystemTrayIcon::Trigger||reason==QSystemTrayIcon::DoubleClick){m_window->show();m_window->raise();m_window->requestActivate();}});
     }
     QString error;apply(m_library->setting("shortcuts",ShortcutRules::defaults()).toObject(),&error);if(!error.isEmpty()){m_status=error;emit changed();}
+}
+void UiIntegration::registerDismissOnlyPopup(QObject *popup){
+    if(!popup)return;
+    for(const auto &registered:m_dismissOnlyPopups)if(registered==popup)return;
+    m_dismissOnlyPopups.append(popup);
+}
+bool UiIntegration::filterPopupDismissal(QObject *object,QEvent *event){
+    auto *owner=qobject_cast<QWindow *>(object);
+    while(owner&&owner!=m_window)owner=owner->transientParent();
+    if(!owner)return false;
+    if(event->type()==QEvent::ContextMenu){
+        const auto *context=static_cast<QContextMenuEvent *>(event);
+        if(m_suppressDismissContextMenu&&context->reason()==QContextMenuEvent::Mouse){
+            m_suppressDismissContextMenu=false;event->accept();return true;
+        }
+        return false;
+    }
+    const bool press=event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonDblClick||
+        event->type()==QEvent::NonClientAreaMouseButtonPress||event->type()==QEvent::NonClientAreaMouseButtonDblClick;
+    const bool release=event->type()==QEvent::MouseButtonRelease||event->type()==QEvent::NonClientAreaMouseButtonRelease;
+    if(!press&&!release)return false;
+    auto *mouse=static_cast<QMouseEvent *>(event);
+    const auto button=mouse->button();
+    if(button!=Qt::LeftButton&&button!=Qt::RightButton)return false;
+    if(release){
+        if(!m_dismissedButtons.testFlag(button))return false;
+        m_dismissedButtons.setFlag(button,false);event->accept();return true;
+    }
+    // A fresh physical press also clears a stale latch if its release happened
+    // outside this application after a window deactivated.
+    m_dismissedButtons.setFlag(button,false);
+    m_suppressDismissContextMenu=false;
+    QList<QPointer<QObject>> visible,outsideContainers;
+    QPointer<QObject> togglePopup;
+    bool inside=false,insideContainer=false;
+    for(auto it=m_dismissOnlyPopups.begin();it!=m_dismissOnlyPopups.end();){
+        if(it->isNull()){it=m_dismissOnlyPopups.erase(it);continue;}
+        auto *popup=it->data();++it;
+        if(!popup->property("visible").toBool())continue;
+        if(auto *toggle=popup->property("dismissalButton").value<QQuickItem *>()){
+            // A detached popup can receive the press that targets its opener.
+            // Close it from the global hit before Qt can consume or replay it.
+            if(button==Qt::LeftButton&&toggle->isVisible()&&toggle->isEnabled()&&
+               toggle->contains(toggle->mapFromGlobal(mouse->globalPosition())))
+                togglePopup=popup;
+            continue;
+        }
+        auto *content=popup->property("contentItem").value<QQuickItem *>();
+        if(!content||!content->window())continue;
+        // The content's parent includes menu padding, borders and its animated
+        // viewport. Use global coordinates for detached popup windows as well.
+        auto *surface=content->parentItem()?content->parentItem():content;
+        const bool hit=surface->contains(surface->mapFromGlobal(mouse->globalPosition()));
+        if(popup->property("dismissalContainer").toBool()){
+            insideContainer|=hit;if(!hit)outsideContainers.append(popup);
+        }else{inside|=hit;visible.append(popup);}
+    }
+    // Menus keep their own dismissal boundary even inside a searchable popup.
+    // Closing an input context menu must not activate a search result beneath it.
+    if(inside||(visible.isEmpty()&&insideContainer))return false;
+    // An open context menu takes precedence over its surrounding controls.
+    if(visible.isEmpty()&&outsideContainers.isEmpty()&&togglePopup)
+        visible.append(togglePopup);
+    visible.append(outsideContainers);
+    if(visible.isEmpty())return false;
+    m_dismissedButtons.setFlag(button);
+    m_suppressDismissContextMenu=button==Qt::RightButton;
+    event->accept();
+    for(const auto &popup:visible){
+        if(!popup)continue;
+        const char *method=popup->metaObject()->indexOfMethod("dismiss()")>=0?"dismiss":"close";
+        QMetaObject::invokeMethod(popup,method,Qt::DirectConnection);
+    }
+    // Accept before Qt's popup-window delivery can replay the press underneath.
+    // Swallow its release and mouse context event too, even after the exit ends.
+    return true;
 }
 bool UiIntegration::eventFilter(QObject *object,QEvent *event){
     if(event->type()==QEvent::MouseMove||event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonRelease){

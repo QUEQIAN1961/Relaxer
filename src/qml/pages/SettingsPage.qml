@@ -10,14 +10,90 @@ import "." as Pages
 ColumnLayout {
     id: page
     objectName: "settingsPage"
-    function canUnloadPage(){return !lyricColorEditor.visible&&!fontDialog.visible&&!discoveryActions.visible&&!sidebarEditor.visible}
+    function canUnloadPage(){return !midiSettings.dialogVisible&&!settingsBridge.midiSoundFontBusy&&!lyricColorEditor.visible&&!fontDialog.visible&&!discoveryActions.visible&&!sidebarEditor.visible}
     function savePageState(){return {y:scroll.contentItem?scroll.contentItem.contentY:0}}
     function restorePageState(state){Qt.callLater(function(){if(scroll.contentItem)scroll.contentItem.contentY=Math.max(0,Math.min(Number(state.y||0),scroll.contentItem.contentHeight-scroll.contentItem.height))})}
+    property var widthScrollAnchor:null
+    property Item widthAnchorItem:null
+    property bool widthTransitionChanging:false
+    property string widthAnchorSignature:""
+    property int widthAnchorStableFrames:0
+    function widthAnchorKey(item){
+        const name=item.objectName||""
+        if(item instanceof SettingsRow)return name||"row:"+item.label
+        if(item instanceof SettingsGroup)return name||"group:"+item.title
+        if(item instanceof SettingsCard)return name||"card:"+item.title
+        return name==="settingsPlatformsCard"||name==="settingsAiCard"||name==="settingsAboutCard"||
+            name==="shortcutsPage"||name.indexOf("shortcutRow-")===0||name.indexOf("midiSoundFontCard-")===0?name:""
+    }
+    function findWidthAnchor(item,key){
+        if(!item.visible||item.width<=0||item.height<=0)return null
+        if(widthAnchorKey(item)===key)return item
+        for(const child of item.children){const match=findWidthAnchor(child,key);if(match)return match}
+        return null
+    }
+    function beginWidthTransition(){
+        const view=scroll.contentItem
+        if(!view)return
+        settingsWheel.stop();view.cancelFlick()
+        const top=view.contentY,origin=view.originY
+        let anchor=null,anchorY=-Infinity
+        // Follow a logical setting, not a pixel offset or a fraction of the
+        // entire page: rows above it gain height when their controls wrap.
+        function visit(item){
+            if(!item.visible||item.width<=0||item.height<=0)return
+            if(page.widthAnchorKey(item)){
+                const y=item.mapToItem(view.contentItem,0,0).y
+                if(y<=top+.5&&y>=anchorY){anchor=item;anchorY=y}
+            }
+            for(const child of item.children)visit(child)
+        }
+        visit(settingsContent)
+        const offset=anchor?top-anchorY:0
+        widthAnchorItem=anchor
+        widthScrollAnchor={key:anchor?widthAnchorKey(anchor):"",y:top,offset:offset,
+            fraction:anchor&&offset>=0&&offset<anchor.height?offset/anchor.height:-1,
+            edge:top<=origin+.5?"top":view.atYEnd?"bottom":""}
+        widthAnchorSignature="";widthAnchorStableFrames=0;widthTransitionChanging=true
+    }
+    function endWidthTransition(){widthTransitionChanging=false}
+    function restoreWidthScrollAnchor(){
+        const anchor=widthScrollAnchor,view=scroll.contentItem
+        if(!anchor||!view)return ""
+        // Settings notifications may recreate SoundFont delegates while the
+        // remembered wide width is saved. Reacquire them by their stable ID.
+        if(!widthAnchorItem&&anchor.key)widthAnchorItem=findWidthAnchor(settingsContent,anchor.key)
+        const origin=view.originY,bottom=origin+Math.max(0,view.contentHeight-view.height)
+        let y=anchor.y,itemY=0,itemHeight=0
+        if(widthAnchorItem&&widthAnchorItem.visible){
+            itemY=widthAnchorItem.mapToItem(view.contentItem,0,0).y;itemHeight=widthAnchorItem.height
+            y=itemY+(anchor.fraction>=0?anchor.fraction*itemHeight:anchor.offset)
+        }
+        if(anchor.edge==="top")y=origin
+        else if(anchor.edge==="bottom")y=bottom
+        view.contentY=Math.max(origin,Math.min(y,bottom))
+        return [itemY,itemHeight,view.contentHeight,view.height,scroll.availableWidth].join(":")
+    }
+    onVisibleChanged:if(!visible){widthScrollAnchor=null;widthAnchorItem=null;widthTransitionChanging=false}
+    FrameAnimation {
+        running:page.widthScrollAnchor!==null&&page.visible
+        onTriggered:{
+            const signature=page.restoreWidthScrollAnchor()
+            if(!page.widthTransitionChanging&&signature===page.widthAnchorSignature)page.widthAnchorStableFrames++
+            else page.widthAnchorStableFrames=0
+            page.widthAnchorSignature=signature
+            // Keep anchoring through the final layout polish, including the
+            // zero-duration transition used when animations are disabled.
+            if(page.widthAnchorStableFrames>=2){page.widthScrollAnchor=null;page.widthAnchorItem=null}
+        }
+    }
+    Binding {target:scroll.contentItem;property:"interactive";value:false;when:page.widthScrollAnchor!==null;restoreMode:Binding.RestoreBindingOrValue}
     signal aiRequested()
     signal platformsRequested()
     signal appearanceRequested()
     signal shortcutsRequested()
     signal versionLogRequested()
+    signal equalizerRequested()
     Layout.fillWidth: true
     Layout.fillHeight: true
     Layout.minimumWidth: 0
@@ -37,7 +113,7 @@ ColumnLayout {
         function stopAtEdges() { if (contentItem && contentItem.boundsBehavior !== undefined) { contentItem.boundsBehavior = Flickable.StopAtBounds; contentItem.boundsMovement = Flickable.StopAtBounds } }
         Component.onCompleted: Qt.callLater(stopAtEdges)
         onContentItemChanged: Qt.callLater(stopAtEdges)
-        SmoothWheelHandler { flickable: scroll.contentItem as Flickable }
+        SmoothWheelHandler { id:settingsWheel;flickable: scroll.contentItem as Flickable }
         ColumnLayout {
             id: settingsContent;y:16
             width: scroll.availableWidth
@@ -91,7 +167,60 @@ ColumnLayout {
                         }
                         SettingsRow {label:"音乐资料库侧栏";ShellButton {objectName:"customizeSidebar";text:"自定义侧栏";onClicked:sidebarEditor.openEditor()}}
                         SettingsRow {label:"歌曲封面";ToggleButton {objectName:"playlistCoversSetting";text:"显示封面";checked:settingsBridge.values.playlistCovers;onClicked:settingsBridge.setPreference("playlistCovers",checked)}}
-                        SettingsRow {label:"歌曲列表标记";ToggleButton {objectName:"showFavoritesSetting";text:"展示红心";checked:settingsBridge.values.showFavorites;onClicked:settingsBridge.setPreference("showFavorites",checked)}}
+                        SettingsRow {
+                            label:"展示红心"
+                            GridLayout {
+                                id:favoriteDisplay
+                                objectName:"favoriteDisplayScopeControl"
+                                width:Math.min(parent.width,tiledWidth)
+                                height:implicitHeight
+                                columns:tiled?labels.length:1
+                                columnSpacing:gap
+                                rowSpacing:gap
+                                readonly property var labels:["资料库","我的歌单","发现页"]
+                                readonly property int scopes:settingsBridge.values.favoriteDisplayScopes
+                                readonly property int gap:4
+                                readonly property int buttonPadding:8
+                                readonly property int markSize:18
+                                readonly property int markGap:6
+                                function optionWidth(text){
+                                    // Track font changes as well as available width.
+                                    const font=favoriteMetrics.font
+                                    return Math.ceil(favoriteMetrics.advanceWidth(text))+markSize+markGap+2*buttonPadding
+                                }
+                                readonly property real tiledWidth:labels.reduce((sum,label)=>sum+optionWidth(label),gap*(labels.length-1))
+                                readonly property bool tiled:Math.ceil(tiledWidth)<=Math.floor(width)
+                                FontMetrics {
+                                    id:favoriteMetrics
+                                    font.family:Theme.fontFamily
+                                    font.pixelSize:Theme.fontSize
+                                    font.weight:Font.DemiBold
+                                }
+                                Repeater {
+                                    model:favoriteDisplay.labels
+                                    delegate:ToggleButton {
+                                        required property int index
+                                        required property string modelData
+                                        readonly property int scope:1<<index
+                                        objectName:"favoriteDisplayScope-"+index
+                                        Layout.fillWidth:true
+                                        Layout.minimumWidth:0
+                                        Layout.preferredWidth:favoriteDisplay.optionWidth(modelData)
+                                        leftPadding:favoriteDisplay.buttonPadding
+                                        rightPadding:favoriteDisplay.buttonPadding
+                                        indicatorSize:favoriteDisplay.markSize
+                                        indicatorSpacing:favoriteDisplay.markGap
+                                        font:favoriteMetrics.font
+                                        text:modelData
+                                        checked:(favoriteDisplay.scopes&scope)!==0
+                                        onClicked:{
+                                            if(!settingsBridge.setPreference("favoriteDisplayScopes",favoriteDisplay.scopes^scope))
+                                                checked=Qt.binding(()=>(favoriteDisplay.scopes&scope)!==0)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         SettingsRow {id:closeRow;objectName:"settingsCloseCell";label:"关闭窗口时";optionLabels:["退出播放器","最小化到系统托盘"]
                             ChoiceBox {objectName:"closeSetting";visible:!closeRow.optionsInline;width:Math.min(280,parent.width);model:["退出播放器","最小化到系统托盘"];currentIndex:settingsBridge.values.closeToTray?1:0;onActivated:settingsBridge.setPreference("closeToTray",currentIndex===1)}
                             Repeater {
@@ -160,6 +289,12 @@ ColumnLayout {
                         SettingsRow {label:"视频黑色留边";ToggleButton {objectName:"videoBlackBarsSetting";text:"启用";checked:settingsBridge.values.videoBlackBars;onClicked:settingsBridge.setPreference("videoBlackBars",checked)}}
                         SettingsRow {label:"播放进度记忆";ToggleButton {objectName:"rememberPositionSetting";text:"启用";checked:settingsBridge.values.rememberPosition;onClicked:settingsBridge.setPreference("rememberPosition",checked)}}
                     }
+                    SettingsGroup {title:"均衡器";objectName:"settingsEqualizerGroup"
+                        SettingsRow {label:"参数均衡器"
+                            ShellButton {objectName:"openParametricEqualizer";text:"打开均衡器";onClicked:page.equalizerRequested()}
+                        }
+                    }
+                    MidiSettings {id:midiSettings}
             }
             SettingsCard {title:"存储";objectName:"settingsStorageCard"
                     SettingsGroup {
@@ -195,6 +330,7 @@ ColumnLayout {
                     }
             }
             Rectangle {
+                objectName:"settingsPlatformsCard"
                 Layout.fillWidth:true;implicitHeight:platformCard.implicitHeight+36;radius:14;color:Theme.card
                 ColumnLayout {
                     id:platformCard;anchors {left:parent.left;right:parent.right;top:parent.top;margins:18} spacing:8
@@ -207,6 +343,7 @@ ColumnLayout {
                 }
             }
             Rectangle {
+                objectName:"settingsAiCard"
                 Layout.fillWidth: true
                 implicitHeight: aiCard.implicitHeight + 36
                 radius: 14

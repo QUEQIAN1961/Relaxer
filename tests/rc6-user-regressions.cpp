@@ -51,7 +51,7 @@ private slots:
         QFile file(":/changelog.json");QVERIFY(file.open(QIODevice::ReadOnly));const auto original=QJsonDocument::fromJson(file.readAll()).array();
         const auto summary=summarizedChangelog(original);int rc020=0,rc022=0;
         for(const auto &value:summary){const auto row=value.toArray();const auto title=row[0].toString();
-            if(title=="V0.2.0-RC")++rc020;if(title=="Relaxer V0.2.2-RC")++rc022;
+            if(title=="Relaxer V0.2.0-RC")++rc020;if(title=="Relaxer V0.2.2-RC")++rc022;
             QVERIFY(!QRegularExpression("V0\\.2\\.[02]-[Rr][Cc][0-9]+").match(title).hasMatch());
         }
         QCOMPARE(rc020,1);QCOMPARE(rc022,1);
@@ -74,18 +74,26 @@ private slots:
         QVERIFY(rcInternal.match(QStringLiteral("私人测试候选")).hasMatch());
         QVERIFY(!rcInternal.match(QStringLiteral("停止歌词搜索时的候选结果")).hasMatch());
         QString rc022,rc020;int groups022=0,groups020=0;
+        QStringList legacyTitles;
         for(const auto &value:summary){
             const auto row=value.toArray();QCOMPARE(row.size(),3);
             const auto title=row[0].toString(),text=row[2].toString(),stamp=row[1].toString();
             QVERIFY(date.match(stamp).hasMatch());QVERIFY(QDate::fromString(stamp,"yyyy.MM.dd").isValid());
             QVERIFY2(!internal.match(text).hasMatch(),qPrintable(title+": "+text));
+            if(title.startsWith("Relaxer V0.1.")){
+                legacyTitles.append(title);
+                QVERIFY2(!text.isEmpty()&&text.size()<=200,qPrintable(title));
+            }
             if(title=="Relaxer V0.2.2-RC"){rc022=text;++groups022;}
-            if(title=="V0.2.0-RC"){rc020=text;++groups020;}
+            if(title=="Relaxer V0.2.0-RC"){rc020=text;++groups020;}
             // Published GA history is intentionally preserved, including its
             // historical acceptance sentence; RC notes contain no such wording.
             if(title.endsWith("-RC"))QVERIFY2(!rcInternal.match(text).hasMatch(),qPrintable(title+": "+text));
         }
         QCOMPARE(groups022,1);QCOMPARE(groups020,1);
+        QStringList expectedLegacy;
+        for(int patch=10;patch>=0;--patch)expectedLegacy.append(QStringLiteral("Relaxer V0.1.%1").arg(patch));
+        QCOMPARE(legacyTitles,expectedLegacy);
         for(const auto &term:{"便携 EXE","操作记录","纯音乐，请欣赏","默认折叠","停止歌词搜索","每次完整文件校验","来源核对"})QVERIFY2(rc022.contains(QString::fromUtf8(term)),term);
         for(const auto &term:{"MIDI","无需翻译","未保存译文","付费确认"})QVERIFY2(rc020.contains(QString::fromUtf8(term)),term);
         for(const auto &value:history){const auto title=value.toArray()[0].toString();if(title=="Relaxer V0.2.0-GA"||title=="Relaxer V0.2.1-GA")QVERIFY(summary.contains(value));}
@@ -120,6 +128,17 @@ private slots:
         f.shell->appBridge()->navigate(3);w->setProperty("settingsSection","log");
         auto *page=visual(root,"versionLogPage");QVERIFY(page);QTRY_VERIFY(page->isVisible());QCOMPARE(page->property("shown").toInt(),3);
         QVERIFY(QMetaObject::invokeMethod(visual(root,"versionLogExpand"),"clicked"));QTRY_VERIFY(page->property("shown").toInt()>3);
+        auto *scroll=visual(page,"versionLogScroll");QVERIFY(scroll);
+        auto *view=scroll->property("contentItem").value<QQuickItem *>();QVERIFY(view);
+        QTRY_VERIFY(view->property("contentHeight").toReal()>view->height());
+        const auto previousHeight=view->property("contentHeight").toReal();
+        const auto previousY=view->property("originY").toReal()+previousHeight-view->height();
+        QVERIFY(view->setProperty("contentY",previousY));
+        const auto previousShown=page->property("shown").toInt();
+        QVERIFY(click(w,visual(page,"versionLogExpand")));
+        QTRY_COMPARE(page->property("shown").toInt(),previousShown+3);
+        QTRY_VERIFY(view->property("contentHeight").toReal()>previousHeight);
+        QCOMPARE(view->property("contentY").toReal(),previousY);
         QVERIFY(click(w,visual(root,"versionLogBack")));QTRY_COMPARE(w->property("settingsSection").toString(),QString("settings"));
         w->setProperty("settingsSection","log");QTRY_VERIFY(page->isVisible());QCOMPARE(page->property("shown").toInt(),3);
         page->setProperty("shown",12);f.shell->appBridge()->navigate(0);f.shell->appBridge()->navigate(3);

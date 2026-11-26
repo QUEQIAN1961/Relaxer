@@ -4,6 +4,8 @@
 #include "shortcut-rules.h"
 #include "ui-font-config.h"
 #include "disk-cache.h"
+#include "fluid-midi-backend.h"
+#include "midi-synthesis-options.h"
 #include <QCryptographicHash>
 #include <QColor>
 #include <QColorDialog>
@@ -91,7 +93,7 @@ private:
     QColor m_border;
 };
 QStringList preferenceKeys() {
-    return {"theme", "threshold", "closeToTray", "showLyricTranslation", "playerCoverBackground", "lyricColor", "reduceMotion", "animationMode", "uiGpuAcceleration", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "fontSize", "playlistCovers", "playlistHeaderAnimation", "mutedBold", "showFavorites", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode"};
+    return {"theme", "threshold", "closeToTray", "showLyricTranslation", "playerCoverBackground", "lyricColor", "reduceMotion", "animationMode", "uiGpuAcceleration", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "fontSize", "playlistCovers", "playlistHeaderAnimation", "mutedBold", "favoriteDisplayScopes", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode"};
 }
 QColor mixed(const QColor &first, const QColor &second, double amount) {
     return QColor(qRound(first.red() * amount + second.red() * (1 - amount)),
@@ -122,13 +124,16 @@ bool systemDark() {
 
 SettingsBridge::SettingsBridge(Library *library, QObject *parent, SystemThemeReader systemTheme)
     : QObject(parent), m_library(library), m_store(library), m_appearance(library), m_systemTheme(std::move(systemTheme)),
-      m_gpuAccelerationAtStartup(m_store.get("uiGpuAcceleration",true).toBool(true)) {
+      m_gpuAccelerationAtStartup(m_store.get("uiGpuAcceleration",true).toBool(true)),
+      m_midiSoundFontAtStartup(m_store.get("midiSoundFont",QString()).toString()),
+      m_midiSynthesisAtStartup(normalizedMidiSynthesis(m_store.get("midiSynthesis",QJsonObject()).toObject())) {
+    m_midiSoundFontPool.setMaxThreadCount(1);
     // Invalidate before QML handles the existing notification, including live previews.
     connect(this, &SettingsBridge::settingsChanged, this, &SettingsBridge::invalidateCaches);
     connect(library, &Library::settingsUpdated, this, [this](const QStringList &keys) {
         static const QStringList relevant{"theme", "threshold", "closeToTray", "showLyricTranslation",
-            "playerCoverBackground", "lyricColor", "qml.reduceMotion", "mutedBold", "showFavorites", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode",
-            "qml.animationMode", "uiGpuAcceleration", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "discoveryActionLayout", "fontSize", "playlistCovers", "playlistHeaderAnimation", "shortcuts", "uiFont", "windowWidth", "windowHeight", "windowMaximized", "appearanceHistory"};
+            "playerCoverBackground", "lyricColor", "qml.reduceMotion", "mutedBold", "showFavorites", "favoriteDisplayMode", "favoriteDisplayScopes", "songColumnWidths", "sidebarSections", "sidebarWidth", "wideWindowWidth", "vipMarkMode", "settingsEntryMode", "historyEntryMode",
+            "midiSoundFont", "midiSoundFonts", "midiSynthesis", "qml.animationMode", "uiGpuAcceleration", "playbackFade", "rememberPosition", "onlineVideoMode", "localVideoMode", "showLocalVideoLyrics", "autoExpandVideo", "videoBlackBars", "cacheLimitMB", "discoveryActions", "discoveryActionLayout", "fontSize", "playlistCovers", "playlistHeaderAnimation", "shortcuts", "uiFont", "windowWidth", "windowHeight", "windowMaximized", "appearanceHistory"};
         for (const auto &key : keys) if (relevant.contains(key)) { invalidateCaches(); break; }
     });
     resetDraft();
@@ -144,6 +149,7 @@ SettingsBridge::SettingsBridge(Library *library, QObject *parent, SystemThemeRea
     }
 }
 SettingsBridge::~SettingsBridge() {
+    m_midiSoundFontPool.waitForDone();
     delete m_colorDialog.data();
     for(const auto id:m_fontIds)QFontDatabase::removeApplicationFont(id);
 }
@@ -153,15 +159,20 @@ QVariantList SettingsBridge::changelog() const {QFile file(":/changelog.json");r
 QVariantMap SettingsBridge::values() const {
     if (m_valuesCache) return *m_valuesCache;
     const int vipMode=m_store.get("vipMarkMode",2).toInt();
+    const int legacyFavoriteMode=m_store.get("showFavorites",true).toBool()?1:0;
+    const int previousFavoriteMode=qBound(0,m_store.get("favoriteDisplayMode",legacyFavoriteMode).toInt(legacyFavoriteMode),3);
+    const int previousFavoriteScopes=previousFavoriteMode==3?7:previousFavoriteMode;
+    const int favoriteScopes=qBound(0,m_store.get("favoriteDisplayScopes",previousFavoriteScopes).toInt(previousFavoriteScopes),7);
     m_valuesCache = QVariantMap{{"theme", m_store.get("theme", 0).toInt()}, {"threshold", m_store.get("threshold", 80).toInt()},
             {"closeToTray", m_store.get("closeToTray", false).toBool()},
             {"showLyricTranslation", m_store.get("showLyricTranslation", true).toBool()},
             {"playerCoverBackground", m_store.get("playerCoverBackground", true).toBool()},
             {"lyricColor", m_store.get("lyricColor", QString()).toString()},
-            {"showFavorites", m_store.get("showFavorites", true).toBool()},
+            {"favoriteDisplayScopes",favoriteScopes},
             {"reduceMotion", m_store.get("qml.animationMode",m_store.get("qml.reduceMotion",false).toBool()?2:0).toInt()==2},
             {"animationMode",m_store.get("qml.animationMode",m_store.get("qml.reduceMotion",false).toBool()?2:0).toInt()},
             {"uiGpuAcceleration",m_store.get("uiGpuAcceleration",true).toBool(true)},
+            {"midiSoundFont",m_store.get("midiSoundFont",QString()).toString()},
             {"playbackFade",m_store.get("playbackFade",false).toBool()},
             {"rememberPosition",m_store.get("rememberPosition",true).toBool()},
             {"settingsEntryMode",m_store.get("settingsEntryMode",0).toInt()},
@@ -287,6 +298,9 @@ QString SettingsBridge::validatePreference(const QString &key, const QJsonValue 
     if(key=="discoveryActions"){
         if(!value.isArray()||value.toArray().size()>3)return "快捷功能配置无效";
         QSet<QString> seen;for(const auto &entry:value.toArray()){const auto id=entry.toString();if(!QStringList{"download","next","more"}.contains(id)||seen.contains(id))return "快捷功能配置无效";seen.insert(id);}
+    }else if(key=="favoriteDisplayScopes"){
+        if(!value.isDouble()||value.toDouble()!=value.toInt()||value.toInt()<0||value.toInt()>7)
+            return "红心显示范围无效";
     }else if (key == "theme" || key == "threshold" || key=="animationMode" || key=="cacheLimitMB" || key=="fontSize" || key=="sidebarWidth" || key=="wideWindowWidth" || key=="vipMarkMode" || key=="settingsEntryMode" || key=="historyEntryMode" || key=="onlineVideoMode" || key=="localVideoMode") {
         if (!value.isDouble() || value.toDouble() != value.toInt()) return "设置需要整数";
         if (key == "theme" && (value.toInt() < 0 || value.toInt() > 3)) return "主题超出范围";

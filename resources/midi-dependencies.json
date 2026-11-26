@@ -7,7 +7,7 @@
     "url": "https://codeload.github.com/mrbumpy409/GeneralUser-GS/zip/684543d5e5efaef08d02be50dcda8d552478fa60",
     "sha256": "197207fffaf7bad496a1d5d9a44b0edd16efe97d53db42afb6c73cdbdefb4484"
   },
-  "distribution": "FluidSynth LGPL-2.1-or-later, built from pinned source without optional audio/codec libraries; GeneralUser GS separate soundfont license",
+  "distribution": "FluidSynth LGPL-2.1-or-later; libsndfile 1.2.2 upstream Windows SDK with embedded codecs and upstream notices; GeneralUser GS separate soundfont license",
   "fluidsynth": {
     "version": "2.6.2",
     "url": "https://codeload.github.com/FluidSynth/fluidsynth/zip/refs/tags/v2.6.2",
@@ -26,5 +26,23 @@
     "url": "https://codeload.github.com/kthohr/gcem/zip/012ae73c6d0a2cb09ffe86475f5c6fba3926e200",
     "archive": "gcem-source.zip",
     "sha256": "28159274c54e9640354852e172d10d88eb159f4e7f2fea42edbcd20105ed3526"
+  },
+  "sndfile": {
+    "version": "1.2.2",
+    "url": "https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2-win64.zip",
+    "archive": "libsndfile-1.2.2-win64.zip",
+    "sha256": "2173935c0c1ed13cf627951d34483f9d405ead2eb473190461c42ba220643a3f"
+  },
+  "sndfileSource": {
+    "version": "1.2.2",
+    "url": "https://codeload.github.com/libsndfile/libsndfile/zip/refs/tags/1.2.2",
+    "archive": "libsndfile-1.2.2-source.zip",
+    "sha256": "14899cc522be3442df041ba74d6477bd91619a9be508e5097176e054d0b7ed5c"
+  },
+  "capabilities": {
+    "SF2": true,
+    "SF3": true,
+    "SF2PACK": false,
+    "SFZ": false
   }
 }

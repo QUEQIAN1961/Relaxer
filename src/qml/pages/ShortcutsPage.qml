@@ -33,7 +33,7 @@ Rectangle {
         UiText { text: "快捷键"; color: Theme.text; basePixelSize: 22; font.weight: Font.DemiBold }
         UiText {
             Layout.fillWidth: true
-            text: "应用内：播放器窗口激活时生效。全局：切换应用或最小化后也能使用，支持主键盘数字及 Num 小键盘数字。音量每次调整 5%。"
+            text: "应用内：窗口激活时生效；全局：切换应用或最小化后仍生效。音量步进 5%。"
             wrapMode: Text.Wrap
             color: Theme.secondary
             basePixelSize: 14
@@ -52,6 +52,7 @@ Rectangle {
                 delegate: Item {
                     id: actionRow
                     required property var modelData
+                    objectName:"shortcutRow-"+modelData.key
                     Layout.fillWidth: true
                     Layout.preferredWidth: content.width
                     Layout.preferredHeight:Theme.compact&&!modelData.appOnly?92:42

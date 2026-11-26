@@ -27,7 +27,7 @@ Playback::Playback(Library *l, QObject *p, bool decodeOnly)
     : QObject(p), m_library(l), m_fader([this](qreal gain){if(m_output)m_output->setVolume(m_volume*gain/100.);if(m_midi&&m_midiBackend)m_midiBackend->setVolume(qRound(m_volume*gain));}), m_player(this), m_decodeOnly(decodeOnly) {
     connect(l,&Library::changed,this,[this]{m_currentTrackValid=false;});
     connect(l,&Library::statsChanged,this,[this]{m_currentTrackValid=false;});
-    m_midiBackend = std::make_unique<MidiTransport>(l->root(), MidiTransport::Sender{}, MidiTransport::PathResolver{}, decodeOnly);
+    m_midiBackend = std::make_unique<MidiTransport>(l->root(), MidiTransport::Sender{}, MidiTransport::PathResolver{}, decodeOnly, l->setting("midiSoundFont",QString()).toString(), l->setting("midiSynthesis",QJsonObject()).toObject());
     connect(l,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("playbackFade")&&!m_library->setting("playbackFade",false).toBool())m_fader.finish();});
     connect(l,&Library::settingsUpdated,this,[this](const QStringList &keys){if(keys.contains("localVideoMode"))applyLocalVideoMode();});
     connect(&m_player,&QMediaPlayer::tracksChanged,this,&Playback::applyLocalVideoMode);
@@ -229,6 +229,7 @@ void Playback::load(qint64 id, bool autoplay, bool resume) {
         onError("音乐文件缺失：" + t.title);
         return;
     }
+    emit audioSourceAboutToStart();
     if (!ensurePlayable(t, autoplay))
         return;
     emit trackChanged();
@@ -261,16 +262,7 @@ void Playback::toggle() {
         return;
     }
     if (playing()&&!m_fader.pausing()) {
-        sample();
-        m_fader.to(0,m_library->setting("playbackFade",false).toBool(),[this]{
-        if (m_midi) {
-            if (!m_midiBackend->pause()) { onError(m_midiBackend->error()); return; }
-            m_midiPlaying = false;
-            emit stateChanged();
-        } else
-            m_player.pause();
-        save();
-        });
+        pause();
     } else {
         if(playing())m_fader.to(1,m_library->setting("playbackFade",false).toBool());
         else m_fader.reset(m_library->setting("playbackFade",false).toBool()?0:1);
@@ -293,6 +285,20 @@ void Playback::toggle() {
         } else
             m_player.play();
     }
+}
+void Playback::pause() {
+    if (m_shutdown || !playing() || m_fader.pausing()) return;
+    sample();
+    m_fader.to(0, m_library->setting("playbackFade", false).toBool(), [this] {
+        if (m_midi) {
+            if (!m_midiBackend->pause()) { onError(m_midiBackend->error()); return; }
+            m_midiPlaying = false;
+            emit stateChanged();
+        } else {
+            m_player.pause();
+        }
+        save();
+    });
 }
 void Playback::pauseForQueue(){
     sample();m_fader.reset(0);
@@ -323,8 +329,14 @@ void Playback::playUpcoming(int index){
     if (m_shutdown) return;
     const auto future=m_queue.upcoming();if(index<0||index>=future.size())return;
     sample();finish();haltTransport();m_failed.clear();qint64 id=0;
-    for(int i=0;i<=index;++i)id=m_queue.next(true);
+    if(m_queue.pendingEdited){const auto wanted=future[index];for(int i=0;i<m_queue.items.size()*2;++i){id=m_queue.next(true);if(!id||id==wanted)break;}}
+    else for(int i=0;i<=index;++i)id=m_queue.next(true);
     if(id)load(id,true);else saveQueue();
+}
+bool Playback::editUpcoming(const QVector<qint64> &order){
+    if(m_shutdown||!m_queue.editUpcoming(order))return false;
+    // No finish/load/seek/source assignment: queue editing must be inaudible.
+    emit stateChanged();saveQueue();return true;
 }
 void Playback::previous() {
     if (m_shutdown) return;
@@ -402,7 +414,8 @@ bool Playback::saveQueue() {
     const auto &ids=m_savedQueueArray;
     // Same keys and representation; one existing storage transaction prevents
     // a failed periodic/final snapshot from leaving a partially updated queue.
-    const QJsonObject snapshot{{"queue", ids}, {"current", double(m_queue.current())},
+    QJsonArray priority;for(auto id:m_queue.pendingPriority())priority.append(QString::number(id));
+    const QJsonObject snapshot{{"queueEdited",m_queue.pendingEdited},{"queuePriority",priority},{"queue", ids}, {"current", double(m_queue.current())},
         {"position", m_library->setting("rememberPosition",true).toBool()?double(position()):0}, {"activeSession", double(m_session.id)}};
     if(m_haveSavedQueue&&snapshot==m_lastSavedQueue)return true;
     QJsonObject changed;
@@ -429,6 +442,8 @@ void Playback::restore() {
             ids << qint64(v.toDouble());
     auto id = qint64(m_library->setting("current").toDouble());
     m_queue.set(ids, id);
+    QVector<qint64> priority;for(const auto &v:m_library->setting("queuePriority").toArray())priority.append(v.toString().toLongLong());
+    m_queue.restoreUpcomingState(m_library->setting("queueEdited",false).toBool(),priority);
     if (!m_queue.current())
         return;
     m_session = m_library->session(qint64(m_library->setting("activeSession").toDouble()));
@@ -554,6 +569,7 @@ bool Playback::startMidi(const QString &path, bool autoplay) {
         onError(m_midiBackend->error());
         return false;
     }
+    if(!m_midiBackend->soundFontWarning().isEmpty())emit midiSoundFontFallback(m_midiBackend->soundFontWarning());
     if (!m_midiBackend->setVolume(qRound(m_volume*m_fader.gain()))) { onError(m_midiBackend->error()); return false; }
     m_midiDuration = m_midiBackend->duration();
     m_session.duration = m_midiDuration;

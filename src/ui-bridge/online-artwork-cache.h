@@ -8,7 +8,10 @@
 #include <atomic>
 #include <memory>
 
+class QQuickAsyncImageProvider;
+
 namespace relaxer {
+class OnlineCoverResponse;
 // Online queues carry an immediately usable thumbnail. Only the visible large
 // player asks for the original; current/next thumbnails are cached ahead of time.
 class OnlineArtworkCache final:public QObject {
@@ -17,6 +20,8 @@ class OnlineArtworkCache final:public QObject {
 public:
     OnlineArtworkCache(Library *library,PlaybackFacade *facade,QObject *parent=nullptr);
     ~OnlineArtworkCache() override;
+    Q_INVOKABLE QUrl coverImageUrl(const QUrl &source) const;
+    QQuickAsyncImageProvider *createImageProvider();
     void prepare(Track &track,const QUrl &thumbnail,const QUrl &original,const QString &originalPath);
     void setExpanded(bool expanded);
     void setPresentationActive(bool active);
@@ -32,6 +37,7 @@ private:
     };
     Library *m_library;PlaybackFacade *m_facade;QNetworkAccessManager m_network;
     QHash<qint64,Entry> m_entries;QSet<QNetworkReply *> m_requests;QTimer m_prefetch,m_trim;
+    QSet<OnlineCoverResponse *> m_coverResponses;
     QThreadPool m_decodePool;int m_decoding=0;quint64 m_generation=0;
     std::shared_ptr<std::atomic_bool> m_decodeTicket=std::make_shared<std::atomic_bool>(true);
     bool m_expanded=false,m_presentationActive=true;
@@ -39,5 +45,8 @@ private:
     void prefetch();
     void fetch(qint64 id,bool original);
     void publish(qint64 id);
+    void loadCover(const QUrl &source,const QSize &requestedSize,OnlineCoverResponse *response);
+    void downloadCover(const QUrl &source,const QString &path,const QSize &requestedSize,OnlineCoverResponse *response);
+    void completeCover(OnlineCoverResponse *response,QImage image);
 };
 }

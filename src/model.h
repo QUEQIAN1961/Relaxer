@@ -1,5 +1,6 @@
 #pragma once
 #include <QMetaType>
+#include <QCryptographicHash>
 #include <QJsonObject>
 #include <QDateTime>
 #include <QString>
@@ -18,6 +19,26 @@ struct Track {
     QString importedAt;
     qint64 matchedLocalId=0;
 };
+inline bool isOnlineTrack(const Track &track) {
+    const auto &key=track.hash;
+    return key.startsWith("netease:")||key.startsWith("qqmusic:")||key.startsWith("kugou:")||
+           key.startsWith("qishui:")||key.startsWith("bilibili:");
+}
+inline qint64 trackIdentityHash48(const QString &key) {
+    const auto bytes=QCryptographicHash::hash(key.toUtf8(),QCryptographicHash::Sha256);
+    qint64 id=0;
+    for(int i=0;i<6;++i)id=(id<<8)|quint8(bytes[i]);
+    return id;
+}
+inline qint64 stableAdditionalTrackId(const QString &key) {
+    const qint64 partition=key.startsWith("kugou:")?2:key.startsWith("qishui:")?3:0;
+    if(!partition)return 0;
+    // Reserve a disjoint range for each catalog, within JS's exact integers.
+    return (partition<<48)|trackIdentityHash48(key);
+}
+inline qint64 bilibiliTrackId(const QString &bvid) {
+    return 5000000000000LL+trackIdentityHash48(bvid);
+}
 inline bool isVideoFile(const QString &path){
     const auto suffix=path.section('.',-1).toLower();
     return QStringList{"mp4","mkv","webm","mov","m4v","avi","mpeg","mpg","ts","m2ts","wmv"}.contains(suffix);

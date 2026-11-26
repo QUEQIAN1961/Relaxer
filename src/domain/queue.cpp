@@ -4,6 +4,7 @@
 
 namespace relaxer {
 void Queue::set(QVector<qint64> ids, qint64 id) {
+    pendingEdited=false;
     items.clear();
     QSet<qint64> unique;
     for (auto t : ids)
@@ -37,6 +38,28 @@ bool Queue::enqueue(const QVector<qint64> &ids,bool next){
     else for(auto it=selected.crbegin();it!=selected.crend();++it)bag.prepend(*it);
     m_plannedBags.clear();m_generated.clear();return true;
 }
+bool Queue::editUpcoming(const QVector<qint64> &order) {
+    const auto playing=current();if(!playing)return false;
+    auto pending=upcoming();pending.removeAll(playing);QSet<qint64> eligible(pending.begin(),pending.end()),seen;
+    if(mode!=Mode::Sequential)for(auto id:items)if(id!=playing)eligible.insert(id);
+    for(auto id:order)if(!eligible.contains(id)||seen.contains(id))return false;else seen.insert(id);
+    QVector<qint64> kept;for(auto id:items)if(!eligible.contains(id))kept.append(id);
+    const int at=kept.indexOf(playing);if(at<0)return false;
+    for(int i=0;i<order.size();++i)kept.insert(at+1+i,order[i]);
+    items=kept;index=items.indexOf(playing);m_priority=order;pendingEdited=true;
+    m_plannedBags.clear();m_generated.clear();refill();
+    QVector<qint64> keptHistory;int keptIndex=-1;
+    for(int i=0;i<history.size();++i)if(items.contains(history[i])){keptHistory.append(history[i]);if(i<=historyIndex)keptIndex=keptHistory.size()-1;}
+    history=keptHistory;historyIndex=keptIndex;
+    if(historyIndex+1<history.size())history.resize(historyIndex+1);
+    if(historyIndex<0||history.value(historyIndex)!=playing){history.append(playing);historyIndex=history.size()-1;}
+    return true;
+}
+void Queue::restoreUpcomingState(bool edited,const QVector<qint64> &priority){
+    pendingEdited=edited;m_priority.clear();QSet<qint64> seen;
+    for(auto id:priority)if(id!=current()&&items.contains(id)&&!seen.contains(id)){seen.insert(id);m_priority.append(id);bag.removeAll(id);}
+    m_plannedBags.clear();m_generated.clear();
+}
 void Queue::refill(bool full) {
     if(full&&!m_plannedBags.isEmpty()){bag=m_plannedBags.takeFirst();return;}
     bag = items;
@@ -62,6 +85,12 @@ void Queue::setMode(Mode m) {
 }
 QVector<qint64> Queue::upcoming(int count){
     QVector<qint64> result;if(items.isEmpty())return result;
+    if(pendingEdited){
+        const int wanted=count<0?items.size()-1:qMin(count,int(items.size())-1);
+        Queue copy=*this;copy.m_previewing=true;copy.m_generated.clear();QSet<qint64> seen;
+        for(int i=0;i<items.size()*2&&result.size()<wanted;++i){const auto id=copy.next(true);if(!id)break;if(id!=current()&&!seen.contains(id)){seen.insert(id);result.append(id);}}
+        m_plannedBags+=copy.m_generated;return result;
+    }
     const int limit=count<0?int(items.size()):qMin(count,int(items.size()));
     Queue copy=*this;copy.m_previewing=true;copy.m_generated.clear();
     for(int i=0;i<limit;++i){const auto id=copy.next(true);if(!id)break;result<<id;}

@@ -20,6 +20,8 @@ public:
     bool trayAvailable()const;
     QString shortcutStatus()const{return m_status;}
     Q_INVOKABLE void showTray();
+    Q_INVOKABLE void registerDismissOnlyPopup(QObject *popup);
+    bool filterPopupDismissal(QObject *object,QEvent *event);
     Q_INVOKABLE bool saveShortcuts(const QVariantMap &configuration);
     Q_INVOKABLE void setShortcutRecording(bool recording);
     Q_INVOKABLE void saveMiniWindowPlacement();
@@ -43,6 +45,9 @@ private:
     QVariantList m_miniPlacement;
     QKeySequence m_miniSequence;
     QPointF m_pointerPosition;
+    QList<QPointer<QObject>> m_dismissOnlyPopups;
+    Qt::MouseButtons m_dismissedButtons=Qt::NoButton;
+    bool m_suppressDismissContextMenu=false;
     int m_resizeEdges=0;
     bool m_applyingNativeFrame=false;
     WId m_resizeWindow=0;

@@ -1,6 +1,7 @@
 #include "online-download-bridge.h"
 #include "online-track-matcher.h"
 #include "ncm-restore.h"
+#include "import-coordinator.h"
 #include <QDir>
 #include <QDesktopServices>
 #include <QFileInfo>
@@ -10,10 +11,13 @@
 #include <QTimer>
 #include <QRunnable>
 #include <QDateTime>
+#include <utility>
 namespace relaxer {
 OnlineDownloadBridge::OnlineDownloadBridge(Library *library,QObject *parent):QAbstractListModel(parent),m_library(library),m_network(this){
     m_detectPool.setMaxThreadCount(1);m_detectPool.setExpiryTimeout(10000);
     m_detectTimer.setSingleShot(true);connect(&m_detectTimer,&QTimer::timeout,this,&OnlineDownloadBridge::detectPending);
+    m_favoriteImportTimer.setSingleShot(true);
+    connect(&m_favoriteImportTimer,&QTimer::timeout,this,&OnlineDownloadBridge::importNextFavoriteDownload);
     m_progressTimer.setSingleShot(true);m_progressTimer.setInterval(75);connect(&m_progressTimer,&QTimer::timeout,this,[this]{publishTask(false);});
     m_downloads=library->setting("online.downloads").toObject();connect(library,&Library::changed,this,[this]{++m_detectRevision;m_detectQueue.clear();m_known.clear();m_downloadIndex.reset();++m_revision;emit downloadsChanged();emit changed();});
 }
@@ -26,7 +30,62 @@ QString OnlineDownloadBridge::destinationPath(const QVariantMap &song,const QStr
     const auto format=QStringList{"flac","m4a","ogg","wav"}.contains(extension)?extension:QString("mp3");
     return QDir(downloadDirectory()).filePath(name+"."+format);
 }
-QString OnlineDownloadBridge::songKey(const QString &provider,const QVariantMap &song) const {return song.value("key",provider=="qq"?"qqmusic:"+song.value("mid").toString():"netease:"+song.value("id").toString()).toString();}
+QString OnlineDownloadBridge::songKey(const QString &provider,const QVariantMap &song) const {
+    const auto remoteId=song.value(provider=="qq"?"mid":"id").toString();
+    const auto keyProvider=provider=="qq"?QString("qqmusic"):provider.isEmpty()?QString("netease"):provider;
+    return song.value("key",keyProvider+":"+remoteId).toString();
+}
+void OnlineDownloadBridge::attachFavoriteImporter(ImportCoordinator *coordinator){
+    if(m_favoriteImporter||!coordinator)return;
+    m_favoriteImporter=coordinator;
+    connect(m_library,&Library::onlineFavoritesChanged,this,[this]{m_favoriteImportTimer.start(0);});
+    connect(this,&OnlineDownloadBridge::downloaded,this,[this]{
+        m_favoriteImportAttempts.remove(m_key);
+        m_favoriteImportTimer.start(0);
+    });
+    connect(coordinator,&ImportCoordinator::trackCommitted,this,[this](quint64 task,qint64 track,bool){
+        if(task==m_favoriteImportTask)m_favoriteImportTrack=track;
+    });
+    connect(coordinator,&ImportCoordinator::finished,this,[this](const ImportSummary &summary){
+        if(summary.taskId==m_favoriteImportTask){
+            const auto key=std::exchange(m_favoriteImportKey,QString());
+            const auto track=std::exchange(m_favoriteImportTrack,qint64(0));
+            m_favoriteImportTask=0;
+            if(!summary.cancelled){
+                if(!track)emit favoriteImportFailed(summary.errors.value(0,summary.fatalError));
+                else if(!m_library->linkFavoriteDownload(key,track))emit favoriteImportFailed(m_library->lastError());
+            }
+        }
+        if(!m_favoriteImporter->isShuttingDown())m_favoriteImportTimer.start(0);
+    });
+    m_favoriteImportTimer.start(0);
+}
+void OnlineDownloadBridge::importNextFavoriteDownload(){
+    if(!m_favoriteImporter||m_favoriteImporter->isBusy()||m_favoriteImporter->isShuttingDown()||
+       m_favoriteImportTask||m_downloads.isEmpty())return;
+    const auto folder=QFileInfo(downloadDirectory()).canonicalFilePath();
+    if(folder.isEmpty())return;
+    // Only a completed download's exact provider receipt can replace a favorite.
+    // The fuzzy title/artist matcher still serves the download button alone.
+    for(const auto &key:m_library->onlineFavoriteKeys(false)){
+        const auto record=m_downloads.value(key);
+        const auto path=record.isObject()?record.toObject().value("path").toString():record.toString();
+        if(path.isEmpty()||m_favoriteImportAttempts.value(key)==path)continue;
+        const QFileInfo file(path);
+        const auto canonical=file.canonicalFilePath();
+        if(!file.isFile()||file.isSymLink()||file.size()<=0||QFileInfo(canonical).absolutePath()!=folder)continue;
+        m_favoriteImportAttempts.insert(key,path);
+        ImportRequest request;
+        request.sources={canonical};
+        request.maximumWorkers=1;
+        const auto id=m_favoriteImporter->start(request);
+        if(id){
+            m_favoriteImportTask=id;
+            m_favoriteImportKey=key;
+            return;
+        }
+    }
+}
 std::shared_ptr<const OnlineTrackIndex> OnlineDownloadBridge::downloadIndex(){
     if(!m_downloadIndex){QVector<Track> rows;qint64 id=1;for(const auto &value:m_downloads){const auto row=value.toObject();if(row.isEmpty())continue;Track t;t.id=id++;t.file=row.value("path").toString();t.title=row.value("title").toString();t.artist=row.value("artist").toString();t.duration=row.value("duration").toVariant().toLongLong();rows.append(t);}m_downloadIndex=std::make_shared<OnlineTrackIndex>(rows);}
     return m_downloadIndex;

@@ -8,6 +8,33 @@ import "../theme"
 Item {
     id:page;objectName:"discoverPage"
     readonly property bool presentationActive:visible&&(!Window.window||(Window.window.visible&&Window.window.visibility!==Window.Minimized))
+    property bool deferInitialCatalog:false
+    signal queueLocateFailed(string message)
+    property string queueLocateKey:""
+    property string queueLocateProvider:""
+    property string queueLocateKind:""
+    property string queueLocateArgument:""
+    property int queueLocateTicks:0
+    function locateQueueTrack(key,origin){
+        const index=["netease","qq","qishui","kugou","bilibili"].indexOf(origin.provider)
+        if(index<0){queueLocateFailed("无法识别歌曲的来源平台");return}
+        queueLocateTimer.stop();queueLocateKey="";selectionMode=false;clearSelection();sourceIndex=index
+        const kind=origin.kind||"playlist",argument=String(origin.id||origin.title||"")
+        showPage(kind,argument,false)
+        queueLocateKey=key;queueLocateProvider=provider;queueLocateKind=kind;queueLocateArgument=argument;queueLocateTicks=0;queueLocateTimer.restart()
+    }
+    Timer {
+        id:queueLocateTimer;interval:80;repeat:true
+        onTriggered:{
+            if(!page.visible||page.provider!==page.queueLocateProvider||page.activeView.kind!==page.queueLocateKind||page.activeView.argument!==page.queueLocateArgument){stop();page.queueLocateKey="";return}
+            for(let i=0;i<page.visibleSongs.length;++i){const row=page.visibleSongs[i];if(String(page.songTrackId(row))===page.queueLocateKey){page.selectedSongKey=page.provider+":"+String(row.id);songs.currentIndex=i;songs.positionViewAtIndex(i,ListView.Contain);page.queueLocateKey="";stop();return}}
+            page.queueLocateTicks++
+            if(page.musicSource.catalogLoading&&page.queueLocateTicks<250)return
+            if(page.videoSource&&bilibili.hasMore&&page.queueLocateTicks<250){bilibili.loadMore();return}
+            const status=page.musicSource.status,detail=/失败|权限|登录|不可|删除|403|404/.test(status)?"："+status:""
+            page.queueLocateFailed("无法在来源歌单中找到该歌曲，可能已被移除或无法访问"+detail);page.queueLocateKey="";stop()
+        }
+    }
     property int sourceIndex:0
     readonly property bool qqSelected: sourceIndex === 1
     readonly property bool videoSource:sourceIndex===4
@@ -62,6 +89,18 @@ Item {
     function actOnSelection(action){
         actOnSongs(selectedSongs(),action)
     }
+    function songOrigin(){
+        const current=musicSource.currentPlaylist
+        return {id:String(current.id||activeView.argument||""),kind:activeView.kind,name:current.name||""}
+    }
+    function choosePlaylistFor(rows){
+        if(!rows.length||!rows[0].id)return
+        addPlaylistDialog.provider=page.provider
+        addPlaylistDialog.entries=rows.slice()
+        addPlaylistDialog.origin=page.songOrigin()
+        newDiscoveryPlaylistName.text=""
+        addPlaylistDialog.open()
+    }
     function actOnSongs(rows,action){
         if(!rows.length)return
         if(action==="copy"){
@@ -111,9 +150,9 @@ Item {
         accountMenu.popup(account,account.width-accountMenu.width,account.height+6)
     }
     onVisibleChanged:if(!visible){
-        closeAccountMenu();searchCollection.close();downloadList.close();batchMenu.dismiss();songMenu.dismiss()
+        closeAccountMenu();searchCollection.close();downloadList.close();batchMenu.dismiss();songMenu.dismiss();addPlaylistDialog.close()
         if(searchMode){const views=sourceViews.slice();views[sourceIndex]={kind:videoSource?"mine":"featured",argument:""};sourceViews=views;searchMode=false;const history=sourceHistory.slice();history[sourceIndex]=[];sourceHistory=history}
-    }else if(initialized)showPage(activeView.kind,activeView.argument)
+    }else if(initialized&&!deferInitialCatalog)showPage(activeView.kind,activeView.argument)
     function showPage(kind,argument,refresh){navigateView(kind,argument,refresh,false)}
     function navigateView(kind,argument,refresh,goingBack){
         pagingView=null;collectionQuery="";searchCollection.close()
@@ -179,7 +218,7 @@ Item {
     }
     onShowPlaylistsChanged:syncPinnedKey()
     function showHome(){pinnedKey="";showPage(videoSource?"mine":"featured","")}
-    Component.onCompleted:{initialized=true;showHome()}
+    Component.onCompleted:{initialized=true;if(!deferInitialCatalog)showHome()}
     ColumnLayout {
         anchors.fill:parent;anchors.margins:Theme.pageMargin;anchors.topMargin:28;anchors.bottomMargin:0;spacing:12
         Item {
@@ -306,7 +345,7 @@ Item {
                 objectName:"onlinePlaylist-"+modelData.id
                 HoverHandler {id:cardHover}
                 HighlightSurface {objectName:"onlinePlaylistBackground";width:parent.width-4;height:parent.height-8;radius:12;positionRevision:playlistGrid.contentY+card.x+card.y;hovered:cardHover.hovered}
-                Artwork {id:cardCover;x:5;y:5;width:parent.width-14;height:width*(page.videoSource&&!page.searchCards?.75:1);videoCover:page.videoSource&&!page.searchCards;animated:false;contentKey:page.provider+":"+(card.modelData.kind||"playlist")+":"+String(card.modelData.id);resolution:320;seed:card.modelData.name;file:card.modelData.cover||"";imageUrl:String(file).length?file:"image://relaxer/artwork?seed="+encodeURIComponent(seed)+"&resolution=256&radiusRatio=0"}
+                Artwork {id:cardCover;x:5;y:5;width:parent.width-14;height:width*(page.videoSource&&!page.searchCards?.75:1);videoCover:page.videoSource&&!page.searchCards;animated:false;cacheOnlineCover:card.modelData.kind!=="user";contentKey:page.provider+":"+(card.modelData.kind||"playlist")+":"+String(card.modelData.id);resolution:320;seed:card.modelData.name;file:card.modelData.cover||"";imageUrl:String(file).length?file:"image://relaxer/artwork?seed="+encodeURIComponent(seed)+"&resolution=256&radiusRatio=0"}
                 UiText {x:5;y:cardCover.y+cardCover.height+5;width:parent.width-14;text:card.modelData.name;textFormat:Text.PlainText;basePixelSize:14;font.weight:Font.DemiBold;maximumLineCount:2;wrapMode:Text.Wrap;elide:Text.ElideRight}
                 MouseArea {
                     anchors.fill:parent;cursorShape:Qt.PointingHandCursor
@@ -335,6 +374,10 @@ Item {
                 id:row;required property var modelData;required property int index
                 readonly property bool current:playbackBridge.trackId===page.songTrackId(modelData)
                 readonly property string songKey:page.provider+":"+String(modelData.id)
+                readonly property bool favorite:{
+                    libraryBridge.onlineFavoritesRevision
+                    return libraryBridge.discoveryFavorite(page.provider,row.modelData)
+                }
                 selected:page.selectionMode?page.selectedIds.indexOf(String(modelData.id))>=0:page.selectedSongKey===songKey
                 objectName:"onlineSong-"+modelData.id;width:songs.width-10;height:Math.ceil((modelData.reason.length?88:64)*Math.max(1,Theme.fontScale));radius:8
                 positionRevision:songs.contentY+row.y;hovered:rowHover.hovered
@@ -352,6 +395,15 @@ Item {
                         objectName:"onlinePlay-"+row.modelData.id;Layout.preferredWidth:30;Layout.preferredHeight:30;padding:3;horizontalPadding:3;verticalPadding:3
                         symbol:row.current&&playbackBridge.playing?"pause":"play";tip:row.current&&playbackBridge.playing?"暂停":"播放";showTooltip:true
                         onClicked:if(row.current)playbackBridge.toggle();else page.musicSource.playSong(row.modelData.id)
+                    }
+                    IconButton {
+                        objectName:"onlineFavorite-"+row.modelData.id
+                        visible:!page.selectionMode&&(settingsBridge.values.favoriteDisplayScopes&4)!==0
+                        Layout.preferredWidth:28;Layout.preferredHeight:30;padding:4
+                        symbol:row.favorite?"liked":"heart"
+                        tint:row.favorite?Theme.accent:Theme.secondary
+                        tip:row.favorite?"取消喜欢":"加入我喜欢";showTooltip:true
+                        onClicked:libraryBridge.toggleDiscoveryFavorite(page.provider,row.modelData,page.songOrigin())
                     }
                     Artwork {
                         objectName:"onlineCover-"+row.modelData.id;contentKey:row.songKey
@@ -401,8 +453,10 @@ Item {
         RoundMenuItem {text:"随机播放";onTriggered:page.contextAction("shuffle")}
         RoundMenuItem {objectName:"onlineContextNext";text:"下一首播放";onTriggered:page.contextAction("next")}
         RoundMenuItem {text:"追加播放队列";onTriggered:page.contextAction("append")}
+        RoundMenuItem {objectName:"onlineContextAddPlaylist";text:"加入自建歌单…";onTriggered:page.choosePlaylistFor(page.contextRows())}
         RoundMenuItem {objectName:"onlineContextDownload";visible:!page.videoSource;text:page.contextRows().length>1?"批量下载":"下载";onTriggered:page.contextAction("download")}
         RoundMenuItem {text:"复制歌曲信息";onTriggered:page.contextAction("copy")}
+        RoundMenuItem {objectName:"onlineSongEqualizer";text:"歌曲均衡器…";visible:page.contextRows().length===1;onTriggered:equalizerBridge.requestOnlineSong(page.provider,page.contextSong)}
         MenuSeparator {}
         RoundMenuItem {objectName:"onlineContextMultiSelect";text:"多选";onTriggered:page.beginSelection()}
         RoundMenuItem {visible:page.selectionMode;text:"全选";onTriggered:page.selectAll(false)}
@@ -415,11 +469,92 @@ Item {
         RoundMenuItem {text:"随机播放所选";enabled:page.selectedIds.length>0;onTriggered:page.actOnSelection("shuffle")}
         RoundMenuItem {text:"批量下一首";enabled:page.selectedIds.length>0;onTriggered:page.actOnSelection("next")}
         RoundMenuItem {text:"追加播放队列";enabled:page.selectedIds.length>0;onTriggered:page.actOnSelection("append")}
+        RoundMenuItem {objectName:"onlineBatchAddPlaylist";text:"加入自建歌单…";enabled:page.selectedIds.length>0;onTriggered:page.choosePlaylistFor(page.selectedSongs())}
         RoundMenuItem {text:"批量下载";visible:!page.videoSource;enabled:page.selectedIds.length>0;onTriggered:page.actOnSelection("download")}
         RoundMenuItem {text:"复制歌曲信息";enabled:page.selectedIds.length>0;onTriggered:page.actOnSelection("copy")}
         MenuSeparator {}
         RoundMenuItem {text:"反选";onTriggered:page.selectAll(true)}
         RoundMenuItem {text:"清空选择";onTriggered:page.clearSelection()}
+    }
+    ConfirmDialog {
+        id:addPlaylistDialog
+        objectName:"onlineAddPlaylistDialog"
+        parent:page.Overlay.overlay
+        anchors.centerIn:parent
+        width:Math.min(420,parent?parent.width-28:420)
+        modal:true
+        title:"加入自建歌单"
+        standardButtons:Dialog.Cancel
+        property string provider:""
+        property var entries:[]
+        property var origin:({})
+        property string errorText:""
+        readonly property var destinations:{
+            const rows=[]
+            for(let i=0;i<playlistModel.count;i++){
+                const row=playlistModel.get(i)
+                if(!row.cloud)rows.push(row)
+            }
+            return rows
+        }
+        function complete(ok){
+            if(ok){page.batchStatus="已加入歌单";close()}
+            else errorText=libraryBridge.error
+        }
+        function createAndAdd(){
+            if(!newDiscoveryPlaylistName.text.trim().length)return
+            complete(libraryBridge.createPlaylistWithDiscoveryTracks(
+                newDiscoveryPlaylistName.text,provider,entries,origin))
+        }
+        onAboutToShow:errorText=""
+        onClosed:entries=[]
+        contentItem:ColumnLayout {
+            spacing:8
+            ListView {
+                Layout.fillWidth:true
+                Layout.preferredHeight:Math.min(count*Theme.controlHeight,Theme.controlHeight*5)
+                clip:true
+                model:addPlaylistDialog.destinations
+                visible:count>0
+                ScrollBar.vertical:ScrollBar{}
+                delegate:ShellButton {
+                    required property var modelData
+                    objectName:"onlineAddPlaylist-"+modelData.playlistKey
+                    width:ListView.view.width
+                    height:Theme.controlHeight
+                    text:modelData.name
+                    flat:true
+                    onClicked:addPlaylistDialog.complete(libraryBridge.addDiscoveryTracks(
+                        modelData.playlistKey,addPlaylistDialog.provider,addPlaylistDialog.entries,addPlaylistDialog.origin))
+                }
+            }
+            RowLayout {
+                Layout.fillWidth:true
+                EntryField {
+                    id:newDiscoveryPlaylistName
+                    objectName:"onlineNewPlaylistName"
+                    Layout.fillWidth:true
+                    Layout.minimumWidth:0
+                    placeholderText:"新歌单名称"
+                    maximumLength:120
+                    onAccepted:addPlaylistDialog.createAndAdd()
+                }
+                ShellButton {
+                    objectName:"onlineCreatePlaylistAndAdd"
+                    text:"新建并加入"
+                    enabled:newDiscoveryPlaylistName.text.trim().length>0
+                    onClicked:addPlaylistDialog.createAndAdd()
+                }
+            }
+            UiText {
+                Layout.fillWidth:true
+                visible:text.length>0
+                text:addPlaylistDialog.errorText
+                textFormat:Text.PlainText
+                color:Theme.accent
+                wrapMode:Text.Wrap
+            }
+        }
     }
     DownloadList {id:downloadList;parent:downloadsButton}
     TextMetrics {id:accountMenuText;font:accountMenu.font;text:page.videoSource?"视频画质上限":"音乐音质"}
@@ -433,7 +568,6 @@ Item {
             LayoutMirroring.enabled:false
             arrow:Symbol {objectName:accountEntry.subMenu===qualityMenu?"onlineQualityArrow":"onlineSourceArrow";visible:!!accountEntry.subMenu;name:"back";width:14;height:14;x:8;y:(accountEntry.height-height)/2;color:Theme.secondary}
         }
-        closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutsideParent
         enter:Transition {NumberAnimation {target:accountMenu;property:"expansion";from:0;to:1;duration:settingsBridge.values.reduceMotion?0:140;easing.type:Easing.OutCubic}}
         exit:Transition {NumberAnimation {target:accountMenu;property:"expansion";to:0;duration:settingsBridge.values.reduceMotion?0:90;easing.type:Easing.InCubic}}
         RoundMenu {
@@ -474,6 +608,7 @@ Item {
             }
         }
         MenuSeparator {padding:0;topPadding:3;bottomPadding:3;contentItem:Rectangle {implicitHeight:1;color:Theme.border}}
+        RoundMenuItem {objectName:"onlinePlatformEqualizer";text:"此平台均衡器…";implicitHeight:32;leftPadding:10;rightPadding:10;onTriggered:equalizerBridge.requestPlatform(page.provider)}
         RoundMenuItem {objectName:"onlineLogout";implicitHeight:32;leftPadding:10;rightPadding:10;text:page.musicSource.loggedIn?"退出账号":"扫码登录";destructive:page.musicSource.loggedIn;onTriggered:if(page.musicSource.loggedIn)page.musicSource.logout();else page.startLogin()}
     }
     ConfirmDialog {

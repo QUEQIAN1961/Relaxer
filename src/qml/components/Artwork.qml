@@ -14,6 +14,7 @@ Item {
     property int resolution:640
     property bool animated:true
     property bool retainWhenHidden:false
+    property bool cacheOnlineCover:true
     property int direction:0
     property real radius:Math.min(width,height)*Theme.artworkCornerRatio
     property url imageUrl:(String(file).startsWith("https://")||String(file).startsWith("http://"))?file:
@@ -31,9 +32,11 @@ Item {
     readonly property bool software:GraphicsInfo.api===GraphicsInfo.Software
     readonly property bool windowActive:!Window.window||(Window.window.visible&&Window.window.visibility!==Window.Minimized)
     readonly property bool presentationActive:visible&&windowActive
+    readonly property bool needsMask:!software&&radius>0
     readonly property bool reduceMotion:settingsBridge.values.reduceMotion
     readonly property bool contentCurrent:animated||contentKey===displayedContentKey
     readonly property bool remoteImage:String(imageUrl).startsWith("https://")||String(imageUrl).startsWith("http://")
+    readonly property url requestUrl:cacheOnlineCover&&remoteImage?onlineArtwork.coverImageUrl(imageUrl):imageUrl
     readonly property int decodeWidth:Math.max(64,Math.min(960,Math.ceil(resolution*(Window.window?Window.window.devicePixelRatio:1))))
     readonly property int decodeHeight:Math.max(1,Math.ceil(decodeWidth/coverAspect))
     readonly property alias imageItem:pocket
@@ -47,7 +50,9 @@ Item {
         const image=imageFor(value)
         return !!image&&image.status===Image.Ready&&(!software||(softwareLoadRevision>=0&&softwareLoader.item&&softwareLoader.item.isImageLoaded(value)))
     }
-    function paintFallback(){if(initialized&&softwareLoader.item)softwareLoader.item.requestPaint()}
+    function paintFallback(){if(initialized&&presentationActive&&softwareLoader.item)softwareLoader.item.requestPaint()}
+    function mayUpdateImage(){return windowActive&&(visible||retainWhenHidden)}
+    function scheduleImageUpdate(){if(initialized&&mayUpdateImage())imageUpdate.restart()}
     function imageArrived(){
         if(!initialized)return
         if(!presentationActive){if(!visible&&!retainWhenHidden)suspendImages();else settleBackground();return}
@@ -58,8 +63,8 @@ Item {
         paintFallback()
     }
     function updateImage(){
-        if(!initialized||(!presentationActive&&!(retainWhenHidden&&windowActive)))return
-        const next=String(imageUrl),changed=contentKey!==displayedContentKey
+        if(!initialized||!mayUpdateImage())return
+        const next=String(requestUrl),changed=contentKey!==displayedContentKey
         if(next===String(displayedUrl)){
             if(changed&&!animated){motion.stop();pendingTransition=false;transition=1;retireOutgoing()}
             displayedContentKey=contentKey;imageArrived();return
@@ -121,18 +126,30 @@ Item {
         if(index===activeSlot&&activeDirection>0)return width*(1-progress())
         return 0
     }
-    onImageUrlChanged:if(initialized)imageUpdate.restart()
-    onContentKeyChanged:if(initialized){paintFallback();imageUpdate.restart()}
-    onPresentationActiveChanged:if(initialized){if(presentationActive){updateImage();paintFallback()}else if(!visible&&!retainWhenHidden)suspendImages();else settleBackground()}
-    onWindowActiveChanged:if(initialized&&windowActive&&retainWhenHidden)imageUpdate.restart()
-    onRetainWhenHiddenChanged:if(initialized){if(retainWhenHidden&&windowActive)imageUpdate.restart();else if(!visible&&!retainWhenHidden)suspendImages()}
+    onRequestUrlChanged:scheduleImageUpdate()
+    onContentKeyChanged:{paintFallback();scheduleImageUpdate()}
+    onPresentationActiveChanged:if(initialized){
+        if(presentationActive){
+            imageUpdate.stop();updateImage();paintFallback()
+        }else if(!visible&&!retainWhenHidden){
+            imageUpdate.stop();suspendImages()
+        }else settleBackground()
+    }
+    onWindowActiveChanged:if(initialized){
+        if(!windowActive)imageUpdate.stop()
+        else if(!visible&&retainWhenHidden)scheduleImageUpdate()
+    }
+    onRetainWhenHiddenChanged:if(initialized&&!visible){
+        if(retainWhenHidden)scheduleImageUpdate()
+        else{imageUpdate.stop();suspendImages()}
+    }
     onTransitionChanged:paintFallback()
     onWidthChanged:paintFallback()
     onHeightChanged:paintFallback()
     onRadiusChanged:paintFallback()
     onAnimatedChanged:if(initialized&&!animated){motion.stop();pendingTransition=false;transition=1;if(loaded(displayedUrl))retireOutgoing()}
     onReduceMotionChanged:if(initialized&&reduceMotion){motion.stop();pendingTransition=false;transition=1;if(loaded(displayedUrl))retireOutgoing()}
-    onSoftwareChanged:if(initialized){suspendImages();imageUpdate.restart()}
+    onSoftwareChanged:if(initialized){suspendImages();scheduleImageUpdate()}
     Component.onCompleted:{initialized=true;updateImage()}
     Component.onDestruction:{initialized=false;imageUpdate.stop();motion.stop()}
     // A child timer cancels with a recycled/destroyed delegate. A raw callLater
@@ -153,10 +170,10 @@ Item {
     }
     Item {
         id:coverScene;anchors.fill:parent
-        visible:artwork.visible&&!artwork.software&&!!coverMask.item
+        visible:artwork.visible&&!artwork.software&&(!artwork.needsMask||!!coverMask.item)
         // Apply the mask to the actual image layer, including recycled queue rows
         // and native popup windows. There is no separate unmasked image pass.
-        layer.enabled:artwork.visible&&!artwork.software
+        layer.enabled:artwork.visible&&artwork.needsMask
         layer.smooth:true
         layer.effect:MultiEffect {
             maskEnabled:true;maskThresholdMin:.5;maskSpreadAtMin:1
@@ -180,7 +197,7 @@ Item {
         }
     }
     Loader {
-        id:coverMask;anchors.fill:parent;active:(artwork.visible||artwork.retainWhenHidden)&&!artwork.software
+        id:coverMask;anchors.fill:parent;active:artwork.needsMask&&(artwork.visible||artwork.retainWhenHidden)
         sourceComponent:ContinuousCorner {
             radius:artwork.radius;color:"white";visible:false
             layer.enabled:true;layer.smooth:true

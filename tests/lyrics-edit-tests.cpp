@@ -4,6 +4,7 @@
 #include "lyrics-document-reader.h"
 #include "lyrics-replacement-fixture.h"
 #include "import-fixture.h"
+#include "c4c5-ui-fixture.h"
 #include <QApplication>
 #include <QMessageBox>
 #include <QQuickItem>
@@ -277,7 +278,11 @@ private slots:
         // window only after that popup has completely left the overlay.
         QTRY_VERIFY(!dialog->property("visible").toBool());
         QTRY_VERIFY(!w->property("popupOpen").toBool());
-        QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());QVERIFY(click(w,visual(root,"playerMetadata")));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
+        QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());
+        QVERIFY(c4c5_fixture::wave(l.absolute(a.file)));
+        shell.facade()->play({a.id},a.id);QTRY_VERIFY(shell.facade()->playing());shell.facade()->pause();
+        QTRY_VERIFY(shell.upcomingModel()->count()>0);
+        QVERIFY(click(w,visual(root,"playerMetadata")));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
         QTest::keyClick(w,Qt::Key_Escape);QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);QVERIFY(shell.feedbackBridge()->visible());QVERIFY(!w->property("popupOpen").toBool());QVERIFY(shot(shell,"ui-batch-result-notification"));QVERIFY(shell.warnings().isEmpty());
     }
 };

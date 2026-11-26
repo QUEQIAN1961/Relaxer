@@ -4,6 +4,10 @@ import "../theme"
 Controls.Menu {
     id: menu
     popupType: Controls.Popup.Item
+    // All menus, including cascaded and text-edit menus, share one dismissal
+    // guard so an outside press/release cannot activate the control underneath.
+    closePolicy: Controls.Popup.CloseOnEscape | Controls.Popup.CloseOnPressOutside
+    Component.onCompleted: uiIntegration.registerDismissOnlyPopup(menu)
     property real expansion: 1
     // A growing viewport changes ListView's estimate for off-screen items.
     // Size from the actual menu items, including zero-height hidden actions,

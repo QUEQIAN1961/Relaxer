@@ -9,8 +9,94 @@
 #include <QDateTime>
 #include <QRunnable>
 #include <QCryptographicHash>
+#include <QPointer>
+#include <QQuickImageProvider>
+#include <functional>
+#include <utility>
 
 namespace relaxer {
+namespace {
+constexpr qint64 CoverByteLimit=16*1024*1024;
+
+bool remoteCover(const QUrl &url) {
+    return url.isValid()&&!url.host().isEmpty()&&url.userInfo().isEmpty()
+        &&(url.scheme()=="https"||url.scheme()=="http");
+}
+
+QNetworkRequest coverRequest(const QUrl &source) {
+    QNetworkRequest request(source);
+    request.setTransferTimeout(15000);
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute,false);
+    request.setAttribute(QNetworkRequest::CookieLoadControlAttribute,QNetworkRequest::Manual);
+    request.setAttribute(QNetworkRequest::CookieSaveControlAttribute,QNetworkRequest::Manual);
+    const auto host=source.host();
+    request.setRawHeader("User-Agent","Mozilla/5.0");
+    if(host=="hdslb.com"||host.endsWith(".hdslb.com")||host.endsWith(".biliimg.com"))
+        request.setRawHeader("Referer","https://www.bilibili.com/");
+    else if(host.endsWith("gtimg.cn"))request.setRawHeader("Referer","https://y.qq.com/");
+    else if(host.endsWith("kugou.com"))request.setRawHeader("Referer","https://www.kugou.com/");
+    else if(host.contains("douyin")||host.contains("byte"))request.setRawHeader("Referer","https://music.douyin.com/");
+    else if(host.endsWith("music.126.net")||host.endsWith("music.163.com"))request.setRawHeader("Referer","https://music.163.com/");
+    return request;
+}
+
+QImage decodeCover(QImageReader &reader,const QSize &limit) {
+    reader.setAutoTransform(true);
+    const auto size=reader.size();
+    if(size.isEmpty()||qint64(size.width())*size.height()>100000000)return {};
+    if(size.width()>limit.width()||size.height()>limit.height())
+        reader.setScaledSize(size.scaled(limit,Qt::KeepAspectRatio));
+    auto image=reader.read();
+    if(image.width()>limit.width()||image.height()>limit.height())
+        image=image.scaled(limit,Qt::KeepAspectRatio,Qt::SmoothTransformation);
+    return image;
+}
+
+void boundCoverReply(QNetworkReply *reply) {
+    reply->setReadBufferSize(CoverByteLimit+1);
+    QObject::connect(reply,&QNetworkReply::readyRead,reply,[reply]{
+        if(reply->bytesAvailable()>CoverByteLimit)reply->abort();
+    });
+    QObject::connect(reply,&QNetworkReply::downloadProgress,reply,[reply](qint64 received,qint64 total){
+        if(received>CoverByteLimit||total>CoverByteLimit)reply->abort();
+    });
+}
+}
+
+class OnlineCoverResponse final:public QQuickImageResponse {
+public:
+    QQuickTextureFactory *textureFactory() const override {
+        return QQuickTextureFactory::textureFactoryForImage(m_image);
+    }
+    QString errorString() const override {
+        return m_image.isNull()?QStringLiteral("Online cover is unavailable"):QString();
+    }
+    void complete(QImage image) {
+        m_image=std::move(image);
+        emit finished();
+    }
+private:
+    QImage m_image;
+};
+
+namespace {
+class OnlineCoverProvider final:public QQuickAsyncImageProvider {
+public:
+    using Load=std::function<void(const QUrl &,const QSize &,OnlineCoverResponse *)>;
+    OnlineCoverProvider(QThread *thread,Load load):m_thread(thread),m_load(std::move(load)){}
+    QQuickImageResponse *requestImageResponse(const QString &id,const QSize &size) override {
+        auto *response=new OnlineCoverResponse;
+        response->moveToThread(m_thread);
+        const auto source=QUrl::fromEncoded(QByteArray::fromBase64(id.toLatin1(),QByteArray::Base64UrlEncoding));
+        QMetaObject::invokeMethod(response,[response,source,size,load=m_load]{load(source,size,response);},Qt::QueuedConnection);
+        return response;
+    }
+private:
+    QThread *m_thread;
+    Load m_load;
+};
+}
+
 OnlineArtworkCache::OnlineArtworkCache(Library *library,PlaybackFacade *facade,QObject *parent)
     :QObject(parent),m_library(library),m_facade(facade),m_network(this){
     m_decodePool.setMaxThreadCount(1);m_decodePool.setExpiryTimeout(10000);
@@ -35,6 +121,80 @@ OnlineArtworkCache::~OnlineArtworkCache(){
     m_decodeTicket->store(false);for(auto &entry:m_entries)entry.valid->store(false);
     for(auto *reply:m_requests){reply->disconnect(this);reply->abort();}
     m_decodePool.clear();m_decodePool.waitForDone();
+    const auto pending=std::exchange(m_coverResponses,{});
+    for(auto *response:pending)response->complete({});
+}
+
+QUrl OnlineArtworkCache::coverImageUrl(const QUrl &source) const {
+    if(!remoteCover(source))return source;
+    const auto key=source.toEncoded(QUrl::RemoveFragment).toBase64(QByteArray::Base64UrlEncoding|QByteArray::OmitTrailingEquals);
+    return QUrl("image://online-cover/"+QString::fromLatin1(key));
+}
+
+QQuickAsyncImageProvider *OnlineArtworkCache::createImageProvider() {
+    return new OnlineCoverProvider(thread(),[cache=QPointer<OnlineArtworkCache>(this)](const QUrl &source,const QSize &size,OnlineCoverResponse *response){
+        if(cache)cache->loadCover(source,size,response);
+        else response->complete({});
+    });
+}
+
+void OnlineArtworkCache::loadCover(const QUrl &source,const QSize &requestedSize,OnlineCoverResponse *response) {
+    if(!remoteCover(source)){response->complete({});return;}
+    m_coverResponses.insert(response);
+    connect(response,&QObject::destroyed,this,[this,response]{m_coverResponses.remove(response);});
+    const auto digest=QCryptographicHash::hash(source.toEncoded(),QCryptographicHash::Sha256).toHex();
+    const auto path=QDir(DiskCache::online(m_library)).filePath("artwork-"+digest+".img");
+    const QSize cap(1600,1600);
+    const auto size=requestedSize.isEmpty()?cap:requestedSize.boundedTo(cap);
+    const auto pending=QPointer<OnlineCoverResponse>(response);
+    m_decodePool.start([this,source,size,path,pending]{
+        QImage image;
+        const QFileInfo info(path);
+        if(info.isFile()&&!info.isSymLink()&&info.size()<=CoverByteLimit){
+            QImageReader reader(path);
+            image=decodeCover(reader,size);
+        }
+        QMetaObject::invokeMethod(this,[this,source,size,path,pending,image=std::move(image)]()mutable{
+            if(!pending)return;
+            if(image.isNull())downloadCover(source,path,size,pending);
+            else completeCover(pending,std::move(image));
+        },Qt::QueuedConnection);
+    });
+}
+
+void OnlineArtworkCache::downloadCover(const QUrl &source,const QString &path,const QSize &size,OnlineCoverResponse *response) {
+    auto *reply=m_network.get(coverRequest(source));
+    boundCoverReply(reply);
+    const auto pending=QPointer<OnlineCoverResponse>(response);
+    connect(reply,&QNetworkReply::finished,this,[this,reply,path,size,pending]{
+        reply->deleteLater();
+        if(reply->error()!=QNetworkReply::NoError||reply->bytesAvailable()>CoverByteLimit){
+            if(pending)completeCover(pending,{});
+            return;
+        }
+        // Validate the image before storing just its bytes. The filename hashes
+        // the full source URL, keeping headers and URL query strings off disk.
+        m_decodePool.start([this,path,size,pending,bytes=reply->readAll()]{
+            QBuffer input;
+            input.setData(bytes);
+            input.open(QIODevice::ReadOnly);
+            QImageReader reader(&input);
+            auto image=decodeCover(reader,size);
+            bool saved=false;
+            if(!image.isNull()&&!QFileInfo(path).isSymLink()){
+                QSaveFile file(path);
+                saved=file.open(QIODevice::WriteOnly)&&file.write(bytes)==bytes.size()&&file.commit();
+            }
+            QMetaObject::invokeMethod(this,[this,pending,saved,image=std::move(image)]()mutable{
+                if(saved&&!m_trim.isActive())m_trim.start();
+                if(pending)completeCover(pending,std::move(image));
+            },Qt::QueuedConnection);
+        });
+    });
+}
+
+void OnlineArtworkCache::completeCover(OnlineCoverResponse *response,QImage image) {
+    if(m_coverResponses.remove(response))response->complete(std::move(image));
 }
 QString OnlineArtworkCache::bestCover(const Entry &entry) const {
     if(entry.originalReady)return entry.originalPath;
@@ -68,7 +228,9 @@ void OnlineArtworkCache::setExpanded(bool expanded){if(m_expanded==expanded)retu
 void OnlineArtworkCache::setPresentationActive(bool active){
     if(m_presentationActive==active)return;m_presentationActive=active;
     if(active){m_decodeTicket=std::make_shared<std::atomic_bool>(true);m_prefetch.start(0);return;}
-    m_decodeTicket->store(false);m_decodePool.clear();m_decoding=0;
+    // Queued prefetches check this ticket before decoding. Keep the jobs for
+    // already requested artwork so they can finish writing their cache files.
+    m_decodeTicket->store(false);m_decoding=0;
     for(auto &entry:m_entries){entry.thumbnailPending=false;entry.originalPending=false;}
     m_prefetch.stop();
     // Only this object's artwork replies, never media/playback requests.
@@ -102,10 +264,8 @@ void OnlineArtworkCache::fetch(qint64 id,bool original){
     const auto source=original?entry.original:entry.thumbnail;if(source.isEmpty()||QDateTime::currentMSecsSinceEpoch()<(original?entry.originalRetryAt:entry.thumbnailRetryAt))return;
     const auto generation=entry.generation;const auto ticket=m_decodeTicket;const auto valid=entry.valid;
     if(original)entry.originalPending=true;else entry.thumbnailPending=true;
-    QNetworkRequest request(source);request.setTransferTimeout(15000);request.setAttribute(QNetworkRequest::Http2AllowedAttribute,false);
-    request.setRawHeader("User-Agent","Mozilla/5.0");request.setRawHeader("Referer",source.host().endsWith("gtimg.cn")?"https://y.qq.com/":source.host().endsWith("kugou.com")?"https://www.kugou.com/":source.host().contains("douyin")||source.host().contains("byte")?"https://music.douyin.com/":"https://music.163.com/");
-    auto *reply=m_network.get(request);reply->setProperty("artworkId",id);m_requests.insert(reply);
-    connect(reply,&QNetworkReply::downloadProgress,this,[reply](qint64 received,qint64 total){if(received>16*1024*1024||total>16*1024*1024)reply->abort();});
+    auto *reply=m_network.get(coverRequest(source));reply->setProperty("artworkId",id);m_requests.insert(reply);
+    boundCoverReply(reply);
     connect(reply,&QNetworkReply::finished,this,[this,id,original,source,reply,generation,ticket,valid]{
         m_requests.remove(reply);auto bytes=reply->isOpen()?reply->readAll():QByteArray();const bool ok=reply->error()==QNetworkReply::NoError;reply->deleteLater();
         auto it=m_entries.find(id);

@@ -61,6 +61,7 @@ public:
     RoundedMenu *addMenu(const QString &title);
     RoundedMenu *addMenu(const QIcon &icon, const QString &title);
 protected:
+    void mousePressEvent(QMouseEvent *) override;
     void paintEvent(QPaintEvent *) override;
     void showEvent(QShowEvent *) override;
     void resizeEvent(QResizeEvent *) override;

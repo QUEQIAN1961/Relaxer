@@ -18,6 +18,15 @@ Item {
     property bool compact:false
     property bool selected:false
     signal activated()
+    readonly property alias contextMenu:playlistEqMenu
+    MouseArea {
+        anchors.fill:parent;z:3;acceptedButtons:Qt.RightButton;enabled:!row.sorting
+        onClicked:mouse=>playlistEqMenu.popup(row,mouse.x,mouse.y)
+    }
+    RoundMenu {
+        id:playlistEqMenu;objectName:"playlistRowContext-"+row.playlistKey;parent:row.Overlay.overlay
+        RoundMenuItem {text:"歌单均衡器…";onTriggered:equalizerBridge.requestPlaylist(row.playlistKey)}
+    }
     height:36;clip:true
     readonly property string savedMarker:libraryBridge.playlistMarkers[playlistKey]||"icon:music"
     readonly property string marker:"mark-"+(savedMarker.startsWith("icon:")?savedMarker.slice(5):"music")

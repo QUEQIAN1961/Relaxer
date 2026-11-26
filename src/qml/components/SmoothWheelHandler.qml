@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 
 Item {
     id: wheel
@@ -82,6 +83,16 @@ Item {
         function onVisibleChanged() { if (!wheel.flickable.visible) wheel.stop() }
         function onHeightChanged() { wheel.constrainTarget() }
         function onContentHeightChanged() { wheel.constrainTarget() }
+    }
+    Connections {
+        target:wheel.flickable?wheel.flickable.Window.window:null
+        function onVisibilityChanged(){
+            const window=target
+            if(window&&(window.visibility===Window.Hidden||window.visibility===Window.Minimized)){
+                wheel.stop()
+                if(wheel.flickable.flicking)wheel.flickable.cancelFlick()
+            }
+        }
     }
     property Connections scrollbar: Connections {
         id: barConnection

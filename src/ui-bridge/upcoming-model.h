@@ -36,12 +36,20 @@ class UpcomingModel final : public QAbstractListModel {
     // Revalidates the displayed row against the engine immediately before the
     // command. A stale row can never start an unrelated forecast entry.
     Q_INVOKABLE bool activate(int row);
+    Q_INVOKABLE bool canMove(const QString &key,int direction) const;
+    Q_INVOKABLE bool moveTrack(const QString &key,int direction);
+    Q_INVOKABLE bool removeTracks(const QStringList &keys);
+    Q_INVOKABLE bool clearPending();
+    Q_INVOKABLE bool locateTrack(const QString &key);
+    Q_INVOKABLE QStringList selectableKeys() const;
     void refresh();
     // Counts this adapter's additional work, excluding the existing facade's
     // own snapshot reads. These are C++ diagnostics, not QML properties.
     quint64 metadataReadCount() const { return m_metadataReads; }
     quint64 forecastReadCount() const { return m_forecastReads; }
   signals:
+    void locateRequested(const QString &trackKey);
+    void operationFailed(const QString &message);
     void countChanged();
     void firstChanged();
     void aboutToActivate(int row, const QString &trackKey, const QUrl &coverUrl);

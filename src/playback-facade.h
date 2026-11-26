@@ -52,8 +52,9 @@ class PlaybackFacade final : public QObject {
         return (hash.startsWith("qqmusic:")?QStringLiteral("QQ 音乐"):hash.startsWith("kugou:")?QStringLiteral("酷狗音乐"):hash.startsWith("qishui:")?QStringLiteral("汽水音乐"):hash.startsWith("bilibili:")?QStringLiteral("哔哩哔哩"):QStringLiteral("网易云"))+QStringLiteral("在线播放");
     }
     QVector<qint64> upcoming();
-    void play(const QVector<qint64> &ids, qint64 start = 0);
+    void play(const QVector<qint64> &ids, qint64 start = 0,const QVariantMap &origin = {});
     void playOnline(const QVector<Track> &tracks, qint64 start);
+    void playMixedPlaylist(const QVector<Track> &tracks,qint64 start,const QVariantMap &origin);
     bool batchOnline(const QVector<Track> &tracks,const QString &action);
     bool enqueueTracks(const QVector<Track> &tracks,bool next);
     void setOnlineSource(qint64 id, const QUrl &url, const QMap<QByteArray,QByteArray> &headers={}, const QList<QUrl> &backups={});
@@ -68,9 +69,14 @@ class PlaybackFacade final : public QObject {
     void failOnlineSource(qint64 id, const QString &message, bool transient=false);
     void stopOnline();
     void toggle();
+    void pause();
     void next();
     void previous();
     void playUpcoming(int index);
+    bool editUpcoming(const QVector<qint64> &order);
+    QVector<qint64> editableUpcoming() const;
+    void rememberQueueOrigin(const QVector<qint64> &ids,const QVariantMap &origin);
+    QVariantMap queueOrigin(qint64 id) const;
     void seek(qint64 position);
     void setMode(Mode mode);
     void setVolume(int volume);
@@ -134,6 +140,7 @@ class PlaybackFacade final : public QObject {
     void updateOnlineVideoMode();
     void resetVideoFrame();
     void applyVideoSink();
+    QVariantMap m_queueOrigins;
     bool m_sharedQueueActive=false;
     QSet<qint64> m_queueFailures;
     Queue m_onlineQueue;
@@ -161,7 +168,7 @@ class PlaybackFacade final : public QObject {
     void applyOnlineResume();
     bool saveOnlineState();
     void requestOnlineCurrent(bool resume=false,bool retry=false,bool autoplay=true);
-    static bool isOnline(const Track &track){return track.hash.startsWith("netease:")||track.hash.startsWith("qqmusic:")||track.hash.startsWith("kugou:")||track.hash.startsWith("qishui:")||track.hash.startsWith("bilibili:");}
+    static bool isOnline(const Track &track){return isOnlineTrack(track);}
     void activateQueuedCurrent();
     void advanceShared(bool manual);
     void skipUnavailableCurrent(const QString &message);

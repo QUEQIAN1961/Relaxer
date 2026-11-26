@@ -26,7 +26,7 @@ inline QJsonArray summarizedChangelog(const QJsonArray &history) {
             if (candidate.hasMatch() && candidate.captured(1) == series)
                 details.append(item.at(2).toString());
         }
-        result.append(QJsonArray{QStringLiteral("V") + series + "-RC", entry.at(1), details.join("\n\n")});
+        result.append(QJsonArray{QStringLiteral("Relaxer V") + series + "-RC", entry.at(1), details.join("\n\n")});
     }
     return result;
 }

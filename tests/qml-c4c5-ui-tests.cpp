@@ -19,7 +19,8 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames().size(),1);QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void lyricHighlightScaleManualScrollAndRealSeek(){
-        Fixture f;QVERIFY(f.ok);auto *window=f.shell->window();auto *facade=f.shell->facade();QVERIFY(QMetaObject::invokeMethod(window,"showLyrics"));
+        Fixture f;QVERIFY(f.ok);auto *window=f.shell->window();auto *facade=f.shell->facade();
+        QTRY_VERIFY(f.shell->upcomingModel()->count()>0);QVERIFY(QMetaObject::invokeMethod(window,"showLyrics"));
         QTRY_COMPARE(f.shell->lyricsModel()->count(),80);QTRY_VERIFY(facade->seekable());f.shell->playbackBridge()->pause();facade->seek(3000);
         QTRY_COMPARE(f.shell->lyricsModel()->currentIndex(),3);
         QTRY_COMPARE(window->property("playerProgress").toReal(),1.);
@@ -51,7 +52,8 @@ private slots:
         QVERIFY2(f.shell->warnings().isEmpty(),qPrintable(f.shell->warnings().join('\n')));
     }
     void artworkResetsAndReduceMotionSettingsAreLive(){
-        Fixture f;QVERIFY(f.ok);auto *window=f.shell->window();QVERIFY(QMetaObject::invokeMethod(window,"showLyrics"));QTRY_VERIFY(!f.shell->lyricsModel()->cover().isEmpty());
+        Fixture f;QVERIFY(f.ok);auto *window=f.shell->window();
+        QTRY_VERIFY(f.shell->upcomingModel()->count()>0);QVERIFY(QMetaObject::invokeMethod(window,"showLyrics"));QTRY_VERIFY(!f.shell->lyricsModel()->cover().isEmpty());
         auto *art=visual(window->contentItem(),"currentArtwork");QVERIFY(art);QTRY_COMPARE(art->property("file").toUrl(),f.shell->playbackBridge()->coverUrl());
         f.shell->facade()->play({f.a.id,f.b.id},f.b.id);QTRY_COMPARE(f.shell->lyricsModel()->trackKey(),QString::number(f.b.id));
         QTRY_VERIFY(f.shell->lyricsModel()->cover().isEmpty());QTRY_COMPARE(art->property("file").toUrl(),QUrl());QTRY_VERIFY(art->isVisible());QVERIFY(art->property("imageUrl").toUrl().scheme()=="image");

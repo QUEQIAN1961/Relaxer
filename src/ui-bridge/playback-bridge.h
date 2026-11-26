@@ -101,7 +101,6 @@ class PlaybackBridge final : public QObject {
     void errorChanged();
     void failure(quint64 operation, const QString &target, const QString &title, const QString &message, int code);
     void persistenceFailure(const QString &message);
-    void onlineFavoriteRequested(qint64 id);
     void onlineArtworkDetailRequested(bool visible);
     void recovered();
   public:

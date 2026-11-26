@@ -11,7 +11,8 @@ Rectangle {
     property bool modeTransitionActive:false
     // Keep song and artist metadata throughout the mode animation, then
     // resume the usual hover and lyric presentation, whether playing or paused.
-    readonly property bool controlsVisible:!modeTransitionActive&&(miniHover.hovered||queue.visible||volumeControl.popupVisible)
+    property bool queueOpenPending:false
+    readonly property bool controlsVisible:!modeTransitionActive&&(miniHover.hovered||queueOpenPending||queue.visible||volumeControl.popupVisible)
     property real controlsProgress:controlsVisible?1:0
     Behavior on controlsProgress {enabled:!mini.modeTransitionActive;NumberAnimation{duration:settingsBridge.values.reduceMotion?0:160;easing.type:Easing.OutCubic}}
     property var lyricLine:({key:"",original:"",translation:"",start:0,end:0})
@@ -70,7 +71,7 @@ Rectangle {
     }
     HoverHandler {
         id:miniHover;objectName:"miniHoverHandler"
-        onHoveredChanged:if(!hovered&&queue.visible)Qt.callLater(function(){if(!queueHover.hovered)queue.close()})
+        onHoveredChanged:if(hovered)queueDismiss.stop();else if(queue.opened)queueDismiss.restart()
     }
     component MiniButton:IconButton {
         id:button;width:36;height:36;padding:6
@@ -88,7 +89,8 @@ Rectangle {
         }
         onDoubleClicked:mini.restoreRequested()
     }
-    function closeTransientPopups(){queue.close();volumeControl.closePopup()}
+    function closeQueue(){queueOpenPending=false;queue.close()}
+    function closeTransientPopups(){closeQueue();volumeControl.closePopup()}
     function transitionParts(){
         const entries=[{key:"cover",item:cover,kind:"art",alpha:1},
             {key:"title",item:titleLabel,kind:"text",alpha:showingLyrics?0:1-controlsProgress},{key:"artist",item:artistLabel,kind:"text",alpha:showingLyrics?0:1-controlsProgress},
@@ -97,7 +99,7 @@ Rectangle {
         const parts=[]
         for(const entry of entries){
             const item=entry.item,alpha=entry.alpha===undefined?controlsProgress*item.opacity:entry.alpha
-            if(alpha<=.01)continue
+            if(!item.visible||alpha<=.01)continue
             const point=item.mapToGlobal(0,0),text=entry.kind==="text"
             const w=text?Math.min(item.width,item.contentWidth+2):item.width
             parts.push({key:entry.key,kind:entry.kind||"icon",alpha:alpha,
@@ -108,12 +110,30 @@ Rectangle {
         }
         return parts
     }
-    function openQueue(){
-        // Keep the bar and its upward list together even near the screen top.
+    function fitQueueWindow(){
+        // Keep the bar and its upward list together, including the edit toolbar.
         const window=mini.Window.window
         uiIntegration.setWindowGeometry(Math.max(Screen.virtualX,Math.min(window.x,Screen.virtualX+Screen.width-window.width)),Math.max(Screen.virtualY+queue.fullHeight,Math.min(window.y,Screen.virtualY+Screen.height-window.height)),window.width,window.height)
-        queue.open()
     }
+    function showFittedQueue(){
+        if(!queueOpenPending)return
+        if(!presentationActive||modeTransitionActive||!upcomingModel.count){queueOpenPending=false;return}
+        if(mini.Window.window.y<Screen.virtualY+queue.fullHeight)return
+        queue.open()
+        queueOpenPending=false
+    }
+    function openQueue(){
+        if(!presentationActive||modeTransitionActive||!upcomingModel.count||queue.visible||queueOpenPending)return
+        queueOpenPending=true
+        fitQueueWindow()
+        // Apply native placement before creating the detached popup window.
+        Qt.callLater(mini.showFittedQueue)
+    }
+    Connections {
+        target:mini.Window.window
+        function onYChanged(){if(mini.queueOpenPending)Qt.callLater(mini.showFittedQueue)}
+    }
+    onPresentationActiveChanged:if(!presentationActive)queueOpenPending=false
     Image {
         anchors.fill:parent
         source:mini.presentationActive&&String(settingsBridge.palette.footerImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.footerImage))+"&blur="+Number(settingsBridge.palette.blurFooter||0):""
@@ -161,11 +181,9 @@ Rectangle {
         x:cover.x+cover.width+6+(mini.width-(cover.x+cover.width+6)-cover.x-width)/2
         opacity:mini.controlsProgress;visible:opacity>0;enabled:mini.controlsVisible
         MiniButton {
-            id:queueButton;objectName:"miniQueueButton";anchors.verticalCenter:parent.verticalCenter;text:"下一首列表"
-            property bool openedAtPress:false
+            id:queueButton;objectName:"miniQueueButton";visible:upcomingModel.count>0;anchors.verticalCenter:parent.verticalCenter;text:"下一首列表"
             contentItem:Item {Repeater{model:3;Rectangle{required property int index;x:0;y:5+index*6;width:8+index*6;height:2;radius:1;color:Theme.text}}}
-            onPressed:openedAtPress=queue.visible
-            onClicked:if(openedAtPress||queue.visible)queue.close();else mini.openQueue()
+            onClicked:if(queue.visible||mini.queueOpenPending)mini.closeQueue();else mini.openQueue()
         }
         MiniButton {id:favorite;objectName:"miniFavorite";anchors.verticalCenter:parent.verticalCenter;symbol:playbackBridge.currentFavorite?"liked":"heart";iconColor:playbackBridge.currentFavorite?Theme.accent:Theme.text;text:playbackBridge.currentFavorite?"取消喜欢":"喜欢歌曲";enabled:playbackBridge.available&&playbackBridge.hasTrack;onClicked:playbackBridge.toggleFavorite()}
         MiniButton {id:previous;objectName:"miniPrevious";anchors.verticalCenter:parent.verticalCenter;symbol:"previous";text:"上一首";enabled:playbackBridge.available&&playbackBridge.hasTrack;onClicked:playbackBridge.previous()}
@@ -178,20 +196,26 @@ Rectangle {
         MiniButton {id:playMode;objectName:"miniPlayMode";anchors.verticalCenter:parent.verticalCenter;symbol:["playlist","repeat","single","shuffle"][playbackBridge.mode];text:["顺序播放","列表循环","单曲循环","随机循环"][playbackBridge.mode];enabled:playbackBridge.available;onClicked:playbackBridge.setMode((playbackBridge.mode+1)%4)}
         VolumeButton {id:volumeControl;objectName:"miniVolume";anchors.verticalCenter:parent.verticalCenter;width:36;height:36;padding:6;popupOnHover:true}
     }
+    Connections{target:upcomingModel;function onCountChanged(){if(!upcomingModel.count)mini.closeQueue()}}
     Popup {
         id:queue;objectName:"miniQueuePopup";parent:mini;popupType:Popup.Window
-        readonly property int fullHeight:Math.max(1,Math.min(5,upcomingModel.count))*56+8
+        readonly property Item dismissalButton:queueButton
+        Component.onCompleted:uiIntegration.registerDismissOnlyPopup(queue)
+        readonly property int fullHeight:34+miniUpcoming.editingHeight+Math.max(1,Math.min(5,upcomingModel.count))*56+4
+        onFullHeightChanged:if(visible||mini.queueOpenPending)mini.fitQueueWindow()
         property real reveal:0
         width:mini.width;height:fullHeight;padding:0;margins:0
         x:0;y:-height
-        closePolicy:Popup.CloseOnEscape
+        closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutsideParent
         enter:Transition{NumberAnimation{target:queue;property:"reveal";from:0;to:1;duration:settingsBridge.values.reduceMotion?0:220;easing.type:Easing.OutCubic}}
-        onClosed:reveal=0
+        onOpened:miniUpcoming.forceActiveFocus()
+        onClosed:{reveal=0;miniUpcoming.resetEditing();queueDismiss.stop()}
         background:Item {}
         contentItem:Item {
             Item {
                 objectName:"miniQueueReveal";anchors.bottom:parent.bottom;width:parent.width;height:Math.round(queue.fullHeight*queue.reveal);clip:true
-                HoverHandler {id:queueHover;objectName:"miniQueueHover";onHoveredChanged:if(!hovered&&queue.visible)queue.close()}
+                HoverHandler {id:queueHover;objectName:"miniQueueHover";onHoveredChanged:if(hovered)queueDismiss.stop();else if(queue.opened)queueDismiss.restart()}
+                Timer{id:queueDismiss;interval:160;onTriggered:if(queue.opened&&!miniHover.hovered&&!queueHover.hovered&&!miniUpcoming.menuOpen&&!miniUpcoming.selectionMode)queue.close()}
                 Image {
                     id:queueBackdrop;objectName:"miniQueueBackdrop";anchors.fill:parent;visible:false
                     readonly property string file:String(settingsBridge.palette.footerImage).length?String(settingsBridge.palette.footerImage):String(playbackBridge.coverUrl)
@@ -202,9 +226,11 @@ Rectangle {
                 }
                 GlassSurface{objectName:"miniQueueGlass";anchors.fill:parent;backdrop:queueBackdrop;sampleRect:Qt.rect(0,0,queueBackdrop.width,queueBackdrop.height);tintOpacity:Theme.dark?.78:.76;active:queue.visible;radius:12;liquid:true}
                 UpcomingPanel {
-                    objectName:"miniUpcomingPanel";width:parent.width;height:queue.fullHeight;y:parent.height-height
-                    popupPresentation:true;expandedPlayer:true;showHeader:false;relocating:true;enabled:queue.opened
+                    id:miniUpcoming;objectName:"miniUpcomingPanel";width:parent.width;height:queue.fullHeight;y:parent.height-height
+                    popupPresentation:true;popupActive:queue.opened;detachedMenus:true;expandedPlayer:true;showHeader:true;relocating:true;enabled:queue.opened
+                    backdropSource:queueBackdrop;backdropRect:Qt.rect(0,0,width,height)
                     onActivated:queue.close()
+                    onDismissRequested:queue.close()
                 }
             }
         }

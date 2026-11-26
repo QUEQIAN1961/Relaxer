@@ -83,6 +83,7 @@ IconButton {
         width:Math.min(360,control.Window.window?control.Window.window.width-24:360)
         height:Math.min(340,Math.max(94,48+playbackBridge.audioOutputs.length*40),control.Window.window?control.Window.window.height-48:340)
         padding:0;margins:8;focus:true;modal:false;dim:false
+        Component.onCompleted:uiIntegration.registerDismissOnlyPopup(devicePopup)
         closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutside
         enter:Transition {NumberAnimation{property:"opacity";from:0;to:1;duration:settingsBridge.values.reduceMotion?0:160;easing.type:Easing.OutCubic}}
         exit:Transition {NumberAnimation{property:"opacity";to:0;duration:settingsBridge.values.reduceMotion?0:120;easing.type:Easing.InCubic}}

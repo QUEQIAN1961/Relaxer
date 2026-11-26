@@ -21,8 +21,31 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUuid>
+#include <QUrl>
 #include <QThread>
 namespace relaxer {
+namespace {
+QVariantList onlineEntryValues(const Track &track) {
+    QJsonObject metadata;
+    for(const auto &key:QStringList{"id","mid","mediaMid","songType","albumId","audioId","bvid"})
+        if(track.onlineMetadata.contains(key))metadata[key]=track.onlineMetadata.value(key);
+    const auto origin=track.onlineMetadata.value("queueOrigin").toObject();
+    if(!origin.isEmpty())metadata["queueOrigin"]=QJsonObject{
+        {"provider",origin.value("provider").toString()},{"kind",origin.value("kind").toString()},
+        {"id",origin.value("id").toString()},{"name",origin.value("name").toString()}};
+    auto cover=QUrl(track.onlineMetadata.value("thumbnail").toString());
+    if(cover.isEmpty())cover=QUrl(track.onlineMetadata.value("cover").toString());
+    if(cover.isEmpty())cover=QUrl(track.cover);
+    if((cover.scheme()!="https"&&cover.scheme()!="http")||cover.host().isEmpty()||!cover.userInfo().isEmpty())
+        cover=QUrl();
+    cover.setQuery(QString());
+    cover.setFragment(QString());
+    const auto title=track.onlineMetadata.value("videoTitle").toString(track.title);
+    const auto duration=track.onlineMetadata.value("fullDurationMs").toInteger(track.duration);
+    return {title,track.artist,track.album,cover.toString(),duration,track.requiresSubscription,
+            QString::fromUtf8(QJsonDocument(metadata).toJson(QJsonDocument::Compact))};
+}
+}
 Library::Library(QString root, QObject *p)
     : QObject(p), m_root(QDir(root).absolutePath()), m_connection(QUuid::createUuid().toString()) {}
 Library::~Library() {
@@ -141,6 +164,18 @@ bool Library::open(QString *error) {
         (!playlistColumns.contains("remote_count")&&!exec("ALTER TABLE playlists ADD COLUMN remote_count INTEGER NOT NULL DEFAULT 0")) ||
         !exec("CREATE UNIQUE INDEX IF NOT EXISTS cloud_playlist_source ON playlists(provider,remote_id) WHERE provider<>''") ||
         !exec("CREATE TABLE IF NOT EXISTS online_tracks(id INTEGER PRIMARY KEY,provider_key TEXT UNIQUE NOT NULL,title TEXT,artist TEXT,album TEXT,duration INTEGER DEFAULT 0,plays INTEGER DEFAULT 0,heard INTEGER DEFAULT 0)") ||
+        !exec("CREATE TABLE IF NOT EXISTS playlist_online_entries("
+              "playlist INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,"
+              "track INTEGER NOT NULL,provider_key TEXT NOT NULL,position INTEGER NOT NULL,"
+              "title TEXT,artist TEXT,album TEXT,cover TEXT,duration INTEGER NOT NULL,"
+              "subscription INTEGER NOT NULL,metadata TEXT NOT NULL,"
+              "PRIMARY KEY(playlist,track),UNIQUE(playlist,provider_key))") ||
+        !exec("CREATE TABLE IF NOT EXISTS online_favorites("
+              "provider_key TEXT NOT NULL PRIMARY KEY,track INTEGER NOT NULL UNIQUE,"
+              "title TEXT,artist TEXT,album TEXT,cover TEXT,duration INTEGER NOT NULL,"
+              "subscription INTEGER NOT NULL,metadata TEXT NOT NULL,added TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)") ||
+        !exec("CREATE TABLE IF NOT EXISTS favorite_download_links("
+              "provider_key TEXT NOT NULL PRIMARY KEY,track INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE)") ||
         !exec("CREATE TABLE IF NOT EXISTS online_sessions(id INTEGER PRIMARY KEY,track INTEGER REFERENCES online_tracks(id) ON DELETE CASCADE,heard INTEGER DEFAULT 0,duration INTEGER DEFAULT 0,sought INTEGER DEFAULT 0,counted INTEGER DEFAULT 0,finished INTEGER DEFAULT 0,updated TEXT DEFAULT CURRENT_TIMESTAMP)") ||
         !m_db.commit()) {
         if (m_error.isEmpty()) m_error = m_db.lastError().text();
@@ -209,6 +244,71 @@ QVector<Track> Library::tracks(qint64 list, const QString &f) const {
     }
     else { m_error = q.lastError().text(); emit queryFailed("tracks",m_error); }
     return r;
+}
+QVector<Track> Library::playlistEntries(qint64 playlist) const {
+    const bool favorites=playlist==-1;
+    QSqlQuery query(m_db);
+    const QString localColumns=
+        "SELECT t.id AS id,t.hash,t.file,t.title,t.artist,t.album,t.cover,t.lyrics,t.duration,t.plays,t.heard,"
+        "t.favorite,t.cover_origin,t.added AS added,";
+    const QString onlineColumns=
+        "SELECT e.track,e.provider_key,'',e.title,e.artist,e.album,e.cover,'',e.duration,"
+        "COALESCE(s.plays,0),COALESCE(s.heard,0),";
+    if(favorites){
+        query.prepare(localColumns+"0,NULL,NULL FROM tracks t WHERE t.favorite=1 UNION ALL "+
+            onlineColumns+"1,'',e.added,0,e.subscription,e.metadata "
+            "FROM online_favorites e LEFT JOIN online_tracks s ON s.provider_key=e.provider_key "
+            "ORDER BY added DESC,id DESC");
+    }else{
+        query.prepare(localColumns+"p.position AS position,NULL,NULL "
+            "FROM playlist_tracks p JOIN tracks t ON t.id=p.track WHERE p.playlist=? UNION ALL "+
+            onlineColumns+"0,'','',e.position,e.subscription,e.metadata "
+            "FROM playlist_online_entries e LEFT JOIN online_tracks s ON s.provider_key=e.provider_key "
+            "WHERE e.playlist=? ORDER BY position,id");
+        query.addBindValue(playlist);
+        query.addBindValue(playlist);
+    }
+    if(!query.exec()){
+        m_error=query.lastError().text();
+        emit queryFailed("playlistEntries",m_error);
+        return {};
+    }
+    QVector<Track> result;
+    while(query.next()){
+        auto track=fromQuery(query);
+        track.requiresSubscription=query.value(15).toBool();
+        track.onlineMetadata=QJsonDocument::fromJson(query.value(16).toByteArray()).object();
+        result.append(std::move(track));
+    }
+    emit querySucceeded("playlistEntries");
+    return result;
+}
+bool Library::containsPlaylistEntry(qint64 playlist,qint64 track) const {
+    QSqlQuery query(m_db);
+    if(playlist==-1){
+        query.prepare("SELECT 1 FROM tracks WHERE id=? AND favorite=1 "
+                      "UNION ALL SELECT 1 FROM online_favorites WHERE track=?");
+        query.addBindValue(track);
+        query.addBindValue(track);
+    }else{
+        query.prepare("SELECT 1 FROM playlist_tracks WHERE playlist=? AND track=? "
+                      "UNION ALL SELECT 1 FROM playlist_online_entries WHERE playlist=? AND track=?");
+        for(int i=0;i<2;++i){query.addBindValue(playlist);query.addBindValue(track);}
+    }
+    return query.exec()&&query.next();
+}
+QVector<Track> Library::searchEqualizerSongs(const QString &text,int limit,QString *error)const{
+    if(error)error->clear();
+    const auto terms=text.left(120).simplified().split(' ',Qt::SkipEmptyParts);if(terms.isEmpty())return {};
+    QString sql="SELECT id,hash,title,artist,album FROM tracks WHERE 1=1";
+    for(const auto &term:terms){Q_UNUSED(term);sql+=" AND (title LIKE ? ESCAPE '!' OR artist LIKE ? ESCAPE '!' OR album LIKE ? ESCAPE '!')";}
+    sql+=" ORDER BY title COLLATE NOCASE,id LIMIT ?";QSqlQuery query(m_db);
+    if(!query.prepare(sql)){m_error=query.lastError().text();if(error)*error=m_error;emit queryFailed("equalizer-song-search",m_error);return {};}
+    for(auto term:terms){term.replace("!","!!").replace("%","!%").replace("_","!_");for(int i=0;i<3;++i)query.addBindValue("%"+term+"%");}
+    query.addBindValue(qBound(1,limit,101));QVector<Track> rows;
+    if(!query.exec()){m_error=query.lastError().text();if(error)*error=m_error;emit queryFailed("equalizer-song-search",m_error);return {};}
+    while(query.next()){Track t;t.id=query.value(0).toLongLong();t.hash=query.value(1).toString();t.title=query.value(2).toString();t.artist=query.value(3).toString();t.album=query.value(4).toString();rows.append(std::move(t));}
+    emit querySucceeded("equalizer-song-search");return rows;
 }
 QVector<Track> Library::matchingTracks()const{
     QVector<Track> rows;QSqlQuery query(m_db);
@@ -346,7 +446,11 @@ qint64 Library::insertImportedTrack(const Track &t,bool *added) {
 }
 QVector<Playlist> Library::playlists() const {
     QSqlQuery q(m_db);
-    if (!q.exec("SELECT p.id,p.name,p.cover,CASE WHEN p.provider<>'' THEN p.remote_count ELSE COUNT(pt.track) END,COALESCE(SUM(t.plays),0),p.tags,p.description,p.provider,p.remote_id "
+    if (!q.exec("SELECT p.id,p.name,p.cover,CASE WHEN p.provider<>'' THEN p.remote_count ELSE COUNT(pt.track)+"
+           "(SELECT COUNT(*) FROM playlist_online_entries e WHERE e.playlist=p.id) END,"
+           "COALESCE(SUM(t.plays),0)+COALESCE((SELECT SUM(s.plays) FROM playlist_online_entries e "
+           "JOIN online_tracks s ON s.provider_key=e.provider_key WHERE e.playlist=p.id),0),"
+           "p.tags,p.description,p.provider,p.remote_id "
            "FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlist=p.id "
            "LEFT JOIN tracks t ON t.id=pt.track GROUP BY p.id ORDER BY p.id")) { m_error=q.lastError().text();emit queryFailed("playlists",m_error);return {}; }
     QVector<Playlist> r;
@@ -399,15 +503,16 @@ bool Library::playlistDescription(qint64 id, const QString &description) {
         return false;
     notifyChanged();return true;
 }
-qint64 Library::createPlaylist(const QString &name) {
-    if (name.trimmed().isEmpty() || !exec("INSERT INTO playlists(name) VALUES(?)", {name.trimmed()}))
-        return 0;
+qint64 Library::createPlaylist(const QString &name,const QVector<Track> &entries) {
+    const auto title=name.trimmed();
+    if(title.isEmpty()||characterCount(title)>120){m_error="请输入 1 至 120 字的歌单名称";return 0;}
+    if(!m_db.transaction()){m_error=m_db.lastError().text();return 0;}
     QSqlQuery q(m_db);
-    q.exec("SELECT last_insert_rowid()");
-    q.next();
-    auto id = q.value(0).toLongLong();
-    notifyChanged();
-    return id;
+    q.prepare("INSERT INTO playlists(name) VALUES(?)");
+    q.addBindValue(title);
+    if(!q.exec()){m_error=q.lastError().text();finishPlaylistEdit(false);return 0;}
+    const auto id=q.lastInsertId().toLongLong();
+    return finishPlaylistEdit(id>0&&(entries.isEmpty()||appendPlaylistEntries(id,entries)))?id:0;
 }
 bool Library::renamePlaylist(qint64 id, const QString &n) {
     if(!writablePlaylist(id))return false;
@@ -457,67 +562,181 @@ bool Library::playlistCover(qint64 id, const QString &path) {
     return ok;
 }
 bool Library::addToPlaylist(qint64 p, const QVector<qint64> &ids) {
+    QVector<Track> entries;
+    entries.reserve(ids.size());
+    for(auto id:ids){Track track;track.id=id;entries.append(track);}
+    return addPlaylistEntries(p,entries);
+}
+bool Library::finishPlaylistEdit(bool success) {
+    if(success&&m_db.commit()){notifyChanged();return true;}
+    if(success)m_error=m_db.lastError().text();
+    m_db.rollback();
+    return false;
+}
+bool Library::addPlaylistEntries(qint64 p,const QVector<Track> &entries) {
     if(!writablePlaylist(p))return false;
-    if (!m_db.transaction())
-        return false;
+    if(!m_db.transaction()){m_error=m_db.lastError().text();return false;}
+    return finishPlaylistEdit(appendPlaylistEntries(p,entries));
+}
+bool Library::appendPlaylistEntries(qint64 p,const QVector<Track> &entries) {
     QSqlQuery max(m_db);
-    max.prepare("SELECT COALESCE(MAX(position),-1)+1 FROM playlist_tracks WHERE playlist=?");
+    max.prepare("SELECT COALESCE(MAX(position),-1)+1 FROM ("
+                "SELECT MAX(position) AS position FROM playlist_tracks WHERE playlist=? UNION ALL "
+                "SELECT MAX(position) FROM playlist_online_entries WHERE playlist=?)");
     max.addBindValue(p);
-    max.exec();
-    max.next();
-    int pos = max.value(0).toInt();
-    for (auto id : ids)
-        if (!exec("INSERT OR IGNORE INTO playlist_tracks(playlist,track,position) VALUES(?,?,?)",
-                  {p, id, pos++})) {
-            m_db.rollback();
-            return false;
+    max.addBindValue(p);
+    if(!max.exec()||!max.next()){m_error=max.lastError().text();return false;}
+    auto position=max.value(0).toLongLong();
+    max.finish();
+    for(const auto &track:entries){
+        if(!isOnlineTrack(track)){
+            if(!exec("INSERT OR IGNORE INTO playlist_tracks(playlist,track,position) VALUES(?,?,?)",
+                     {p,track.id,position++}))return false;
+            continue;
         }
-    if (!m_db.commit())
-        return false;
-    notifyChanged();
+        const QVariantList values=QVariantList{p,track.id,track.hash,position++}+onlineEntryValues(track);
+        if(!exec("INSERT INTO playlist_online_entries(playlist,track,provider_key,position,title,artist,album,cover,duration,subscription,metadata) "
+                 "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(playlist,provider_key) DO UPDATE SET "
+                 "title=excluded.title,artist=excluded.artist,album=excluded.album,"
+                 "cover=COALESCE(NULLIF(excluded.cover,''),cover),duration=excluded.duration,"
+                 "subscription=excluded.subscription,metadata=excluded.metadata",
+                 values))
+            return false;
+    }
     return true;
 }
 bool Library::removeFromPlaylist(qint64 p, const QVector<qint64> &ids) {
     if(!writablePlaylist(p))return false;
     if (!m_db.transaction())
         return false;
-    for (auto id : ids)
-        if (!exec("DELETE FROM playlist_tracks WHERE playlist=? AND track=?", {p, id})) {
-            m_db.rollback();
-            return false;
-        }
-    bool ok = m_db.commit();
-    if (ok)
-        notifyChanged();
-    return ok;
+    for(auto id:ids)
+        if(!exec("DELETE FROM playlist_tracks WHERE playlist=? AND track=?",{p,id})||
+           !exec("DELETE FROM playlist_online_entries WHERE playlist=? AND track=?",{p,id}))
+            return finishPlaylistEdit(false);
+    return finishPlaylistEdit(true);
 }
-bool Library::reorder(qint64 p, const QVector<qint64> &ids) {
+bool Library::reorder(qint64 p,const QVector<qint64> &ids,bool includeOnline) {
     if(!writablePlaylist(p))return false;
-    auto old = tracks(p);
-    QSet<qint64> expected, got;
-    for (const auto &t : old)
-        expected.insert(t.id);
-    for (auto id : ids)
-        got.insert(id);
-    if (expected != got || ids.size() != got.size())
-        return false;
-    if (!m_db.transaction())
-        return false;
-    for (int i = 0; i < ids.size(); ++i)
-        if (!exec("UPDATE playlist_tracks SET position=? WHERE playlist=? AND track=?", {i, p, ids[i]})) {
-            m_db.rollback();
-            return false;
-        }
-    bool ok = m_db.commit();
-    if (ok)
-        notifyChanged();
-    return ok;
+    if(!m_db.transaction()){m_error=m_db.lastError().text();return false;}
+    QSqlQuery query(m_db);
+    QString sql="SELECT track,position,0 AS remote FROM playlist_tracks WHERE playlist=?";
+    if(includeOnline)sql+=" UNION ALL SELECT track,position,1 FROM playlist_online_entries WHERE playlist=?";
+    query.prepare(sql+" ORDER BY position,track");
+    query.addBindValue(p);
+    if(includeOnline)query.addBindValue(p);
+    if(!query.exec()){m_error=query.lastError().text();return finishPlaylistEdit(false);}
+    QSet<qint64> expected,remote;
+    QVector<qint64> positions;
+    while(query.next()){
+        const auto id=query.value(0).toLongLong();
+        expected.insert(id);positions.append(query.value(1).toLongLong());
+        if(query.value(2).toBool())remote.insert(id);
+    }
+    query.finish();
+    if(positions.size()!=ids.size()||expected!=QSet<qint64>(ids.begin(),ids.end())){
+        m_error="歌单内容已改变，请刷新后重试";
+        return finishPlaylistEdit(false);
+    }
+    for(qsizetype i=0;i<ids.size();++i){
+        const auto statement=remote.contains(ids[i])?
+            "UPDATE playlist_online_entries SET position=? WHERE playlist=? AND track=?":
+            "UPDATE playlist_tracks SET position=? WHERE playlist=? AND track=?";
+        // The compatibility UI reorders its local projection in the same slots.
+        if(!exec(statement,{includeOnline?qint64(i):positions[i],p,ids[i]}))return finishPlaylistEdit(false);
+    }
+    return finishPlaylistEdit(true);
 }
 bool Library::favorite(qint64 id, bool v) {
     bool ok = exec("UPDATE tracks SET favorite=? WHERE id=?", {v, id});
-    if (ok)
+    if(ok){
+        emit onlineFavoritesChanged();
         notifyChanged();
+    }
     return ok;
+}
+bool Library::onlineFavorite(const QString &key) const {
+    QSqlQuery query(m_db);
+    query.prepare("SELECT 1 FROM online_favorites WHERE provider_key=? UNION ALL "
+                  "SELECT 1 FROM favorite_download_links d JOIN tracks t ON t.id=d.track "
+                  "WHERE d.provider_key=? AND t.favorite=1");
+    query.addBindValue(key);
+    query.addBindValue(key);
+    return query.exec()&&query.next();
+}
+QSet<QString> Library::onlineFavoriteKeys(bool includeLocalDownloads) const {
+    QSet<QString> keys;
+    QSqlQuery query(m_db);
+    QString statement="SELECT provider_key FROM online_favorites";
+    if(includeLocalDownloads)statement+=" UNION SELECT d.provider_key FROM favorite_download_links d "
+                                       "JOIN tracks t ON t.id=d.track WHERE t.favorite=1";
+    if(query.exec(statement))
+        while(query.next())keys.insert(query.value(0).toString());
+    return keys;
+}
+qint64 Library::downloadedFavoriteTrackId(const QString &key) const {
+    QSqlQuery query(m_db);
+    query.prepare("SELECT track FROM favorite_download_links WHERE provider_key=?");
+    query.addBindValue(key);
+    return query.exec()&&query.next()?query.value(0).toLongLong():0;
+}
+bool Library::linkFavoriteDownload(const QString &key,qint64 localId){
+    const auto local=track(localId);
+    const QFileInfo file(absolute(local.file));
+    if(!local.id||!file.isFile()||file.size()<=0){
+        m_error="找不到已导入的本地音频";
+        return false;
+    }
+    if(!m_db.transaction()){m_error=m_db.lastError().text();return false;}
+    const bool stored=exec("INSERT INTO favorite_download_links(provider_key,track) VALUES(?,?) "
+                           "ON CONFLICT(provider_key) DO UPDATE SET track=excluded.track",{key,localId})&&
+        exec("UPDATE tracks SET favorite=1 WHERE id=? AND EXISTS("
+             "SELECT 1 FROM online_favorites WHERE provider_key=?)",{localId,key})&&
+        exec("DELETE FROM online_favorites WHERE provider_key=?",{key});
+    if(!stored){m_db.rollback();return false;}
+    if(!m_db.commit()){m_error=m_db.lastError().text();m_db.rollback();return false;}
+    emit onlineFavoritesChanged();
+    notifyChanged();
+    return true;
+}
+bool Library::setTrackFavorites(const QVector<Track> &entries,bool value){
+    if(entries.isEmpty())return false;
+    if(!m_db.transaction()){m_error=m_db.lastError().text();return false;}
+    bool local=false,online=false;
+    for(const auto &entry:entries){
+        bool ok;
+        if(isOnlineTrack(entry)){
+            const auto key=entry.hash.section(':',1);
+            if(entry.id<=0||key.trimmed().isEmpty()){
+                m_error="缺少平台曲目标识";
+                m_db.rollback();
+                return false;
+            }
+            if(const auto localId=downloadedFavoriteTrackId(entry.hash);localId){
+                ok=exec("UPDATE tracks SET favorite=? WHERE id=?",{value,localId});
+                local=true;
+            }else{
+                const auto stable=stableAdditionalTrackId(entry.hash);
+                ok=value?exec("INSERT INTO online_favorites(provider_key,track,title,artist,album,cover,duration,subscription,metadata) "
+                              "VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(provider_key) DO NOTHING",
+                              QVariantList{entry.hash,stable?stable:entry.id}+onlineEntryValues(entry)):
+                         exec("DELETE FROM online_favorites WHERE provider_key=?",{entry.hash});
+            }
+            online=true;
+        }else{
+            if(!track(entry.id).id){
+                m_error="歌曲不存在";
+                m_db.rollback();
+                return false;
+            }
+            ok=exec("UPDATE tracks SET favorite=? WHERE id=?",{value,entry.id});
+            local=true;
+        }
+        if(!ok){m_db.rollback();return false;}
+    }
+    if(!m_db.commit()){m_error=m_db.lastError().text();m_db.rollback();return false;}
+    if(online||local)emit onlineFavoritesChanged();
+    if(local)notifyChanged();
+    return true;
 }
 bool Library::remove(const QVector<qint64> &ids) {
     if (!m_db.transaction())
@@ -529,14 +748,16 @@ bool Library::remove(const QVector<qint64> &ids) {
             return false;
         }
     bool ok = m_db.commit();
-    if (ok)
+    if(ok){
+        emit onlineFavoritesChanged();
         notifyChanged();
+    }
     return ok;
 }
 bool Library::favorites(const QVector<qint64> &ids,bool value){
     if(!m_db.transaction())return false;
     for(auto id:ids)if(!track(id).id||!exec("UPDATE tracks SET favorite=? WHERE id=?",{value,id})){m_db.rollback();return false;}
-    const bool ok=m_db.commit();if(ok)notifyChanged();return ok;
+    const bool ok=m_db.commit();if(ok){emit onlineFavoritesChanged();notifyChanged();}return ok;
 }
 bool Library::removeManaged(const QVector<qint64> &ids){
     m_error.clear();if(ids.isEmpty())return true;
@@ -568,6 +789,7 @@ bool Library::removeManaged(const QVector<qint64> &ids){
     for(auto id:selected)if(!exec("DELETE FROM tracks WHERE id=?",{id})||!exec("DELETE FROM settings WHERE key=?",{QString("lyrics.translationJudgment.v1.%1").arg(id)})){undo();return false;}
     if(!m_db.commit()){m_error=m_db.lastError().text();undo();return false;}
     for(const auto &pair:staged)if(!QFile::remove(pair.second))m_error="歌曲已从资料库删除，但部分副本暂时未能清理";
+    emit onlineFavoritesChanged();
     notifyChanged();return true;
 }
 namespace {

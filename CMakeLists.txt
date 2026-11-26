@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Relaxer VERSION 0.2.6 LANGUAGES CXX)
+project(Relaxer VERSION 0.2.7 LANGUAGES CXX)
 include(CTest)
 set(RELAXER_QT_TEST_COMPONENT)
 if(BUILD_TESTING)
@@ -195,14 +195,20 @@ relaxer_add_qt_test(relaxer_lyrics_replacement_policy relaxer_lyrics_replacement
 endif()
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Sql Multimedia ${RELAXER_QT_TEST_COMPONENT})
 add_library(relaxer_core src/artwork-recovery.cpp src/library.cpp src/storage/settings-store.cpp src/storage/appearance-store.cpp src/appearance-image.cpp src/importer.cpp src/import-coordinator.cpp src/lyrics.cpp src/lyrics-document-reader.cpp src/lyric-text.cpp src/playback.cpp src/midi-transport.cpp)
+add_library(relaxer_audio_dsp SHARED src/audio/parametric-equalizer.cpp src/audio/peq-api.h src/build-identity.cpp)
+set_target_properties(relaxer_audio_dsp PROPERTIES PREFIX "" OUTPUT_NAME "RelaxerAudioDsp")
+target_compile_definitions(relaxer_audio_dsp PRIVATE RELAXER_DSP_BUILD=1)
+target_include_directories(relaxer_audio_dsp PUBLIC src)
+target_link_libraries(relaxer_core PUBLIC relaxer_audio_dsp)
 target_sources(relaxer_core PRIVATE src/fluid-midi-backend.cpp src/fluid-midi-backend.h)
 set(RELAXER_MIDI_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.dependencies/midi" CACHE PATH "Prepared local FluidSynth MIDI runtime")
 if(WIN32 AND EXISTS "${RELAXER_MIDI_RUNTIME_DIR}/runtime-midi.json")
+  file(GLOB relaxer_midi_runtime_dlls "${RELAXER_MIDI_RUNTIME_DIR}/*.dll")
   add_custom_target(relaxer_midi_runtime
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/midi" "${CMAKE_BINARY_DIR}/licenses/midi"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/libfluidsynth-3.dll" "${RELAXER_MIDI_RUNTIME_DIR}/runtime-midi.json" "${CMAKE_BINARY_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${relaxer_midi_runtime_dlls} "${RELAXER_MIDI_RUNTIME_DIR}/runtime-midi.json" "${CMAKE_BINARY_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/midi/GeneralUser-GS.sf2" "${CMAKE_BINARY_DIR}/midi"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/FluidSynth-LGPL-2.1.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GCEM-MIT.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GeneralUser-GS-License.txt" "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi/GeneralUser-GS-README.md" "${CMAKE_BINARY_DIR}/licenses/midi")
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${RELAXER_MIDI_RUNTIME_DIR}/licenses/midi" "${CMAKE_BINARY_DIR}/licenses/midi")
   add_dependencies(relaxer_core relaxer_midi_runtime)
 elseif(WIN32)
   message(STATUS "MIDI runtime not staged: run python scripts/prepare-midi-runtime.py before MIDI playback")
@@ -541,7 +547,7 @@ if(RELAXER_ENABLE_QML)
     src/ui-bridge/ui-graphics-policy.cpp src/ui-bridge/ui-graphics-policy.h
     src/ui-bridge/queue-model.cpp src/ui-bridge/queue-model.h
     src/ui-bridge/lyrics-model.cpp src/ui-bridge/lyrics-model.h
-    src/ui-bridge/settings-bridge.cpp src/ui-bridge/settings-bridge.h
+    src/ui-bridge/equalizer-bridge.cpp src/ui-bridge/equalizer-bridge.h src/ui-bridge/midi-settings.cpp src/ui-bridge/settings-bridge.cpp src/ui-bridge/settings-bridge.h
     src/ui-bridge/import-bridge.cpp src/ui-bridge/import-bridge.h
     src/ui-bridge/ai-bridge.cpp src/ui-bridge/ai-bridge.h
     src/ui-bridge/translation-bridge.cpp src/ui-bridge/translation-bridge.h
@@ -616,6 +622,7 @@ if(RELAXER_ENABLE_QML)
   target_link_libraries(relaxer_optional_qml PUBLIC Qt6::Core)
   target_link_libraries(Relaxer PRIVATE relaxer_optional_qml)
   add_dependencies(Relaxer relaxer_qml_runtime)
+  include(scripts/peq-backend.cmake)
   target_compile_definitions(Relaxer PRIVATE RELAXER_ENABLE_QML=1
     RELAXER_QML_MODULE_FILENAME="$<TARGET_FILE_NAME:relaxer_qml_runtime>")
   if(BUILD_TESTING)

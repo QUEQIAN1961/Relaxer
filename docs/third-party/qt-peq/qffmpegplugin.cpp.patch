@@ -1,0 +1,21 @@
+--- upstream/qffmpegplugin.cpp
++++ relaxer/qffmpegplugin.cpp
+@@ -3,7 +3,8 @@
+ 
+ #include <QtMultimedia/private/qplatformmediaplugin_p.h>
+ 
+-#include <qffmpegmediaintegration_p.h>
++#include <QtFFmpegMediaPluginImpl/private/qffmpegmediaintegration_p.h>
++#include "audio/peq-api.h"
+ 
+ QT_BEGIN_NAMESPACE
+ 
+@@ -13,6 +14,8 @@
+     Q_PLUGIN_METADATA(IID QPlatformMediaPlugin_iid FILE "ffmpeg.json")
+ 
+ public:
++    QFFmpegMediaPlugin(){relaxer::audio::relaxer_peq_media_bridge(1);}
++    ~QFFmpegMediaPlugin()override{relaxer::audio::relaxer_peq_media_bridge(0);}
+     QPlatformMediaIntegration *create(const QString &name) override
+     {
+         if (name == u"ffmpeg")

@@ -31,7 +31,8 @@ Item {
     property Item largeArtwork:page.pictureVideo?videoCover:art
     property bool toolsVisible:false
     property bool delayOpen:false
-    readonly property bool presentationActive:visible&&(!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
+    readonly property bool windowActive:!Window.window||(Window.window.visible&&Window.window.visibility!==Window.Minimized)
+    readonly property bool presentationActive:visible&&windowActive
     function updateArtworkQuality(){playbackBridge.setHighResolutionArtwork(presentationActive&&!artworkTravelling)}
     onPresentationActiveChanged:{updateArtworkQuality();if(presentationActive)bilibili.ensureVideoParts()}
     onArtworkTravellingChanged:updateArtworkQuality()
@@ -55,11 +56,17 @@ Item {
         id:playerBackdrop
         objectName:"playerBackdrop"
         anchors.fill:parent
-        source:!page.visible ? "" : settingsBridge.values.playerCoverBackground ? "image://relaxer/blur?file="+encodeURIComponent(playbackBridge.coverUrl)+"&seed="+encodeURIComponent(playbackBridge.hasTrack?playbackBridge.title:"Relaxer")+"&rev="+playbackBridge.artworkRevision+"&blur="+Number(settingsBridge.palette.blurExpanded||0) : String(settingsBridge.palette.expandedImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.expandedImage))+"&blur="+Number(settingsBridge.palette.blurExpanded||0):""
+        property bool hasBackdrop:false
+        Binding {
+            target:playerBackdrop;property:"source"
+            when:page.windowActive||!page.visible;restoreMode:Binding.RestoreNone
+            value:!page.visible ? "" : settingsBridge.values.playerCoverBackground ? "image://relaxer/blur?file="+encodeURIComponent(playbackBridge.coverUrl)+"&seed="+encodeURIComponent(playbackBridge.hasTrack?playbackBridge.title:"Relaxer")+"&rev="+playbackBridge.artworkRevision+"&blur="+Number(settingsBridge.palette.blurExpanded||0) : String(settingsBridge.palette.expandedImage||"").length?"image://relaxer/background?file="+encodeURIComponent(String(settingsBridge.palette.expandedImage))+"&blur="+Number(settingsBridge.palette.blurExpanded||0):""
+        }
         asynchronous:true;cache:false;retainWhileLoading:true
         sourceSize.width:720;sourceSize.height:720;fillMode:Image.PreserveAspectCrop
         visible:source.toString().length>0
-        opacity:status===Image.Ready?1:0
+        onStatusChanged:if(status!==Image.Loading)hasBackdrop=status===Image.Ready
+        opacity:hasBackdrop?1:0
         Behavior on opacity {NumberAnimation {duration:settingsBridge.values.reduceMotion?0:180}}
     }
     Rectangle{anchors.fill:parent;color:Theme.background;opacity:settingsBridge.values.playerCoverBackground?.68:0}

@@ -8,7 +8,8 @@ Item {
     property bool firstFramePresented:false
     Connections {
         target:header.Window.window
-        function onFrameSwapped(){if(header.visible)header.firstFramePresented=true}
+        enabled:header.visible&&!header.firstFramePresented
+        function onFrameSwapped(){header.firstFramePresented=true}
     }
     property var details: ({})
     property string playlistName: ""

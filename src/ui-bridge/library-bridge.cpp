@@ -2,6 +2,7 @@
 #include "online-music-bridge.h"
 #include "qq-music-bridge.h"
 #include "online-track-matcher.h"
+#include <algorithm>
 #include <QThread>
 #include <QDesktopServices>
 #include <QDir>
@@ -17,6 +18,54 @@
 #include <QDateTime>
 
 namespace relaxer {
+namespace {
+Track trackFromDiscovery(const QString &provider,const QVariantMap &row,const QVariantMap &origin){
+    const auto remoteId=row.value("id").toString().trimmed();
+    const auto key=provider=="qq"?row.value("mid").toString().trimmed():remoteId;
+    if(remoteId.isEmpty()||key.isEmpty()||key.size()>256)return {};
+    Track track;
+    track.hash=(provider=="qq"?QString("qqmusic"):provider)+":"+key;
+    if(provider=="qq"||provider=="netease"){
+        bool ok=false;
+        const auto id=remoteId.toLongLong(&ok);
+        if(!ok||id<=0||id>=OnlineMusicBridge::TrackBase)return {};
+        track.id=id+(provider=="qq"?QqMusicBridge::TrackBase:OnlineMusicBridge::TrackBase);
+    }else if(provider=="kugou"||provider=="qishui"){
+        track.id=stableAdditionalTrackId(track.hash);
+        track.file=remoteId;
+    }else if(provider=="bilibili"){
+        track.id=bilibiliTrackId(remoteId);
+        track.file=remoteId;
+    }else return {};
+    track.title=row.value("title").toString();
+    track.artist=row.value("artist").toString();
+    track.album=row.value("album").toString();
+    track.cover=row.value("thumbnail",row.value("cover")).toString();
+    track.duration=row.value("duration").toLongLong();
+    track.requiresSubscription=row.value("requiresSubscription").toBool();
+    track.onlineMetadata=QJsonObject::fromVariantMap(row);
+    track.onlineMetadata["id"]=remoteId;
+    track.onlineMetadata["queueOrigin"]=QJsonObject{{"provider",provider},
+        {"kind",origin.value("kind","playlist").toString()},{"id",origin.value("id").toString()},
+        {"name",origin.value("name").toString()}};
+    return track;
+}
+QVector<Track> discoveryEntries(const QString &provider,const QVariantList &songs,const QVariantMap &origin){
+    QVector<Track> tracks;
+    tracks.reserve(songs.size());
+    for(const auto &song:songs){
+        auto track=trackFromDiscovery(provider,song.toMap(),origin);
+        if(!track.id)return {};
+        tracks.append(std::move(track));
+    }
+    return tracks;
+}
+void setCustomPlaylistOrigin(Track &track,const QString &key){
+    auto origin=track.onlineMetadata.value("queueOrigin").toObject();
+    origin["customPlaylistKey"]=key;
+    track.onlineMetadata["queueOrigin"]=origin;
+}
+}
 LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackListModel *source,
     TrackFilterModel *view, PlaylistListModel *playlists, QObject *parent)
     : QObject(parent), m_library(library), m_facade(facade), m_source(source), m_view(view), m_playlists(playlists) {
@@ -33,6 +82,10 @@ LibraryBridge::LibraryBridge(Library *library, PlaybackFacade *facade, TrackList
     });
     connect(library, &Library::changed, this, [this] {
         refreshStatistics(); emit profileChanged(); emit playlistChanged();
+    });
+    connect(library,&Library::onlineFavoritesChanged,this,[this]{
+        ++m_onlineFavoritesRevision;
+        emit onlineFavoritesChanged();
     });
     connect(library, &Library::settingsUpdated, this, [this](const QStringList &keys) {
         if (keys.contains("qml.playlistMarkers")) emit playlistMarkersChanged();
@@ -144,9 +197,15 @@ bool LibraryBridge::setCloudPlaylistRemark(const QString &key,const QString &rem
 void LibraryBridge::setCloudSongs(const QString &provider,const QVariantMap &playlist,const QVariantList &songs){
     if(playlist.value("kind")=="artist"||playlist.value("kind")=="album")return;
     const auto cloud=cloudPlaylist(playlistId());if(cloud.value("provider").toString()!=provider||cloud.value("id")!=playlist.value("id"))return;
-    const auto base=provider=="qq"?QqMusicBridge::TrackBase:OnlineMusicBridge::TrackBase;QVector<Track> tracks;
+    QVector<Track> tracks;
     const auto local=m_library->tracks();QHash<qint64,Track> localStats;for(const auto &t:local)localStats.insert(t.id,t);QHash<QString,Track> onlineStats;for(const auto &t:m_library->onlineTracks())onlineStats.insert(t.hash,t);
-    for(const auto &value:songs){const auto row=value.toMap();Track t;t.onlineMetadata=QJsonObject::fromVariantMap(row);t.id=row.contains("internalId")?row.value("internalId").toLongLong():base+row.value("id").toLongLong();if(row.contains("internalId"))t.file=row.value("id").toString();t.title=row.value("title").toString();t.artist=row.value("artist").toString();t.album=row.value("album").toString();t.duration=row.value("duration").toLongLong();t.cover=row.value("thumbnail",row.value("cover")).toString();t.hash=provider=="qq"?"qqmusic:"+row.value("mid").toString():provider+":"+row.value("id").toString();t.requiresSubscription=row.value("requiresSubscription").toBool();t.matchedLocalId=matchOnlineTrack(t,local);const auto stats=t.matchedLocalId?localStats.value(t.matchedLocalId):onlineStats.value(t.hash);t.plays=stats.plays;t.heard=stats.heard;tracks.append(t);}
+    for(const auto &value:songs){
+        auto track=trackFromDiscovery(provider,value.toMap(),playlist);
+        if(!track.id)continue;
+        track.matchedLocalId=matchOnlineTrack(track,local);
+        const auto stats=track.matchedLocalId?localStats.value(track.matchedLocalId):onlineStats.value(track.hash);
+        track.plays=stats.plays;track.heard=stats.heard;tracks.append(std::move(track));
+    }
     m_source->setCloudTracks(m_source->playlist(),tracks);
     const auto name=playlist.value("name").toString(),cover=playlist.value("cover").toString();const auto count=playlist.value("count").toInt();
     if(!name.isEmpty()&&(name!=cloud.value("name").toString()||cover!=cloud.value("cover").toString()||count!=cloud.value("count").toInt()))m_library->pinCloudPlaylist(provider,cloud.value("id").toString(),name,cover,count);
@@ -158,15 +217,40 @@ void LibraryBridge::play(const QString &id) {
     const auto cloud=cloudPlaylist(playlistId());if(!cloud.isEmpty()){const auto base=cloud.value("provider").toString()=="qq"?QqMusicBridge::TrackBase:OnlineMusicBridge::TrackBase;const auto provider=cloud.value("provider").toString();
         const auto remoteId=[&](qint64 value){return provider=="kugou"||provider=="qishui"||provider=="bilibili"?m_source->data(m_source->index(m_source->rowForId(value)),TrackListModel::File).toString():QString::number(value-base);};
         QStringList remote;for(auto id:ids)remote.append(remoteId(id));result(true);emit cloudPlayRequested(provider,remote,remoteId(track));return;}
-    result(true); m_facade->play(ids, track);
+    const QVariantMap origin{{"provider","local"},{"localKey",playlistId()}};
+    if(m_source->hasOnlineEntries()){
+        QVector<Track> entries;
+        bool mixed=false;
+        for(auto key:ids){
+            auto item=m_source->trackAt(m_source->rowForId(key));
+            if(isOnlineTrack(item)){setCustomPlaylistOrigin(item,playlistId());mixed=true;}
+            if(item.id)entries.append(std::move(item));
+        }
+        if(mixed){result(true);m_facade->playMixedPlaylist(entries,track,origin);return;}
+    }
+    result(true);m_facade->play(ids,track,origin);
+    m_facade->rememberQueueOrigin(ids,origin);
 }
 bool LibraryBridge::enqueueNext(const QStringList &keys){
-    QVector<Track> tracks;for(const auto &key:keys){const auto item=m_source->trackAt(m_source->rowForId(key.toLongLong()));if(item.id)tracks.append(item);}
-    return result(m_facade&&m_facade->enqueueTracks(tracks,true),"没有可加入下一首的歌曲");
+    return enqueuePlaylistEntries(keys,true);
 }
 bool LibraryBridge::appendQueue(const QStringList &keys){
-    QVector<Track> tracks;for(const auto &key:keys){const auto item=m_source->trackAt(m_source->rowForId(key.toLongLong()));if(item.id)tracks.append(item);}
-    return result(m_facade&&m_facade->enqueueTracks(tracks,false),"没有可加入队列的歌曲");
+    return enqueuePlaylistEntries(keys,false);
+}
+bool LibraryBridge::enqueuePlaylistEntries(const QStringList &keys,bool next){
+    QVector<Track> entries;
+    QVector<qint64> localIds;
+    const auto cloud=cloudPlaylist(playlistId());
+    for(const auto &key:keys){
+        auto item=m_source->trackAt(m_source->rowForId(key.toLongLong()));
+        if(!item.id)continue;
+        if(!isOnlineTrack(item))localIds.append(item.id);
+        else if(cloud.isEmpty()&&(m_source->playlist()>0||m_source->playlist()==-1))setCustomPlaylistOrigin(item,playlistId());
+        entries.append(std::move(item));
+    }
+    const bool ok=m_facade&&m_facade->enqueueTracks(entries,next);
+    if(ok&&!localIds.isEmpty())m_facade->rememberQueueOrigin(localIds,{{"provider","local"},{"localKey",playlistId()}});
+    return result(ok,next?"没有可加入下一首的歌曲":"没有可加入队列的歌曲");
 }
 void LibraryBridge::playAll() {
     if (m_view->count()) play(m_view->idAt(0));
@@ -181,6 +265,28 @@ QStringList LibraryBridge::visibleTrackKeys() const {
     QStringList keys;
     for (auto id : m_view->ids()) keys.append(QString::number(id));
     return keys;
+}
+QVariantMap LibraryBridge::queueLocation(const QString &id){
+    if(!m_facade||!m_library||!m_facade->queue().items.contains(id.toLongLong()))return {};
+    const auto track=m_facade->track(id.toLongLong());if(!track.id){result(false,"歌曲已从资料库移除");return {};}
+    auto origin=m_facade->queueOrigin(track.id);const auto provider=origin.value("provider").toString();
+    origin["trackKey"]=id;origin["title"]=track.title;
+    const auto custom=origin.value("customPlaylistKey").toString();
+    if(!custom.isEmpty()&&m_library->containsPlaylistEntry(custom.toLongLong(),track.id)){
+        origin["destination"]="local";origin["localKey"]=custom;return origin;
+    }
+    if(provider=="local"){
+        if(!m_library->track(track.id).id){result(false,"歌曲已从资料库移除");return {};}
+        auto key=origin.value("localKey","0").toString();const auto value=key.toLongLong();
+        if(value>0&&!m_library->containsPlaylistEntry(value,track.id)){key="0";origin["notice"]="歌曲已不在来源歌单，已定位到本地音乐";}
+        origin["destination"]="local";origin["localKey"]=key;return origin;
+    }
+    if(!QStringList{"netease","qq","qishui","kugou","bilibili"}.contains(provider)){result(false,"无法识别歌曲的来源平台");return {};}
+    const auto remote=origin.value("id").toString();const auto kind=origin.value("kind","playlist").toString();
+    if(kind=="playlist"&&!remote.isEmpty())for(const auto &p:m_library->playlists())if(p.provider==provider&&p.remoteId==remote){origin["destination"]="local";origin["localKey"]=QString::number(p.id);return origin;}
+    origin["destination"]="discover";
+    if(remote.isEmpty()){origin["kind"]="search";origin["id"]=track.title;origin["notice"]="没有可定位的来源歌单，已在发现页搜索该歌曲";}
+    return origin;
 }
 QVariantMap LibraryBridge::trackDetails(const QString &id) const {
     const auto track = m_library ? m_library->track(id.toLongLong()) : Track{};
@@ -258,8 +364,21 @@ bool LibraryBridge::openTrackFolder(const QString &id) {
                   "无法打开歌曲所在文件夹");
 }
 bool LibraryBridge::toggleFavorite(const QString &id) {
-    const auto track = m_library ? m_library->track(id.toLongLong()) : Track{};
-    return result(track.id && m_library->favorite(track.id, !track.favorite), track.id ? QString() : QString("歌曲不存在"));
+    const auto entries=selectedPlaylistEntries({id});
+    if(entries.isEmpty())return result(false,"歌曲不存在");
+    const auto &track=entries.first();
+    if(isOnlineTrack(track))return result(m_library->setTrackFavorites(entries,!m_library->onlineFavorite(track.hash)));
+    return result(m_library->favorite(track.id,!track.favorite));
+}
+bool LibraryBridge::discoveryFavorite(const QString &provider,const QVariantMap &song) const {
+    const auto id=song.value(provider=="qq"?"mid":"id").toString().trimmed();
+    const auto key=(provider=="qq"?QString("qqmusic"):provider)+":"+id;
+    return !id.isEmpty()&&m_source->onlineFavorite(key);
+}
+bool LibraryBridge::toggleDiscoveryFavorite(const QString &provider,const QVariantMap &song,const QVariantMap &origin){
+    const auto track=trackFromDiscovery(provider,song,origin);
+    if(!m_library||!track.id)return result(false,"缺少平台曲目标识");
+    return result(m_library->setTrackFavorites({track},!m_library->onlineFavorite(track.hash)));
 }
 bool LibraryBridge::removeTrack(const QString &id) {
     const auto track = m_library ? m_library->track(id.toLongLong()) : Track{};
@@ -269,8 +388,11 @@ bool LibraryBridge::removeTrack(const QString &id) {
     return result(m_library->remove({track.id}));
 }
 QString LibraryBridge::createPlaylist(const QString &name) {
+    return createPlaylistFromEntries(name,{});
+}
+QString LibraryBridge::createPlaylistFromEntries(const QString &name,const QVector<Track> &entries) {
     if (!m_library || name.trimmed().isEmpty()) { result(false,"请输入歌单名称");return "0"; }
-    const auto id = m_library->createPlaylist(name);
+    const auto id = m_library->createPlaylist(name,entries);
     if (id) {
         auto markers = m_library->setting("qml.playlistMarkers").toObject();
         if (markers.contains(QString::number(id))) {
@@ -316,20 +438,71 @@ QVector<qint64> LibraryBridge::checkedIds(const QStringList &keys) const {
     return ids;
 }
 bool LibraryBridge::applyFavorite(const QStringList &tracks, bool favorite) {
-    const auto ids = checkedIds(tracks);
-    if (ids.isEmpty()) return result(false,"请选择有效歌曲");
-    return result(m_library->favorites(ids, favorite));
+    const auto entries=selectedPlaylistEntries(tracks);
+    if(entries.isEmpty())return result(false,"请选择有效歌曲");
+    return result(m_library->setTrackFavorites(entries,favorite));
 }
 bool LibraryBridge::addTracksToPlaylist(const QString &playlist, const QStringList &tracks) {
-    const auto ids = checkedIds(tracks);
-    if (ids.isEmpty() || !hasPlaylist(playlist.toLongLong())) return result(false,"请选择有效歌单和歌曲");
-    return result(m_library->addToPlaylist(playlist.toLongLong(), ids));
+    const auto entries=selectedPlaylistEntries(tracks);
+    if(entries.isEmpty())return result(false,"请选择有效歌单和歌曲");
+    return result(m_library->addPlaylistEntries(playlist.toLongLong(),entries));
+}
+bool LibraryBridge::createPlaylistWithTracks(const QString &name,const QStringList &tracks){
+    const auto entries=selectedPlaylistEntries(tracks);
+    if(entries.isEmpty())return result(false,"请选择有效歌曲");
+    return createPlaylistFromEntries(name,entries)!="0";
+}
+bool LibraryBridge::addDiscoveryTracks(const QString &playlist,const QString &provider,
+                                       const QVariantList &songs,const QVariantMap &origin){
+    const auto entries=discoveryEntries(provider,songs,origin);
+    if(!m_library||entries.isEmpty())return result(false,"没有可加入歌单的内容");
+    return result(m_library->addPlaylistEntries(playlist.toLongLong(),entries));
+}
+bool LibraryBridge::createPlaylistWithDiscoveryTracks(const QString &name,const QString &provider,
+                                                      const QVariantList &songs,const QVariantMap &origin){
+    const auto entries=discoveryEntries(provider,songs,origin);
+    if(entries.isEmpty())return result(false,"没有可加入歌单的内容");
+    return createPlaylistFromEntries(name,entries)!="0";
+}
+QVector<Track> LibraryBridge::selectedPlaylistEntries(const QStringList &keys) const {
+    if(!m_library)return {};
+    QVector<Track> entries;
+    QSet<qint64> seen;
+    for(const auto &key:keys){
+        bool valid=false;
+        const auto id=key.toLongLong(&valid);
+        if(!valid||id<=0)return {};
+        if(seen.contains(id))continue;
+        auto track=m_source->trackAt(m_source->rowForId(id));
+        if(!track.id)track=m_library->track(id);
+        if(!track.id&&m_facade)track=m_facade->track(id);
+        if(!track.id)return {};
+        entries.append(std::move(track));seen.insert(id);
+    }
+    return entries;
+}
+QString LibraryBridge::trackSourceLabel(const QString &key) const {
+    const auto track=m_source->trackAt(m_source->rowForId(key.toLongLong()));
+    if(track.hash.startsWith("netease:"))return "网易云";
+    if(track.hash.startsWith("qqmusic:"))return "QQ 音乐";
+    if(track.hash.startsWith("kugou:"))return "酷狗";
+    if(track.hash.startsWith("qishui:"))return "汽水";
+    if(track.hash.startsWith("bilibili:"))return "B站";
+    return {};
+}
+bool LibraryBridge::hasOnlineSelection(const QStringList &keys) const {
+    return std::any_of(keys.cbegin(),keys.cend(),[this](const QString &key){
+        return isOnlineTrack(m_source->trackAt(m_source->rowForId(key.toLongLong())));
+    });
 }
 bool LibraryBridge::removeTracksFromPlaylist(const QStringList &tracks) {
-    const auto ids = checkedIds(tracks); const auto members = m_source->ids();
-    bool valid = m_source->playlist() > 0 && !ids.isEmpty();
-    for (auto id : ids) valid = valid && members.contains(id);
-    if (!valid) return result(false,"请选择当前歌单内歌曲");
+    const auto entries=selectedPlaylistEntries(tracks);
+    if(entries.isEmpty()||m_source->playlist()<=0)return result(false,"请选择当前歌单内歌曲");
+    QVector<qint64> ids;
+    for(const auto &track:entries){
+        if(m_source->rowForId(track.id)<0)return result(false,"请选择当前歌单内歌曲");
+        ids.append(track.id);
+    }
     return result(m_library->removeFromPlaylist(m_source->playlist(), ids));
 }
 bool LibraryBridge::removeTracks(const QStringList &tracks, bool managed) {
@@ -343,7 +516,9 @@ bool LibraryBridge::moveTracksInPlaylist(const QStringList &tracks, int directio
         !m_view->artistFilter().isEmpty() || !m_view->albumFilter().isEmpty() ||
         m_view->sortKey() != 0 || m_view->descending() || (direction != -1 && direction != 1))
         return result(false, "请清空筛选并恢复原顺序后调整歌单");
-    const auto selected = checkedIds(tracks); auto ids = m_source->ids();
+    QVector<qint64> selected;
+    for(const auto &track:selectedPlaylistEntries(tracks))selected.append(track.id);
+    auto ids=m_source->ids();
     if (selected.isEmpty()) return result(false, "请选择当前歌单内歌曲");
     for (auto id : selected) if (!ids.contains(id)) return result(false, "请选择当前歌单内歌曲");
     if (direction < 0) {
@@ -353,7 +528,7 @@ bool LibraryBridge::moveTracksInPlaylist(const QStringList &tracks, int directio
         for (int i = int(ids.size()) - 2; i >= 0; --i)
             if (selected.contains(ids[i]) && !selected.contains(ids[i + 1])) ids.swapItemsAt(i, i + 1);
     }
-    return result(m_library->reorder(m_source->playlist(), ids));
+    return result(m_library->reorder(m_source->playlist(),ids,true));
 }
 bool LibraryBridge::setPlaylistCover(const QString &id, const QUrl &source) {
     return result(m_library && hasPlaylist(id.toLongLong()) && source.isLocalFile() &&

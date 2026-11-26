@@ -403,7 +403,7 @@ QVector<Track> QqMusicBridge::tracksFor(const QStringList &ids){
     for(const auto &id:ids){const auto row=m_catalog.value(id.toLongLong());if(row.isEmpty())continue;Track track;track.onlineMetadata=QJsonObject::fromVariantMap(row);track.id=TrackBase+row.value("id").toLongLong();track.title=row.value("title").toString();track.artist=row.value("artist").toString();track.requiresSubscription=row.value("requiresSubscription").toBool();track.album=row.value("album").toString();track.duration=row.value("duration").toLongLong();track.hash="qqmusic:"+row.value("mid").toString();
         auto original=row.value("cover").toString();original.replace(QRegularExpression("T002R\\d+x\\d+M000"),"T002M000");
         const auto thumbnail=row.value("thumbnail",QString(original).replace("T002M000","T002R300x300M000")).toString();
-        m_artwork->prepare(track,QUrl(thumbnail),QUrl(original),QDir(DiskCache::online(m_library)).filePath(QString("qq-cover-%1.png").arg(row.value("id").toString())));tracks.append(track);}
+        m_artwork->prepare(track,QUrl(thumbnail),QUrl(original),QDir(DiskCache::online(m_library)).filePath(QString("qq-cover-%1.png").arg(row.value("id").toString())));if(!m_currentPlaylist.value("id").toString().isEmpty())track.onlineMetadata["queueOrigin"]=QJsonObject{{"provider","qq"},{"kind",m_currentPlaylist.value("kind","playlist").toString()},{"id",m_currentPlaylist.value("id").toString()},{"name",m_currentPlaylist.value("name").toString()}};tracks.append(track);}
     return tracks;
 }
 void QqMusicBridge::playSongs(const QStringList &ids,const QString &start){

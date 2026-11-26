@@ -23,7 +23,7 @@ def prepare(destination, cache):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         files[name] = sha(data)
-    for component in ('gcem', 'fluidsynth', 'soundfont'):
+    for component in ('sndfile', 'sndfileSource', 'gcem', 'fluidsynth', 'soundfont'):
         info = metadata[component]
         archive = cache / info['archive']
         if not archive.exists() or sha(archive.read_bytes()) != info['sha256']:
@@ -34,7 +34,14 @@ def prepare(destination, cache):
                 raise ValueError('Upstream archive changed; review the pinned dependency: ' + component)
             archive.write_bytes(data)
         with zipfile.ZipFile(archive) as package:
-            if component == 'gcem':
+            if component == 'sndfile':
+                sdk = destination.parent / 'sndfile-sdk'
+                package.extractall(sdk)
+                save('sndfile.dll', package.read('libsndfile-1.2.2-win64/bin/sndfile.dll'))
+            elif component == 'sndfileSource':
+                save('licenses/midi/libsndfile-COPYING.txt', package.read('libsndfile-1.2.2/COPYING'))
+                save('licenses/midi/libsndfile-AUTHORS.txt', package.read('libsndfile-1.2.2/AUTHORS'))
+            elif component == 'gcem':
                 package.extractall(destination.parent / 'fluidsynth-build')
                 save('licenses/midi/GCEM-MIT.txt', package.read('gcem-' + info['version'] + '/LICENSE'))
             elif component == 'soundfont':
@@ -48,13 +55,17 @@ def prepare(destination, cache):
                 if not source_dir.exists():
                     package.extractall(work)
                 build = work / 'build'
-                options = ['-Denable-cpp11=ON', '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF', '-Denable-signalsmith=OFF',
+                options = ['-Denable-cpp11=ON', '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=OFF', '-Denable-signalsmith=OFF', '-Denable-libsndfile=ON',
+                           '-DSndFile_DIR=' + str(destination.parent / 'sndfile-sdk/libsndfile-1.2.2-win64/cmake'),
                            '-DGCEM_INCLUDE_DIR=' + str(work / ('gcem-' + metadata['gcem']['version']) / 'include')]
-                for feature in ('libsndfile', 'sdl3', 'openmp', 'readline', 'jack', 'pipewire', 'pulseaudio',
+                for feature in ('sdl3', 'openmp', 'readline', 'jack', 'pipewire', 'pulseaudio',
                                 'portaudio', 'dbus', 'network', 'ipv6', 'dsound', 'wasapi',
                                 'waveout', 'winmidi', 'native-dls', 'aufile'):
                     options.append('-Denable-' + feature + '=OFF')
                 subprocess.run(['cmake', '-S', str(source_dir), '-B', str(build), '-G', 'Ninja', *options], check=True)
+                cache_text = (build / 'config.h').read_text(errors='replace')
+                if '#define LIBSNDFILE_SUPPORT 1' not in cache_text or '#define LIBSNDFILE_HASVORBIS 1' not in cache_text:
+                    raise ValueError('FluidSynth build did not enable libsndfile and Vorbis; SF3 unavailable')
                 subprocess.run(['cmake', '--build', str(build), '--target', 'libfluidsynth', '-j', '6'], check=True)
                 save('libfluidsynth-3.dll', (build / 'src/libfluidsynth-3.dll').read_bytes())
                 save('licenses/midi/FluidSynth-LGPL-2.1.txt', package.read('fluidsynth-' + info['version'] + '/LICENSE'))

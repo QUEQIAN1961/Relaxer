@@ -19,7 +19,7 @@ class MidiTransport final {
     // domain makes it unambiguous even for driver-specific native DWORDs.
     // Native values pass through unchanged; local values never reach MCI.
     static constexpr quint32 LocalErrorBase=0x80000000u;
-    explicit MidiTransport(QString root, Sender sender = {}, PathResolver resolver = {}, bool decodeOnly = false);
+    explicit MidiTransport(QString root, Sender sender = {}, PathResolver resolver = {}, bool decodeOnly = false, QString soundFontPath = {}, QJsonObject synthesis = {});
     ~MidiTransport();
     bool open(const QString &path);
     bool play();
@@ -31,6 +31,7 @@ class MidiTransport final {
     qint64 position() const;
     qint64 duration() const { return m_duration; }
     QString error() const { return m_error; }
+    QString soundFontWarning() const;
     QString openedPath() const { return m_path; }
     quint32 errorCode() const { return m_code; }
     ErrorDomain errorDomain() const { return m_domain; }

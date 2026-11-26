@@ -67,6 +67,11 @@ int main(int argc, char **argv) {
         qputenv("QT_FFMPEG_ENCODING_HW_DEVICE_TYPES", ",");
     UiRunDiagnostics diagnostics;
     QApplication app(argc, argv);
+    // Prefer this build's exact Qt multimedia plugin with the PCM processing hook.
+    auto mediaPaths=QCoreApplication::libraryPaths();
+    mediaPaths.removeAll(QCoreApplication::applicationDirPath());
+    mediaPaths.prepend(QCoreApplication::applicationDirPath());
+    QCoreApplication::setLibraryPaths(mediaPaths);
     diagnostics.mark("qtInitializedMs");
     app.setApplicationName("Relaxer");
     app.setApplicationVersion(QString::fromLatin1(phaseC::Version));

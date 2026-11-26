@@ -55,6 +55,15 @@ qint64 seed(Library &lib,const QString &name,bool playable=false) {
     }
     return lib.insert(t);
 }
+bool prepareExpandableQueue(Library &library,QmlShell &shell) {
+    const auto id=seed(library,"expandable-queue",true);
+    if(!id)return false;
+    shell.facade()->play({id},id);
+    if(!QTest::qWaitFor([&]{return shell.facade()->playing()&&shell.upcomingModel()->count()>0;}))
+        return false;
+    shell.facade()->pause();
+    return QTest::qWaitFor([&]{return !shell.facade()->playing();});
+}
 class Browser final:public TranslationBrowserBackend {
 public:
     quint64 token=0;
@@ -88,7 +97,11 @@ private slots:
         QTemporaryDir dir;QVERIFY(dir.isValid());Library lib(dir.filePath("data"));QVERIFY(lib.open());
         QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *f=shell.feedbackBridge();
         w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));
-        auto *expand=visual(w->contentItem(),"playerMetadata");QVERIFY(click(w,expand));
+        auto *root=w->contentItem();
+        QCOMPARE(shell.upcomingModel()->count(),0);
+        auto *expand=visual(root,"playerMetadata");QVERIFY(expand);QVERIFY(!expand->isVisible());
+        QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QVERIFY(!w->property("lyricsOpen").toBool());
+        QVERIFY(prepareExpandableQueue(lib,shell));QVERIFY(click(w,expand));
         QTRY_VERIFY(w->property("lyricsOpen").toBool());QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
         QVERIFY(escapeEvidence(w,f,"expanded"));
         QTest::keyClick(w,Qt::Key_Escape);
@@ -102,9 +115,12 @@ private slots:
         const auto id=seed(lib,"escape-missing");QVERIFY(id);
         QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *f=shell.feedbackBridge();
         w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));
+        QVERIFY(prepareExpandableQueue(lib,shell));
         auto *root=w->contentItem();auto *expand=visual(root,"playerMetadata");QVERIFY(click(w,expand));
         QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
-        // Trigger the real missing-file path, rather than a synthetic notification.
+        // Keep the missing track as the only candidate so retry exercises the same failure.
+        shell.libraryModel()->setFilterText("escape-missing");
+        QTRY_COMPARE(shell.libraryModel()->count(),1);
         shell.libraryBridge()->play(QString::number(id));QTRY_VERIFY(f->visible());
         auto *notice=visual(root,"feedbackNotice");QVERIFY(notice);QTRY_VERIFY(notice->isVisible());
         QCOMPARE(f->current()["source"].toString(),QString("Playback"));
@@ -132,6 +148,7 @@ private slots:
         QTemporaryDir dir;QVERIFY(dir.isValid());Library lib(dir.filePath("data"));QVERIFY(lib.open());
         QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());auto *w=shell.window();auto *f=shell.feedbackBridge();
         w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));auto *root=w->contentItem();
+        QVERIFY(prepareExpandableQueue(lib,shell));
         auto *expand=visual(root,"playerMetadata");QVERIFY(click(w,expand));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
         f->post("Library","Error","Escape details","Preserve the detail and background state");
         QTRY_COMPARE(visual(root,"feedbackPanel")->property("noticeProgress").toDouble(),1.0);
@@ -164,7 +181,8 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(table,"beginBulk"));QTRY_VERIFY(w->property("bulkActive").toBool());
         QVERIFY(table->property("bulkMode").toBool());QVERIFY(!w->property("popupOpen").toBool());
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!w->property("bulkActive").toBool());QVERIFY(!table->property("bulkMode").toBool());
-        auto *upcoming=visual(w->contentItem(),"nextQueuePanel");QVERIFY(upcoming);QVERIFY(upcoming->isVisible());
+        auto *upcoming=visual(w->contentItem(),"nextQueuePanel");QVERIFY(upcoming);QVERIFY(!upcoming->isVisible());
+        QVERIFY(prepareExpandableQueue(lib,shell));QTRY_VERIFY(upcoming->isVisible());
         QVERIFY(click(w,visual(upcoming,"upcomingToggle")));
         QTRY_VERIFY(upcoming->property("panelExpanded").toBool());
         QTest::keyClick(w,Qt::Key_Escape);QTRY_VERIFY(!upcoming->property("panelExpanded").toBool());
@@ -180,6 +198,7 @@ private slots:
         QmlShell restored(&lib,nullptr,true);QVERIFY(restored.load());w=restored.window();
         w->requestActivate();QVERIFY(QTest::qWaitForWindowActive(w));QVERIFY(!w->property("popupOpen").toBool());
         QVERIFY(!restored.feedbackBridge()->visible());QVERIFY(restored.feedbackBridge()->history().isEmpty());
+        QVERIFY(prepareExpandableQueue(lib,restored));
         QVERIFY(click(w,visual(w->contentItem(),"playerMetadata")));QTRY_COMPARE(w->property("playerProgress").toDouble(),1.0);
         QTest::keyClick(w,Qt::Key_Escape);QTRY_COMPARE(w->property("playerProgress").toDouble(),0.0);QVERIFY(restored.warnings().isEmpty());
     }
@@ -219,8 +238,10 @@ private slots:
         QTemporaryDir dir;Library lib(dir.filePath("data"));QVERIFY(lib.open());const auto id=seed(lib,"invalid");QVERIFY(id);
         QVERIFY(write(lib.absolute(lib.track(id).file),"not a media file"));
         QmlShell shell(&lib,nullptr,true);QVERIFY(shell.load());
+        QVERIFY(prepareExpandableQueue(lib,shell));
         QVERIFY(QMetaObject::invokeMethod(shell.window(),"animatePlayer",Q_ARG(QVariant,QVariant(true))));
         QTRY_VERIFY(shell.window()->property("lyricsOpen").toBool());shell.window()->showFullScreen();
+        shell.libraryModel()->setFilterText("invalid");QTRY_COMPARE(shell.libraryModel()->count(),1);
         shell.libraryBridge()->play(QString::number(id));auto *f=shell.feedbackBridge();
         QTRY_VERIFY_WITH_TIMEOUT(f->visible(),15000);QCOMPARE(f->current()["category"].toString(),QString("Error"));
         QTRY_VERIFY(!shell.playbackBridge()->playing());

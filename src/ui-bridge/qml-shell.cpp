@@ -28,7 +28,7 @@ public:QNetworkAccessManager *create(QObject *parent)override{return new QmlHttp
 QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRuntime *runtime,
                    std::unique_ptr<TranslationBrowserBackend> browser, SettingsBridge::SystemThemeReader systemTheme,
                    QNetworkAccessManager *searchTransport, QVector<LyricsSearchSource> searchSources)
-    : QObject(parent), m_feedback(this), m_facade(library, this, decodeOnly), m_appBridge(library, this),
+    : QObject(parent), m_feedback(this), m_facade(library, this, decodeOnly), m_appBridge(library, this), m_equalizer(library,this),
       m_playbackBridge(&m_facade, this, library), m_tracks(library, this), m_trackView(&m_tracks, this),
       m_playlists(library, this), m_libraryBridge(library, &m_facade, &m_tracks, &m_trackView, &m_playlists, this),
       m_queue(library, &m_facade, this),
@@ -42,6 +42,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
       m_sodaMusic(AdditionalMusicBridge::Qishui,library,&m_facade,&m_lyrics,&m_onlineArtwork,this),
       m_bilibili(library,&m_facade,&m_onlineArtwork,this) {
     m_navigationLibrary=library;
+    m_equalizer.attach(&m_facade,&m_tracks);
     initializeQmlResources();
     // Embed the standard controls' Chinese strings so portable builds do not
     // depend on a Qt translation package installed on the user's computer.
@@ -66,6 +67,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     m_engine = std::make_unique<QQmlApplicationEngine>();
     static QmlHttpFactory httpFactory;m_engine->setNetworkAccessManagerFactory(&httpFactory);
     m_engine->addImageProvider("relaxer", new UiImages);
+    m_engine->addImageProvider("online-cover",m_onlineArtwork.createImageProvider());
     m_engine->rootContext()->setContextProperty("appBridge", &m_appBridge);
     m_engine->rootContext()->setContextProperty("playbackBridge", &m_playbackBridge);
     m_engine->rootContext()->setContextProperty("onlineArtwork", &m_onlineArtwork);
@@ -84,6 +86,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
                     qMakePair("upcomingModel",static_cast<QObject *>(&m_upcoming)),
                     qMakePair("uiIntegration",static_cast<QObject *>(&m_uiIntegration)),
                     qMakePair("settingsBridge",static_cast<QObject *>(&m_settings)),
+                    qMakePair("equalizerBridge",static_cast<QObject *>(&m_equalizer)),
                     qMakePair("importBridge",static_cast<QObject *>(&m_importBridge)),
                     qMakePair("aiBridge",static_cast<QObject *>(&m_aiBridge)),
                     qMakePair("translationBridge",static_cast<QObject *>(&m_translationBridge)),
@@ -93,9 +96,8 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
         QQmlEngine::setObjectOwnership(pair.second,QQmlEngine::CppOwnership);
         m_engine->rootContext()->setContextProperty(QString::fromLatin1(pair.first),pair.second);
     }
+    connect(m_facade.backend(),&Playback::midiSoundFontFallback,this,[this](const QString &message){m_feedback.post("MIDI","Warning",message);});
     connect(&m_queue, &QueueListModel::missingTracks, &m_libraryBridge, &LibraryBridge::forgetMissing, Qt::QueuedConnection);
-    connect(&m_playbackBridge,&PlaybackBridge::onlineFavoriteRequested,&m_onlineMusic,&OnlineMusicBridge::toggleFavorite);
-    connect(&m_playbackBridge,&PlaybackBridge::onlineFavoriteRequested,&m_qqMusic,&QqMusicBridge::toggleFavorite);
     connect(&m_playbackBridge,&PlaybackBridge::onlineArtworkDetailRequested,&m_onlineArtwork,&OnlineArtworkCache::setExpanded);
     connect(&m_onlineMusic,&OnlineMusicBridge::downloadReady,&m_onlineDownloads,&OnlineDownloadBridge::chooseDestination);
     connect(&m_qqMusic,&QqMusicBridge::downloadReady,&m_onlineDownloads,&OnlineDownloadBridge::chooseDestination);
@@ -110,15 +112,15 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     connect(&m_libraryBridge,&LibraryBridge::playlistChanged,this,[this]{if(m_libraryBridge.playlistId()!=m_restoredCloudKey)m_restoredCloudKey.clear();});
     connect(&m_appBridge,&AppBridge::pageChanged,this,[this]{if(m_appBridge.page()!=0)m_restoredCloudKey.clear();});
     connect(&m_libraryBridge,&LibraryBridge::cloudPlayRequested,this,[this](const QString &provider,const QStringList &ids,const QString &start){if(provider=="qq")m_qqMusic.playSongs(ids,start);else if(provider=="kugou")m_kugouMusic.playSongs(ids,start);else if(provider=="qishui")m_sodaMusic.playSongs(ids,start);else if(provider=="bilibili")m_bilibili.playSongs(ids,start);else m_onlineMusic.playSongs(ids,start);});
-    connect(&m_bilibili,&BilibiliBridge::songsChanged,this,[this]{m_libraryBridge.setCloudSongs("bilibili",m_bilibili.currentPlaylist(),m_bilibili.songs());});
-    connect(&m_onlineMusic,&OnlineMusicBridge::songsChanged,this,[this]{m_libraryBridge.setCloudSongs("netease",m_onlineMusic.currentPlaylist(),m_onlineMusic.songs());});
-    connect(&m_qqMusic,&QqMusicBridge::songsChanged,this,[this]{m_libraryBridge.setCloudSongs("qq",m_qqMusic.currentPlaylist(),m_qqMusic.songs());});
+    connect(&m_bilibili,&BilibiliBridge::songsChanged,this,[this]{m_libraryBridge.setCloudSongs("bilibili",m_bilibili.currentPlaylist(),m_bilibili.songs());m_equalizer.rememberCloudSongs("bilibili",m_bilibili.currentPlaylist(),m_bilibili.songs());});
+    connect(&m_onlineMusic,&OnlineMusicBridge::songsChanged,this,[this]{m_libraryBridge.setCloudSongs("netease",m_onlineMusic.currentPlaylist(),m_onlineMusic.songs());m_equalizer.rememberCloudSongs("netease",m_onlineMusic.currentPlaylist(),m_onlineMusic.songs());});
+    connect(&m_qqMusic,&QqMusicBridge::songsChanged,this,[this]{m_libraryBridge.setCloudSongs("qq",m_qqMusic.currentPlaylist(),m_qqMusic.songs());m_equalizer.rememberCloudSongs("qq",m_qqMusic.currentPlaylist(),m_qqMusic.songs());});
     for(auto *platform:{&m_kugouMusic,&m_sodaMusic}){
         const auto provider=platform==&m_kugouMusic?QString("kugou"):QString("qishui");
         connect(platform,&AdditionalMusicBridge::playlistMissing,this,[this,provider](const QString &id){fallbackMissingPlaylist(provider,id);},Qt::QueuedConnection);
         connect(platform,&AdditionalMusicBridge::downloadReady,&m_onlineDownloads,&OnlineDownloadBridge::chooseDestination);
         connect(platform,&AdditionalMusicBridge::downloadFailed,&m_onlineDownloads,&OnlineDownloadBridge::resolutionFailed);
-        connect(platform,&AdditionalMusicBridge::songsChanged,this,[this,platform,provider]{m_libraryBridge.setCloudSongs(provider,platform->currentPlaylist(),platform->songs());});
+        connect(platform,&AdditionalMusicBridge::songsChanged,this,[this,platform,provider]{m_libraryBridge.setCloudSongs(provider,platform->currentPlaylist(),platform->songs());m_equalizer.rememberCloudSongs(provider,platform->currentPlaylist(),platform->songs());});
     }
     connect(&m_facade,&PlaybackFacade::onlineTrackUpdated,this,[this](qint64 id){m_tracks.updateCloudTrack(m_facade.track(id));});
     connect(&m_importBridge,&ImportBridge::contentsChanged,this,[this]{m_tracks.refresh();m_playlists.refresh();m_appBridge.refresh();});
@@ -140,6 +142,7 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
     });
     connect(&m_playbackBridge,&PlaybackBridge::recovered,this,[this]{m_feedback.clearSource("Playback");});
     connect(&m_playbackBridge,&PlaybackBridge::persistenceFailure,this,[this](const QString &message){m_feedback.post("Library","Error","播放状态或资料修改未能保存",message,{}, {},true);});
+    connect(&m_upcoming,&UpcomingModel::operationFailed,this,[this](const QString &message){m_feedback.queueNotice(message);});
     connect(&m_libraryBridge,&LibraryBridge::operationFailed,this,[this](const QString &message){m_feedback.post("Library","Error","资料库操作失败",message,{}, {},true);});
     connect(&m_libraryBridge,&LibraryBridge::operationSucceeded,this,[this]{m_feedback.clearSource("Library");});
     connect(&m_importBridge,&ImportBridge::started,this,[this]{m_feedback.clearSource("Import");});
@@ -150,6 +153,10 @@ QmlShell::QmlShell(Library *library, QObject *parent, bool decodeOnly,ai::AiRunt
         m_feedback.post("Artwork",category,message,details,task,{},false,false,0,true);
     });
     connect(&m_importBridge,&ImportBridge::rejected,this,[this](const QString &message){m_feedback.post("Import","Error","无法开始导入",message,{}, {},true);});
+    connect(&m_onlineDownloads,&OnlineDownloadBridge::favoriteImportFailed,this,[this](const QString &message){
+        m_feedback.post("Download","Warning","下载已保留，未能将收藏切换为本地歌曲",message);
+    });
+    m_onlineDownloads.attachFavoriteImporter(&m_import);
     connect(&m_searchBridge,&LyricsSearchBridge::operationFailed,this,[this](const QString &target,const QString &message){m_feedback.post("Lyrics","Error","歌词未能保存："+m_searchBridge.targetTitle(),message,{},target,true);});
     connect(&m_translationBridge,&TranslationBridge::feedback,this,[this](const QString &category,const QString &task,const QString &target,const QString &message,const QString &details){m_feedback.post("Translation",category,message+" · "+m_translationBridge.targetTitle(),details,task,target,category=="Error",category=="ConfirmationRequired");});
     connect(&m_translationBridge,&TranslationBridge::feedbackCleared,this,[this]{m_feedback.clearSource("Translation");});
@@ -236,6 +243,8 @@ bool QmlShell::saveNavigation(){
 }
 bool QmlShell::shutdown() {const bool navigationSaved=saveNavigation();m_feedback.setClosing(true);m_searchBridge.cancelInstrumentalBatch();m_search.shutdown();m_translation.shutdown();m_import.shutdown();const bool playbackSaved=m_facade.shutdown(true);return navigationSaved&&playbackSaved;}
 bool QmlShell::eventFilter(QObject *object,QEvent *event){
+    // Run before feedback observers, shortcuts and QML pointer handlers.
+    if(m_uiIntegration.filterPopupDismissal(object,event))return true;
     if(event->type()==QEvent::Show||event->type()==QEvent::Hide){
         if(auto *view=qobject_cast<QQuickWindow *>(object);view&&view!=window()){
             auto *owner=view->transientParent();

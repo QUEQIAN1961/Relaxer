@@ -26,6 +26,12 @@ TrackListModel::TrackListModel(Library *library, QObject *parent) : QAbstractLis
     m_refresh.setSingleShot(true);
     connect(&m_refresh, &QTimer::timeout, this, &TrackListModel::refresh);
     connect(library, &Library::changed, this, [this] { if (!m_refresh.isActive()) m_refresh.start(0); });
+    m_onlineFavoriteKeys=library->onlineFavoriteKeys();
+    connect(library,&Library::onlineFavoritesChanged,this,[this]{
+        m_onlineFavoriteKeys=m_library->onlineFavoriteKeys();
+        if(m_playlist==-1){if(!m_refresh.isActive())m_refresh.start(0);}
+        else if(m_onlineCount>0)emit dataChanged(index(0),index(m_tracks.size()-1),{Favorite});
+    });
     connect(library, &QObject::destroyed, this, [this] { m_library = nullptr; m_refresh.stop(); refresh(); });
     refresh();
 }
@@ -48,15 +54,17 @@ QVariant TrackListModel::data(const QModelIndex &index, int role) const {
     case VideoTrack: return isVideoTrack(t);
     case Album: return t.album;
     case Duration: return t.duration;
-    case Favorite: return t.favorite;
+    case Favorite: return isOnlineTrack(t)?onlineFavorite(t.hash):t.favorite;
     case File: return t.file;
-    case Cover: return m_cloud?(t.cover.isEmpty()?QUrl{}:t.cover.startsWith("http")?QUrl(t.cover):QUrl::fromLocalFile(t.cover)):m_library && !t.cover.isEmpty() ? artworkUrl(m_library->absolute(t.cover)) : QUrl{};
+    case Cover:
+        if(m_cloud||isOnlineTrack(t))return t.cover.isEmpty()?QUrl{}:t.cover.startsWith("http")?QUrl(t.cover):QUrl::fromLocalFile(t.cover);
+        return m_library&&!t.cover.isEmpty()?artworkUrl(m_library->absolute(t.cover)):QUrl{};
     case Plays: return t.plays;
     case Heard: return t.heard;
     case ImportedAt: return t.importedAt;
     case LyricsAvailable: return !t.lyrics.isEmpty();
     case FileSize: {
-        if (!m_library||m_cloud) return qint64(-1);
+        if (!m_library||m_cloud||isOnlineTrack(t)) return qint64(-1);
         const auto path = m_library->absolute(t.file);
         return m_fileSizes.value(path,-1);
     }
@@ -86,7 +94,7 @@ void TrackListModel::setCloudTracks(qint64 playlist,const QVector<Track> &tracks
     if(!m_cloud||m_playlist!=playlist)return;
     const int before=m_tracks.size();bool append=tracks.size()>before;
     for(int i=0;append&&i<before;++i)append=tracks[i].id==m_tracks[i].id;
-    if(append&&before>0){beginInsertRows({},before,tracks.size()-1);m_cloudTracks=tracks;m_tracks=tracks;for(int i=before;i<tracks.size();++i)m_rows.insert(tracks[i].id,i);endInsertRows();return;}
+    if(append&&before>0){beginInsertRows({},before,tracks.size()-1);m_cloudTracks=tracks;m_tracks=tracks;m_onlineCount=tracks.size();for(int i=before;i<tracks.size();++i)m_rows.insert(tracks[i].id,i);endInsertRows();return;}
     m_cloudTracks=tracks;refresh();
 }
 void TrackListModel::updateCloudTrack(const Track &track){
@@ -94,12 +102,13 @@ void TrackListModel::updateCloudTrack(const Track &track){
 }
 void TrackListModel::refresh() {
     Q_ASSERT(QThread::currentThread() == thread());
-    auto next = !m_library ? QVector<Track>{} : m_cloud?m_cloudTracks:m_playlist == -2 ? m_library->recent() :
+    auto next = !m_library ? QVector<Track>{} : m_cloud?m_cloudTracks:(m_playlist>0||m_playlist==-1)?m_library->playlistEntries(m_playlist):m_playlist == -2 ? m_library->recent() :
                 m_library->tracks(m_playlist == -3 ? 0 : m_playlist);
     if (m_playlist == -3)
         std::stable_sort(next.begin(), next.end(), [](const Track &a, const Track &b) { return a.heard > b.heard; });
     beginResetModel();
     m_tracks = next; m_rows.clear(); m_rows.reserve(m_tracks.size());
+    m_onlineCount=std::count_if(m_tracks.cbegin(),m_tracks.cend(),isOnlineTrack);
     for (int row = 0; row < m_tracks.size(); ++row) m_rows.insert(m_tracks[row].id, row);
     endResetModel();
     if(m_sizeCancel)m_sizeCancel->store(true);++m_sizeRevision;m_sizeTimer.start(0);
@@ -109,7 +118,7 @@ void TrackListModel::readFileSizes(){
     if(m_sizeCancel)m_sizeCancel->store(true);m_sizePool.clear();const auto revision=++m_sizeRevision;
     if(!m_library||m_cloud){m_fileSizes.clear();return;}
     QStringList paths;paths.reserve(m_tracks.size());QSet<QString> current;
-    for(const auto &track:m_tracks){const auto path=m_library->absolute(track.file);if(!current.contains(path)){paths.append(path);current.insert(path);}}
+    for(const auto &track:m_tracks){if(isOnlineTrack(track))continue;const auto path=m_library->absolute(track.file);if(!current.contains(path)){paths.append(path);current.insert(path);}}
     for(auto it=m_fileSizes.begin();it!=m_fileSizes.end();)if(!current.contains(it.key()))it=m_fileSizes.erase(it);else ++it;
     const auto cancelled=std::make_shared<std::atomic_bool>(false);m_sizeCancel=cancelled;
     m_sizePool.start(QRunnable::create([this,paths,revision,cancelled]{
@@ -127,8 +136,9 @@ void TrackListModel::refreshStatistics(qint64 trackId) {
     const auto row = rowForId(trackId); if (row < 0) return;
     // The facade identifies the one track that accumulated listening time;
     // keep ordinary progress independent of total library size.
-    auto &track = m_tracks[row]; const auto updated = m_cloud?(track.matchedLocalId?m_library->track(track.matchedLocalId):m_library->onlineTrack(track.hash)):m_library->track(trackId);
-    if ((!m_cloud&&!updated.id) || (track.plays == updated.plays && track.heard == updated.heard)) return;
+    auto &track=m_tracks[row];
+    const auto updated=isOnlineTrack(track)?(track.matchedLocalId?m_library->track(track.matchedLocalId):m_library->onlineTrack(track.hash)):m_library->track(trackId);
+    if ((!isOnlineTrack(track)&&!updated.id) || (track.plays == updated.plays && track.heard == updated.heard)) return;
     track.plays = updated.plays; track.heard = updated.heard;
     if(m_cloud)m_cloudTracks[row]=track;
     emit dataChanged(index(row), index(row), {Plays, Heard});

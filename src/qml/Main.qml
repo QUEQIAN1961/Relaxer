@@ -199,12 +199,60 @@ ApplicationWindow {
     property bool snapshotAwaitingFrame:false
     property size snapshotSize:Qt.size(0,0)
     property string settingsSection: "settings"
+    property int equalizerReturnPage:3
+    property string equalizerReturnSection:"settings"
+    property bool equalizerReturnPlayer:false
+    readonly property string equalizerBackText:equalizerReturnPlayer?"返回播放":equalizerReturnPage===0||equalizerReturnPage===1?"返回歌单":equalizerReturnPage===4?"返回发现":equalizerReturnPage===2?"返回个人":equalizerReturnPage===5?"返回历史":"返回设置"
+    function openEqualizer(){
+        if(appBridge.page===3&&settingsSection==="equalizer"){
+            if(root.lyricsOpen)root.animatePlayer(false)
+            upcoming.panelExpanded=false;narrowQueue.close()
+            if(equalizerLoader.item)equalizerLoader.item.forceActiveFocus()
+            return
+        }
+        const fromPage=appBridge.page,fromSection=settingsSection,fromPlayer=lyricsOpen
+        changePage(function(){
+            root.equalizerReturnPage=fromPage;root.equalizerReturnSection=fromSection;root.equalizerReturnPlayer=fromPlayer
+            upcoming.panelExpanded=false;narrowQueue.close()
+            root.settingsSection="equalizer";appBridge.navigate(3)
+            if(equalizerLoader.item)equalizerLoader.item.forceActiveFocus()
+        })
+    }
+    function leaveEqualizer(){
+        changePage(function(){
+            root.settingsSection=root.equalizerReturnSection
+            appBridge.navigate(root.equalizerReturnPage)
+            if(root.equalizerReturnPlayer)root.animatePlayer(true)
+        })
+    }
+    property var equalizerPendingAction:null
+    property bool equalizerPendingClose:false
+    property bool equalizerPendingTarget:false
+    function prepareEqualizerEdits(){if(equalizerLoader.item)equalizerLoader.item.prepareToLeave()}
+    function showEqualizerUnsaved(action,closing,target){
+        prepareEqualizerEdits()
+        equalizerPendingAction=action;equalizerPendingClose=closing;equalizerPendingTarget=target
+        equalizerUnsaved.open()
+    }
+    function resolveEqualizerUnsaved(decision){
+        if(decision===1&&!equalizerBridge.saveAllChanges())return
+        if(decision===2)equalizerBridge.discardChanges()
+        const action=equalizerPendingAction,closing=equalizerPendingClose,target=equalizerPendingTarget
+        equalizerPendingAction=null;equalizerPendingClose=false;equalizerPendingTarget=false
+        equalizerUnsaved.close()
+        if(decision===0){equalizerBridge.cancelTargetChange();if(closing)root.exitRequested=false;feedbackBridge.setClosing(false);return}
+        if(target){equalizerBridge.continueTargetChange();return}
+        equalizerBridge.cancelTargetChange()
+        if(closing){root.close();return}
+        if(action)root.changePage(action)
+    }
     property var pendingPageAction: null
     property bool pendingAppearanceClose: false
     property bool bulkActive: false
     property var bulkKeys: []
     property var bulkOwner: null
     property string bulkScope: "0"
+    readonly property bool bulkHasOnline:libraryBridge.hasOnlineSelection(bulkKeys)
     property var bulkActionKeys: []
     property bool metadataTravelling: false
     property var titleFrom: ({x:0,y:0,width:1,height:1,pixelSize:13,family:"Microsoft YaHei UI",weight:400})
@@ -252,6 +300,7 @@ ApplicationWindow {
         bulkOwner.setBulkKeys(all ? libraryBridge.visibleTrackKeys() : [])
     }
     function animatePlayer(open) {
+        if(open&&!upcomingModel.count)return
         if (lyricsOpen === open && !playerMotion.running) return
         ensureNowPlaying()
         if(open)nowPage.forceActiveFocus()
@@ -270,9 +319,15 @@ ApplicationWindow {
         playerMotion.duration = 420; coverMotion.duration=420; playerMotion.restart(); coverMotion.restart()
     }
     property bool widthSwitchActive:false
+    property var widthSwitchPage:null
     property var widthSwitchGeometry:[]
     property real widthSwitchProgress:0
     readonly property bool widthSwitchRunning:widthSwitchMotion.running
+    function finishWidthSwitch(){
+        widthSwitchActive=false;uiIntegration.endResizeAnchor()
+        const page=widthSwitchPage;widthSwitchPage=null
+        if(page&&typeof page.endWidthTransition==="function")page.endWidthTransition()
+    }
     onWidthSwitchProgressChanged: {
         if(widthSwitchGeometry.length!==7)return
         const g=widthSwitchGeometry,w=g[3]+(g[4]-g[3])*widthSwitchProgress
@@ -286,11 +341,13 @@ ApplicationWindow {
             root.narrowProgress=root.widthSwitchGeometry[6]
             const g=root.widthSwitchGeometry
             uiIntegration.setWindowGeometry(g[0]-g[4],g[1],g[4],g[2])
-            Qt.callLater(function(){root.widthSwitchActive=false;uiIntegration.endResizeAnchor()})
+            Qt.callLater(root.finishWidthSwitch)
         }
     }
     function toggleNarrowWindow() {
         if(miniMode||miniSwitching||widthSwitchActive)return
+        widthSwitchPage=settingsLoader.requested?settingsLoader.item:null
+        if(widthSwitchPage&&typeof widthSwitchPage.beginWidthTransition==="function")widthSwitchPage.beginWidthTransition()
         // showNormal() restores an unrelated saved rectangle. Retain both the
         // logical bounds and the physical anchor of the window the user sees.
         const original=[root.x+root.width,root.y,root.height,root.width,narrowProgress]
@@ -303,7 +360,7 @@ ApplicationWindow {
             widthSwitchGeometry=[right,top,keepHeight,initialWidth,nextWidth,original[4],nextWidth<547?1:0]
             widthSwitchActive=true
             widthSwitchProgress=0
-            if(settingsBridge.values.reduceMotion){widthSwitchProgress=1;widthSwitchActive=false;uiIntegration.endResizeAnchor()}
+            if(settingsBridge.values.reduceMotion){widthSwitchProgress=1;Qt.callLater(root.finishWidthSwitch)}
             else widthSwitchMotion.restart()
         }
         if(visibility===Window.Maximized||visibility===Window.FullScreen){
@@ -332,6 +389,8 @@ ApplicationWindow {
         } else { savedGeometry=[x,y,width,height]; wasMaximized=visibility===Window.Maximized; showLyrics(); showFullScreen() }
     }
     function changePage(action) {
+        if(appBridge.page===3&&root.settingsSection==="equalizer")prepareEqualizerEdits()
+        if(equalizerBridge.hasUnsavedChanges){showEqualizerUnsaved(action,false,false);return}
         if (appBridge.page === 3 && settingsSection === "appearance" && !ensureAppearancePage().confirmLeave()) {
             pendingPageAction = action
             return
@@ -368,7 +427,10 @@ ApplicationWindow {
         if(!animate||backgrounded||settingsBridge.values.reduceMotion||paper.width!==snapshotSize.width||paper.height!==snapshotSize.height){action();pageSurface.opacity=1;pageSurface.y=0;clearPageSnapshot();return}
         oldPage.opacity=1;action();pageSurface.opacity=.001;pageSurface.y=-7;pageOut.restart();pageIn.restart()
     }
-    Connections {target:root;function onFrameSwapped(){if(root.snapshotAwaitingFrame){const revision=root.snapshotRevision;Qt.callLater(function(){root.presentPageSnapshot(revision,true)})}}}
+    Connections {
+        target:root;enabled:root.snapshotAwaitingFrame
+        function onFrameSwapped(){const revision=root.snapshotRevision;Qt.callLater(function(){root.presentPageSnapshot(revision,true)})}
+    }
     function requestQuit() { exitRequested=true; root.close() }
     function setMiniGeometry(b){uiIntegration.setWindowGeometry(b[0],b[1],b[2],b[3])}
     function settleMiniLayout(){
@@ -458,6 +520,7 @@ ApplicationWindow {
         settleMiniLayout()
         const flight=[]
         for(const part of parts){
+            if(!upcomingModel.count&&["cover","title","artist","queue"].indexOf(part.key)>=0)continue
             let item=part.key==="cover"?(lyricsOpen?nowPage.largeArtwork:playerBar.smallArtwork)
                 :part.key==="title"?(lyricsOpen?nowPage.metadataTitle:playerBar.metadataTitle)
                 :part.key==="artist"?(lyricsOpen?nowPage.metadataArtist:playerBar.metadataArtist):playerBar.miniTarget(part.key)
@@ -562,6 +625,38 @@ ApplicationWindow {
             else { libraryBridge.openPlaylist("-1"); appBridge.navigate(0) }
         })
     }
+    property var queueLocateJob:null
+    function locateQueueTrack(key){
+        const destination=libraryBridge.queueLocation(key)
+        if(!destination.destination)return
+        narrowQueue.close();upcoming.panelExpanded=false
+        queueLocateJob={key:key,origin:destination,phase:0,ticks:0};queueLocateRouter.restart()
+    }
+    Timer {
+        id:queueLocateRouter;interval:30;repeat:true
+        onTriggered:{
+            const job=root.queueLocateJob;if(!job){stop();return}
+            job.ticks++
+            if(job.ticks>100){feedbackBridge.queueNotice("页面切换未完成，定位已取消，请重试");root.queueLocateJob=null;stop();return}
+            if(root.miniMode){root.leaveMiniPlayer();return}
+            if(root.miniSwitching)return
+            if(job.phase===0){job.phase=1;if(root.lyricsOpen)root.animatePlayer(false);if(job.origin.destination==="local")root.openPlaylist(job.origin.localKey);else root.changePage(function(){appBridge.navigate(4)});return}
+            if(job.origin.destination==="local"){
+                if(appBridge.page!==0||libraryBridge.playlistId!==job.origin.localKey)return
+                localPage.locateQueueTrack(job.key)
+            }else{
+                if(appBridge.page!==4||!discoverLoader.item)return
+                discoverLoader.item.locateQueueTrack(job.key,job.origin)
+            }
+            if(job.origin.notice)feedbackBridge.queueNotice(job.origin.notice)
+            root.queueLocateJob=null;stop()
+        }
+    }
+    function positionNarrowQueue(anchor){
+        const p=anchor.mapToItem(root.contentItem,0,0)
+        narrowQueue.x=Math.max(8,Math.min(root.width-narrowQueue.width-8,p.x))-p.x
+        narrowQueue.y=Math.max(34,playerBar.mapToItem(root.contentItem,0,0).y-narrowQueue.height-10)-p.y
+    }
     function openPlaylist(key) {
         if (appBridge.page === 0 && libraryBridge.playlistId === key) {
             if (lyricsOpen) animatePlayer(false)
@@ -577,12 +672,17 @@ ApplicationWindow {
         lyricsSearchBridge.setTargetTrack(target); translationBridge.setTargetTrack(target)
         ensureLyricsWorkspace().open()
     }
-    readonly property url playerPreviewBackdropUrl: {
-        if(root.miniMode || !settingsBridge.values.playerCoverBackground)return ""
-        const thumbnail=String(onlineArtwork.thumbnailCover)
-        const file=thumbnail.length?thumbnail:String(playbackBridge.coverUrl)
-        if(!file.length || file.startsWith("http"))return ""
-        return "image://relaxer/blur?file="+encodeURIComponent(file)+"&resolution=96&seed="+encodeURIComponent(playbackBridge.title)+"&blur="+Number(settingsBridge.palette.blurExpanded||0)
+    property url playerPreviewBackdropUrl
+    Binding {
+        target:root;property:"playerPreviewBackdropUrl"
+        when:!root.backgrounded;restoreMode:Binding.RestoreNone
+        value:{
+            if(root.miniMode || !settingsBridge.values.playerCoverBackground)return ""
+            const thumbnail=String(onlineArtwork.thumbnailCover)
+            const file=thumbnail.length?thumbnail:String(playbackBridge.coverUrl)
+            if(!file.length || file.startsWith("http"))return ""
+            return "image://relaxer/blur?file="+encodeURIComponent(file)+"&resolution=96&seed="+encodeURIComponent(playbackBridge.title)+"&blur="+Number(settingsBridge.palette.blurExpanded||0)
+        }
     }
     Image {id:playerBackdropWarmup;objectName:"playerBackdropWarmup";visible:false;source:root.playerPreviewBackdropUrl;sourceSize.width:96;sourceSize.height:96;asynchronous:true}
     function backgroundUrl(file,blur){return root.miniMode&&!root.miniSwitching ? "" : String(file||"").length?"image://relaxer/background?file="+encodeURIComponent(String(file))+"&blur="+Number(blur||0):""}
@@ -602,6 +702,8 @@ ApplicationWindow {
     Connections { target: playbackBridge; function onTransitionStarted(direction){if(nowPage)nowPage.trackDirection=direction} }
     Connections {
         target: upcomingModel
+        function onLocateRequested(key){root.locateQueueTrack(key)}
+        function onCountChanged(){if(!upcomingModel.count){root.queueLocateJob=null;queueLocateRouter.stop();narrowQueue.close();upcoming.panelExpanded=false;if(root.lyricsOpen)root.animatePlayer(false)}}
         function onAboutToActivate(row,key,cover) {
             if(root.miniMode||!root.lyricsOpen||settingsBridge.values.reduceMotion)return
             const origin=upcoming.coverItem(row)
@@ -611,7 +713,7 @@ ApplicationWindow {
             coverMotion.duration=460;coverMotion.restart()
         }
     }
-    Shortcut { sequence: "Escape"; enabled: !root.miniMode&&!root.workspaceVisible && !root.popupOpen; onActivated: {if(root.bulkActive)root.clearBulk();else if(root.fullScreenMode)root.toggleFullscreen();else if(root.lyricsOpen)root.animatePlayer(false);else upcoming.panelExpanded=false} }
+    Shortcut { sequence: "Escape"; enabled: !root.miniMode&&!root.workspaceVisible && !root.popupOpen; onActivated: {if(upcoming.visible&&upcoming.panelExpanded)upcoming.handleEscape();else if(root.bulkActive)root.clearBulk();else if(root.fullScreenMode)root.toggleFullscreen();else if(root.lyricsOpen)root.animatePlayer(false);else if(appBridge.page===3&&root.settingsSection==="equalizer")root.leaveEqualizer();else upcoming.panelExpanded=false} }
     Shortcut {sequence:"Ctrl+O";onActivated:{root.leaveMiniPlayer();root.ensureImportDialog().chooseFiles()}}
     Shortcut {sequence:"Ctrl+Shift+O";onActivated:{root.leaveMiniPlayer();root.ensureImportDialog().chooseFolder()}}
     Shortcut {sequence:"Ctrl+F";enabled:!root.workspaceVisible;onActivated:{root.leaveMiniPlayer();root.navigateOriginal(0);searchFocus.restart()}}
@@ -632,12 +734,30 @@ ApplicationWindow {
             feedbackBridge.setClosing(false)
             return
         }
+        prepareEqualizerEdits()
+        if(equalizerBridge.hasUnsavedChanges){
+            close.accepted=false;feedbackBridge.setClosing(false);showEqualizerUnsaved(null,true,false);return
+        }
         if (!allowClose && (importBridge.busy || translationBridge.unfinished || lyricsSearchBridge.busy)) { close.accepted=false; closeConfirm.open() }
         else if(!allowClose && !exitRequested && settingsBridge.values.closeToTray && uiIntegration.trayAvailable){close.accepted=false;root.hide();uiIntegration.showTray()}
         else if(!playbackBridge.requestExit()){close.accepted=false;exitSaveFailure.open()}
         else if(importBridge.unfinished){close.accepted=false;root.awaitingImportClose=true;if(!importBridge.closing)importBridge.beginShutdown()}
         if(!close.accepted)feedbackBridge.setClosing(false)
         else lyricsSearchBridge.cancelInstrumentalBatch()
+    }
+    ConfirmDialog {
+        id:equalizerUnsaved;objectName:"equalizerUnsavedDialog";parent:root.popupLayer;anchors.centerIn:parent
+        width:Math.min(520,root.width-32);modal:true;closePolicy:Popup.NoAutoClose;title:"均衡器更改尚未保存"
+        contentItem:UiText {
+            text:"是否保存后继续？放弃会恢复到上次保存的配置。"+(equalizerBridge.presetDraft.trim().length?"\n待保存预设："+equalizerBridge.presetDraft:"")+(equalizerBridge.status.length?"\n"+equalizerBridge.status:"")
+            textFormat:Text.PlainText;wrapMode:Text.Wrap
+        }
+        footer:DialogButtonBox {
+            background:null;padding:18;topPadding:8;spacing:8
+            ShellButton {objectName:"equalizerLeaveSave";text:"保存更改";primary:true;DialogButtonBox.buttonRole:DialogButtonBox.ActionRole;onClicked:root.resolveEqualizerUnsaved(1)}
+            ShellButton {objectName:"equalizerLeaveDiscard";text:"放弃更改";DialogButtonBox.buttonRole:DialogButtonBox.ActionRole;onClicked:root.resolveEqualizerUnsaved(2)}
+            ShellButton {objectName:"equalizerLeaveCancel";text:"继续编辑";DialogButtonBox.buttonRole:DialogButtonBox.ActionRole;onClicked:root.resolveEqualizerUnsaved(0)}
+        }
     }
     ConfirmDialog {
         id:exitSaveFailure;parent:root.popupLayer;objectName:"exitSaveFailureDialog";anchors.centerIn:parent
@@ -827,7 +947,7 @@ ApplicationWindow {
                 id: pageSurface;objectName:"pageSurface";width:parent.width;height:parent.height
                 StackLayout {
                     id: pages;objectName:"pageStack";anchors.fill:parent;anchors.topMargin:Math.max(0,Theme.pageContentOffset-(32-root.captionHeight));currentIndex:appBridge.page
-                    LocalPage { id:localPage;backdropSource:paper;onBulkChanged:(active,keys)=>root.updateBulk(localPage,active,keys);onLyricsRequested:(keys,missing)=>root.openLyricsTools(keys,missing);onImportRequested:anchor=>root.ensureImportDialog().openMenu(anchor);onEditRequested:(key,name)=>root.ensurePlaylistEditor().edit(key,name) }
+                    LocalPage { id:localPage;backdropSource:paper;onQueueLocateFailed:message=>feedbackBridge.queueNotice(message);onBulkChanged:(active,keys)=>root.updateBulk(localPage,active,keys);onLyricsRequested:(keys,missing)=>root.openLyricsTools(keys,missing);onImportRequested:anchor=>root.ensureImportDialog().openMenu(anchor);onEditRequested:(key,name)=>root.ensurePlaylistEditor().edit(key,name) }
                     DeferredPage {
                         id: playlistsLoader
                         requested: appBridge.page === 1
@@ -841,15 +961,17 @@ ApplicationWindow {
                     Item {
                         StackLayout {
                             anchors.fill:parent
-                            currentIndex:root.settingsSection==="ai"?1:root.settingsSection==="appearance"?2:root.settingsSection==="log"?3:root.settingsSection==="platforms"?4:0
+                            currentIndex:root.settingsSection==="ai"?1:root.settingsSection==="appearance"?2:root.settingsSection==="log"?3:root.settingsSection==="platforms"?4:root.settingsSection==="equalizer"?5:0
                             DeferredPage {
                                 id: settingsLoader;recyclable:true
                                 requested: appBridge.page === 3 && root.settingsSection === "settings"
                                 sourceComponent: Item {
                                     function savePageState(){return settingsPage.savePageState()}
                                     function restorePageState(state){settingsPage.restorePageState(state)}
+                                    function beginWidthTransition(){settingsPage.beginWidthTransition()}
+                                    function endWidthTransition(){settingsPage.endWidthTransition()}
                                     function canUnloadPage(){return settingsPage.canUnloadPage()}
-                                    SettingsPage { id:settingsPage;onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:28;anchors.bottomMargin:0;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onPlatformsRequested:root.changePage(function(){root.settingsSection="platforms"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
+                                    SettingsPage { id:settingsPage;onEqualizerRequested:root.openEqualizer();onVersionLogRequested:root.changePage(function(){root.settingsSection="log"});anchors.fill:parent;anchors.leftMargin:Theme.pageMargin;anchors.rightMargin:Theme.pageMargin;anchors.topMargin:28;anchors.bottomMargin:0;onAiRequested:root.changePage(function(){root.settingsSection="ai"});onPlatformsRequested:root.changePage(function(){root.settingsSection="platforms"});onAppearanceRequested:{settingsBridge.beginAppearance();root.changePage(function(){root.settingsSection="appearance"})} } }
                             }
                             DeferredPage {
                                 id: aiLoader;recyclable:true
@@ -903,11 +1025,17 @@ ApplicationWindow {
                                     PlatformAccounts {width:platformScroll.availableWidth;onBackRequested:root.changePage(function(){root.settingsSection="settings"})}
                                 }
                             }
+                            DeferredPage {
+                                id:equalizerLoader;objectName:"equalizerPageLoader"
+                                requested:appBridge.page===3&&root.settingsSection==="equalizer"
+                                onLoaded:item.forceActiveFocus()
+                                sourceComponent:EqualizerPage {backdropSource:paper;backText:root.equalizerBackText;onBackRequested:root.leaveEqualizer()}
+                            }
                         }
                     }
                     DeferredPage {
-                        requested:appBridge.page===4
-                        sourceComponent:DiscoverPage {backdropSource:paper}
+                        id:discoverLoader;requested:appBridge.page===4
+                        sourceComponent:DiscoverPage {backdropSource:paper;deferInitialCatalog:!!root.queueLocateJob;onQueueLocateFailed:message=>feedbackBridge.queueNotice(message)}
                     }
                     DeferredPage {requested:appBridge.page===5;recyclable:true;sourceComponent:HistoryPage {backdropSource:paper}}
 
@@ -958,10 +1086,9 @@ ApplicationWindow {
         onExpandRequested:root.animatePlayer(!root.lyricsOpen)
         onNarrowRequested:root.toggleNarrowWindow()
         onQueueRequested: anchor => {
+            if(!upcomingModel.count)return
             if(narrowQueue.visible){narrowQueue.close();return}
-            const p=anchor.mapToItem(root.contentItem,0,0)
-            narrowQueue.x=Math.max(8,Math.min(root.width-narrowQueue.width-8,p.x))-p.x
-            narrowQueue.y=Math.max(34,p.y-narrowQueue.height-10)-p.y
+            root.positionNarrowQueue(anchor)
             narrowQueue.open()
         }
     }
@@ -976,8 +1103,8 @@ ApplicationWindow {
                 UiText {objectName:"bulkCount";text:"已选 "+root.bulkKeys.length+" 首歌曲"+(lyricsSearchBridge.batchRunning?" · 剩余 "+lyricsSearchBridge.batchResult.pending:"");color:Theme.text;basePixelSize: 15}
                 ShellButton{objectName:"bulkSelectAll";text:"全选";flat:true;onClicked:root.selectBulk(true)}
                 ShellButton{objectName:"bulkClear";text:"取消选择";flat:true;onClicked:root.selectBulk(false)}
-                ShellButton{objectName:"bulkLyrics";text:"查找歌词";flat:true;enabled:root.bulkKeys.length>0;onClicked:root.openLyricsTools(root.bulkKeys,false)}
-                ShellButton{objectName:"bulkInstrumental";text:lyricsSearchBridge.batchRunning?"取消纯音乐处理":"标记纯音乐…";flat:true;enabled:root.bulkKeys.length>0;onClicked:{if(lyricsSearchBridge.batchRunning)lyricsSearchBridge.cancelInstrumentalBatch();else root.ensureBatchInstrumental().review(root.bulkKeys.slice())}}
+                ShellButton{objectName:"bulkLyrics";text:"查找歌词";flat:true;enabled:root.bulkKeys.length>0&&!root.bulkHasOnline;onClicked:root.openLyricsTools(root.bulkKeys,false)}
+                ShellButton{objectName:"bulkInstrumental";text:lyricsSearchBridge.batchRunning?"取消纯音乐处理":"标记纯音乐…";flat:true;enabled:root.bulkKeys.length>0&&!root.bulkHasOnline;onClicked:{if(lyricsSearchBridge.batchRunning)lyricsSearchBridge.cancelInstrumentalBatch();else root.ensureBatchInstrumental().review(root.bulkKeys.slice())}}
                 ShellButton{objectName:"bulkExit";text:"退出多选";flat:true;onClicked:root.clearBulk()}
             }
             Flow {
@@ -995,13 +1122,13 @@ ApplicationWindow {
         id:bulkAddMenu;parent:root.popupLayer
         Instantiator {
             model:playlistModel
-            delegate:RoundMenuItem {required property string name;required property string playlistKey;text:name;onTriggered:libraryBridge.addTracksToPlaylist(playlistKey,root.bulkKeys)}
+            delegate:RoundMenuItem {required property string name;required property string playlistKey;required property bool cloud;text:name;visible:!cloud;onTriggered:libraryBridge.addTracksToPlaylist(playlistKey,root.bulkKeys)}
             onObjectAdded:(index,object)=>bulkAddMenu.insertItem(index,object)
             onObjectRemoved:(index,object)=>bulkAddMenu.removeItem(object)
         }
     }
     ConfirmDialog{id:bulkDelete;parent:root.popupLayer;anchors.centerIn:parent;title:"从曲库移除";width:460;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:Label{text:"移除所选歌曲及歌单关联和统计，保留音乐文件。"} onAccepted:{libraryBridge.removeTracks(root.bulkActionKeys,false);root.clearBulk()}}
-    ConfirmDialog {id:bulkNew;objectName:"bulkNewPlaylistDialog";parent:root.popupLayer;anchors.centerIn:parent;title:"新建歌单并加入";width:420;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:EntryField {id:bulkName;objectName:"bulkNewPlaylistName";placeholderText:"歌单名称"} onAccepted:{const id=libraryBridge.createPlaylist(bulkName.text);if(id!=="0")libraryBridge.addTracksToPlaylist(id,root.bulkActionKeys)}}
+    ConfirmDialog {id:bulkNew;objectName:"bulkNewPlaylistDialog";parent:root.popupLayer;anchors.centerIn:parent;title:"新建歌单并加入";width:420;modal:true;standardButtons:Dialog.Ok|Dialog.Cancel;contentItem:EntryField {id:bulkName;objectName:"bulkNewPlaylistName";placeholderText:"歌单名称"} onAccepted:libraryBridge.createPlaylistWithTracks(bulkName.text,root.bulkActionKeys)}
     Rectangle {
         id:importPanel;objectName:"importPanel";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:root.bulkActive?bulkBar.top:playerBar.top
         property bool observedTask:false
@@ -1064,7 +1191,8 @@ ApplicationWindow {
             }
             relocating:root.upcomingRelocating||root.widthSwitchActive||root.narrowLayout
             enabled:!relocating&&!root.narrowLayout
-            visible:!root.bulkActive
+            visible:!root.bulkActive&&upcomingModel.count>0
+            onDismissRequested:panelExpanded=false
         }
     }
     NumberAnimation {
@@ -1293,7 +1421,11 @@ ApplicationWindow {
     }
     Popup {
         id:narrowQueue;objectName:"narrowQueuePopup";parent:playerBar.queueControl;popupType:Popup.Item
-        width:Math.min(440,root.width-24);height:Math.min(42+Math.max(1,Math.min(5,upcomingModel.count))*56,normalShell.height-playerBar.height-44);padding:0
+        onOpened:narrowUpcoming.forceActiveFocus()
+        onHeightChanged:if(visible)root.positionNarrowQueue(playerBar.queueControl)
+        onWidthChanged:if(visible)root.positionNarrowQueue(playerBar.queueControl)
+        onClosed:narrowUpcoming.resetEditing()
+        width:Math.min(440,root.width-24);height:Math.min(42+narrowUpcoming.editingHeight+Math.max(1,Math.min(5,upcomingModel.count))*56,normalShell.height-playerBar.height-44);padding:0
         property real reveal:0
         readonly property point anchorPoint:Qt.point(playerBar.queueControl.width/2-x,playerBar.queueControl.height/2-y)
         closePolicy:Popup.CloseOnEscape|Popup.CloseOnPressOutsideParent
@@ -1304,13 +1436,19 @@ ApplicationWindow {
             objectName:"narrowQueueSurface";opacity:narrowQueue.reveal
             transform:Scale {origin.x:narrowQueue.anchorPoint.x;origin.y:narrowQueue.anchorPoint.y;xScale:narrowQueue.reveal;yScale:narrowQueue.reveal}
             GlassSurface {
-                objectName:"queueGlassSurface";anchors.fill:parent;radius:12;backdrop:contentHost;active:narrowQueue.visible;effectName:"queueBackdropBlur"
+                id:queueGlass;objectName:"queueGlassSurface";anchors.fill:parent;radius:12;backdrop:contentHost;active:narrowQueue.visible;effectName:"queueBackdropBlur"
                 secondaryBackdrop:playerBar;secondaryOffset:Qt.point(playerBar.x-contentHost.x,playerBar.y-contentHost.y)
                 sampleRect:Qt.rect(playerBar.x+playerBar.queueControlX+narrowQueue.x,playerBar.y+playerBar.queueControlY+narrowQueue.y,narrowQueue.width,narrowQueue.height)
             }
-            UpcomingPanel {anchors.fill:parent;popupPresentation:true;expandedPlayer:true;onActivated:narrowQueue.close();onDismissRequested:narrowQueue.close()}
+            UpcomingPanel {
+                id:narrowUpcoming;anchors.fill:parent;popupPresentation:true;popupActive:narrowQueue.opened;expandedPlayer:true
+                backdropSource:contentHost;backdropRect:queueGlass.sampleRect
+                secondaryBackdrop:playerBar;secondaryOffset:queueGlass.secondaryOffset
+                onActivated:narrowQueue.close();onDismissRequested:narrowQueue.close()
+            }
         }
     }
+    Connections {target:equalizerBridge;function onEditorRequested(){root.openEqualizer()}function onTargetChangeConfirmationRequested(){root.showEqualizerUnsaved(null,false,true)}}
     NumberAnimation { id:playerMotion;target:root;property:"playerProgress";duration:420;easing.type:Easing.OutCubic }
     NumberAnimation { id:coverMotion;target:root;property:"coverProgress";from:0;to:1;duration:420;easing.type:Easing.OutCubic;onFinished:{root.coverTravelling=false;root.metadataTravelling=false;duration=420} }
     ParallelAnimation {

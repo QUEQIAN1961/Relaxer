@@ -19,6 +19,7 @@ public:
               const QString &details = {}, const QString &operation = {}, const QString &target = {},
               bool retryable = false, bool actionRequired = false, int code = 0, bool silent = false);
     void clearSource(const QString &source);
+    Q_INVOKABLE void queueNotice(const QString &message) { post("Queue","Warning",message); }
     Q_INVOKABLE void dismiss();
     Q_INVOKABLE void setClosing(bool closing);
     Q_INVOKABLE void presented(const QString &eventId);

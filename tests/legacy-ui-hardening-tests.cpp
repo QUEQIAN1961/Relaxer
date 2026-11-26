@@ -70,6 +70,9 @@ private slots:
         QVERIFY(!c4c5_fixture::visual(root,"feedbackReason")->property("text").toString().contains("raw English"));
         QVERIFY(!c4c5_fixture::visual(root,"playerFullscreen"));
         QVERIFY(QMetaObject::invokeMethod(ws,"close"));QTRY_VERIFY(!ws->isVisible());
+        QVERIFY(c4c5_fixture::wave(lib.absolute(a.file)));
+        shell.facade()->play({a.id},a.id);QTRY_VERIFY(shell.facade()->playing());shell.facade()->pause();
+        QTRY_VERIFY(shell.upcomingModel()->count()>0);
         QVERIFY(QMetaObject::invokeMethod(w,"showLyrics"));QTRY_VERIFY(w->property("lyricsOpen").toBool());
         auto *collapse=c4c5_fixture::visual(root,"playerCollapse");QVERIFY(collapse);
         QTRY_COMPARE(w->property("playerProgress").toReal(),1.);

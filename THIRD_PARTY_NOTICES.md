@@ -63,7 +63,9 @@ MPL covered source 和所有适用 GPL/LGPL 对应源码的获取方式：在同
 
 ## MIDI 依赖
 
-V0.2.5-RC 已将 MIDI 后端替换为 FluidSynth 2.6.2（LGPL-2.1-or-later）。发行 DLL 从固定源码构建并禁用可选外部编解码及音频输出库，不分发 SDL3 或 libsndfile；构建所用 GCEM 数学头文件为 MIT 许可，原文随包保留。GeneralUser GS 2.0.3（S. Christian Collins）继续按作者独立许可使用；原文位于运行目录 `licenses/midi/`。原 BASS/BASSMIDI 不再使用或加入新包。
+Relaxer 使用 FluidSynth 2.6.2（LGPL-2.1-or-later）。V0.2.7-RC 便携包使用 MSYS2 libsndfile 1.2.2（LGPL-2.1-or-later）及动态编解码库支持 SF3。确切版本、摘要及来源见 `runtime/runtime-midi.json`，新增组件的原文许可位于 `runtime/licenses/midi/msys2/`，对应源码及构建配方随 MIDI 源码附件提供。构建 FluidSynth 所用 GCEM 数学头文件为 MIT 许可。GeneralUser GS 2.0.3（S. Christian Collins）按作者独立许可使用，原文位于 `runtime/licenses/midi/`。MIDI PCM 由 Qt 输出。
+
+V0.2.7-RC 携带一个基于 Qt Multimedia 6.11.2 修改的 FFmpeg 插件，按 GPL-3.0-only 许可发布。对应的原始 MSYS2 源码包、构建配方、Relaxer 修改与许可原文见同版 Qt 多媒体源码附件及 `docs/third-party/qt-peq/`。
 
 来源、固定版本、准备方式及对应源码链接见 [docs/MIDI-BASS.md](docs/MIDI-BASS.md) 和 `resources/midi-dependencies.json`；分发须满足 LGPL 的原文许可、对应源码与重新链接要求，既有第三方源码附件不自动涵盖新增版本。
 

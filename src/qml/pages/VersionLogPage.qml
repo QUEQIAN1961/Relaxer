@@ -9,6 +9,18 @@ Item {
     function canUnloadPage(){return !legalNotices.visible}
     LegalNoticeDialog {id:legalNotices;parent:page.Overlay.overlay}
     property int shown:3
+    readonly property var entries:settingsBridge.changelog
+    function updateEntries(){
+        const count=Math.max(0,Math.min(shown,entries.length))
+        if(visibleEntries.count>count)visibleEntries.remove(count,visibleEntries.count-count)
+        for(let index=visibleEntries.count;index<count;++index){
+            const entry=entries[index]
+            visibleEntries.append({releaseTitle:entry[0],releaseDate:entry[1],releaseNotes:entry[2]})
+        }
+    }
+    ListModel {id:visibleEntries}
+    Component.onCompleted:updateEntries()
+    onShownChanged:if(visibleEntries)updateEntries()
     onVisibleChanged: if (visible) { shown=3; scroll.contentItem.contentY=0 }
     ColumnLayout {
         anchors.fill:parent;anchors.leftMargin:34;anchors.rightMargin:34;anchors.topMargin:28;anchors.bottomMargin:28;spacing:16
@@ -19,24 +31,29 @@ Item {
             ShellButton{objectName:"versionLogBack";text:"返回设置";flat:true;onClicked:{page.shown=3;page.backRequested()}}
         }
         ScrollView {
-            id:scroll;Layout.fillWidth:true;Layout.fillHeight:true;contentWidth:availableWidth;clip:true
-            SmoothWheelHandler { flickable: scroll.contentItem as Flickable }
+            id:scroll;objectName:"versionLogScroll";Layout.fillWidth:true;Layout.fillHeight:true;contentWidth:availableWidth;clip:true
+            SmoothWheelHandler {id:logWheel;flickable:scroll.contentItem as Flickable}
             ColumnLayout {
                 width:scroll.availableWidth;spacing:12
                 Repeater {
-                    model:settingsBridge.changelog.slice(0,page.shown)
+                    model:visibleEntries
                     delegate:ColumnLayout {
-                        required property var modelData
+                        required property string releaseTitle
+                        required property string releaseDate
+                        required property string releaseNotes
                         Layout.fillWidth:true;spacing:8
-                        UiText {Layout.fillWidth:true;text:modelData[0]+"  "+modelData[1];textFormat:Text.PlainText;font.weight:Font.DemiBold;basePixelSize:15;color:Theme.text}
-                        UiText {Layout.fillWidth:true;text:modelData[2];textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.secondary;basePixelSize: 15}
+                        UiText {Layout.fillWidth:true;text:releaseTitle+"  "+releaseDate;textFormat:Text.PlainText;font.weight:Font.DemiBold;basePixelSize:15;color:Theme.text}
+                        UiText {Layout.fillWidth:true;text:releaseNotes;textFormat:Text.PlainText;wrapMode:Text.Wrap;color:Theme.secondary;basePixelSize: 15}
                     }
                 }
                 RowLayout {
                     Layout.fillWidth:true
                     Item{Layout.fillWidth:true}
                     ShellButton{visible:page.shown>3;text:"收起";flat:true;onClicked:page.shown=3}
-                    ShellButton{objectName:"versionLogExpand";visible:page.shown<settingsBridge.changelog.length;text:"加载更多";flat:true;onClicked:page.shown+=3}
+                    ShellButton {
+                        objectName:"versionLogExpand";visible:page.shown<page.entries.length;text:"加载更多";flat:true
+                        onClicked:{logWheel.stop();logWheel.flickable.cancelFlick();page.shown+=3}
+                    }
                 }
                 UiText {Layout.fillWidth:true;wrapMode:Text.Wrap;text:appBridge.version+" | Developed by QUEQIAN · GNU GPL v3";color:Theme.secondary;basePixelSize: 14}
             }

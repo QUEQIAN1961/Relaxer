@@ -578,26 +578,22 @@ void AdditionalMusicBridge::loadKugouCovers(quint64 revision,const QStringList &
         },false,QJsonDocument(body).toJson(QJsonDocument::Compact));
 }
 void AdditionalMusicBridge::registerSongs(QVariantList rows){
-    if(m_identifiers.isEmpty()){
-        const qint64 base=m_platform==Kugou?3000000000000LL:4000000000000LL;
-        for(const auto key:m_facade->queue().items){
-            if(key<=base||key>=base+1000000000000LL)continue;
-            const auto track=m_facade->track(key);if(!track.hash.startsWith(provider()+":"))continue;
-            m_identifiers.insert(track.hash.mid(provider().size()+1),key);m_nextInternal=qMax(m_nextInternal,key-base+1);
-        }
-    }
     m_songs=std::move(rows);
-    for(auto &v:m_songs){auto row=v.toMap();const auto id=row.value("id").toString();auto previous=m_catalog.value(id);qint64 internal=m_identifiers.value(id);if(!internal){internal=(m_platform==Kugou?3000000000000LL:4000000000000LL)+m_nextInternal++;m_identifiers.insert(id,internal);}
+    for(auto &v:m_songs){
+        auto row=v.toMap();
+        const auto id=row.value("id").toString(),key=provider()+":"+id;
+        const auto previous=m_catalog.value(id);
         if(m_platform==Kugou&&row.value("cover").toString().isEmpty()&&!previous.value("cover").toString().isEmpty()){
             row["cover"]=previous.value("cover");row["thumbnail"]=previous.value("thumbnail");
         }
-        row["internalId"]=QString::number(internal);row["provider"]=provider();row["key"]=provider()+":"+id;m_catalog[id]=row;m_internal[internal]=id;v=row;}
+        row["internalId"]=QString::number(stableAdditionalTrackId(key));
+        row["provider"]=provider();row["key"]=key;m_catalog[id]=row;v=row;
+    }
     trimCatalog();emit songsChanged();
 }
 void AdditionalMusicBridge::trimCatalog(){
     QSet<QString> songs;for(const auto &v:m_songs)songs.insert(v.toMap().value("id").toString());
     trimCatalogMap(m_catalog,songs);
-    for(auto it=m_internal.begin();it!=m_internal.end();)if(!m_catalog.contains(it.value()))it=m_internal.erase(it);else ++it;
     QSet<QString> lists;for(const auto &v:m_playlists)lists.insert(v.toMap().value("id").toString());
     lists.insert(m_currentPlaylist.value("id").toString());trimCatalogMap(m_playlistCatalog,lists,64);
 }
@@ -708,7 +704,7 @@ void AdditionalMusicBridge::playSong(const QString &id){QStringList ids;for(cons
 QVector<Track> AdditionalMusicBridge::tracksFor(const QStringList &ids){
     QVector<Track> tracks;
     for(const auto &id:ids){const auto row=m_catalog.value(id);if(row.isEmpty())continue;Track t;t.onlineMetadata=QJsonObject::fromVariantMap(row);t.id=row.value("internalId").toLongLong();t.title=row.value("title").toString();t.artist=row.value("artist").toString();t.album=row.value("album").toString();t.duration=row.value("duration").toLongLong();t.requiresSubscription=row.value("requiresSubscription").toBool();t.hash=provider()+":"+id;
-        m_artwork->prepare(t,QUrl(row.value("thumbnail").toString()),QUrl(row.value("cover").toString()),QDir(DiskCache::online(m_library)).filePath(provider()+"-"+QString::number(t.id)+".png"));tracks.append(t);}
+        m_artwork->prepare(t,QUrl(row.value("thumbnail").toString()),QUrl(row.value("cover").toString()),QDir(DiskCache::online(m_library)).filePath(provider()+"-"+QString::number(t.id)+".png"));if(!m_currentPlaylist.value("id").toString().isEmpty())t.onlineMetadata["queueOrigin"]=QJsonObject{{"provider",provider()},{"kind",m_kind},{"id",m_currentPlaylist.value("id").toString()},{"name",m_currentPlaylist.value("name").toString()}};tracks.append(t);}
     return tracks;
 }
 void AdditionalMusicBridge::playSongs(const QStringList &ids,const QString &start){
@@ -766,8 +762,16 @@ void AdditionalMusicBridge::resolveSource(const QVariantMap &song,const QString 
     }
 }
 void AdditionalMusicBridge::requestSource(qint64 internal){
-    auto row=m_catalog.value(m_internal.value(internal));if(row.isEmpty()){const auto track=m_facade->track(internal);if(!track.hash.startsWith(provider()+":"))return;row=track.onlineMetadata.toVariantMap();}if(row.isEmpty())return;activate();const auto revision=++m_playRevision;
-    const auto fullDuration=row.value("fullDurationMs",row.value("duration")).toLongLong();
+    const auto track=m_facade->track(internal);
+    const auto prefix=provider()+":";
+    if(!track.hash.startsWith(prefix))return;
+    const auto id=track.hash.mid(prefix.size());
+    auto row=m_catalog.value(id);
+    if(row.isEmpty())row=track.onlineMetadata.toVariantMap();
+    if(id.isEmpty()){m_facade->failOnlineSource(internal,"缺少平台歌曲标识");return;}
+    row["id"]=id;
+    activate();const auto revision=++m_playRevision;
+    const auto fullDuration=row.value("fullDurationMs",row.value("duration",track.duration)).toLongLong();
     status("正在获取"+name()+"播放资源…");resolveSource(row,m_quality,[this,revision,internal,fullDuration](const QJsonObject &source,bool ok){
         if(revision!=m_playRevision||!m_facade->onlineActive()||m_facade->current().id!=internal)return;
         if(!ok){const auto error=m_platform==Qishui?sodaFailureMessage(source):name()+"未返回当前账号可播放的资源";status(error);m_facade->failOnlineSource(internal,error,m_platform==Qishui&&source.value("failureKind").toString()=="network");return;}
